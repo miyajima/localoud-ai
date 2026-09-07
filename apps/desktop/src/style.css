@@ -6,3 +6,5 @@
 #plan-json{display:block;width:100%;min-height:320px;resize:vertical;border:1px solid var(--border,#ddd);padding:14px;margin:10px 0 16px;font:12px/1.55 ui-monospace,monospace;border-radius:10px;background:#f8fafc} .context-row small{display:block;font-size:11px;max-width:440px;overflow-wrap:anywhere} details pre{white-space:pre-wrap;overflow-wrap:anywhere} .inspector h3{margin-top:26px}
 
 .agent-actions{flex-wrap:wrap}.agent-card{margin-bottom:14px}dialog{max-height:85vh;overflow:auto}input[type="checkbox"]{width:auto;margin-right:8px}select{font:inherit}#threads{overflow:auto;min-height:60px}aside{min-height:0}
+
+main{height:100vh;min-height:0}#content{min-height:0}#memory-settings{padding:24px}#memory-settings h2{margin:0 0 12px}#memory-settings label{margin:14px 0 7px}.dialog-actions{position:sticky;bottom:0;background:var(--paper);padding-top:12px}
