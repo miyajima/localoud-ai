@@ -1,0 +1,83 @@
+{
+  "archive_bytes": 804890,
+  "limitations": [
+    "One pair; same task and baseline but stochastic outputs",
+    "Synthetic irrelevant parent history",
+    "Common provider instructions included in measured input",
+    "No API price or subscription cost estimate"
+  ],
+  "parent_latency_ms": 9888,
+  "parent_usage": {
+    "cached_tokens": 0,
+    "command_failures": 0,
+    "inference_count": 1,
+    "initial_input_tokens": 167886,
+    "input_tokens": 167886,
+    "model": "gpt-6-astra",
+    "output_tokens": 8
+  },
+  "results": [
+    {
+      "acceptance_output": ".........\n----------------------------------------------------------------------\nRan 9 tests in 0.000s\n\nOK\n",
+      "acceptance_pass": true,
+      "capsule_estimate": 269,
+      "latency_ms": 81147,
+      "mode": "fork",
+      "retrievals": [
+        {
+          "id": "49012186-9bbe-44d3-9db1-6547897f952b",
+          "query": "interval",
+          "result_ref": "interval-policy",
+          "source": "decision_store",
+          "task_id": "5958739f-d1c7-4667-afa3-dac0f7e8e0d0",
+          "token_budget": 600,
+          "token_estimate": 109
+        }
+      ],
+      "retrieved_estimate": 109,
+      "thread_id": "01a07ca5-b644-7863-b536-f5871d2a0f3c",
+      "turn_id": "01a07ca5-b7ec-71c0-b102-db079ae52a29",
+      "usage": {
+        "cached_tokens": 712832,
+        "command_failures": 1,
+        "inference_count": 5,
+        "initial_input_tokens": 174886,
+        "input_tokens": 895666,
+        "model": "gpt-6-astra",
+        "output_tokens": 1901
+      },
+      "worktree": "/private/var/folders/lm/s5hgvkpd7451pbw9pj889h780000gn/T/astra-context-benchmark-WmY9CA/.agent-worktrees/task-5958739f-d1c7-4667-afa3-dac0f7e8e0d0"
+    },
+    {
+      "acceptance_output": ".........\n----------------------------------------------------------------------\nRan 9 tests in 0.000s\n\nOK\n",
+      "acceptance_pass": true,
+      "capsule_estimate": 269,
+      "latency_ms": 78300,
+      "mode": "capsule_pull",
+      "retrievals": [
+        {
+          "id": "76def746-f57d-4b52-b179-601e8c7b8df3",
+          "query": "interval",
+          "result_ref": "interval-policy",
+          "source": "decision_store",
+          "task_id": "9db47d22-d4db-4062-b26e-294527d5799c",
+          "token_budget": 600,
+          "token_estimate": 109
+        }
+      ],
+      "retrieved_estimate": 109,
+      "thread_id": "01a07ca5-b75b-7973-9cb2-a480588f52ec",
+      "turn_id": "01a07ca6-f546-7011-a661-db6c28d680d1",
+      "usage": {
+        "cached_tokens": 106752,
+        "command_failures": 0,
+        "inference_count": 4,
+        "initial_input_tokens": 28121,
+        "input_tokens": 127904,
+        "model": "gpt-6-astra",
+        "output_tokens": 2052
+      },
+      "worktree": "/private/var/folders/lm/s5hgvkpd7451pbw9pj889h780000gn/T/astra-context-benchmark-WmY9CA/.agent-worktrees/task-9db47d22-d4db-4062-b26e-294527d5799c"
+    }
+  ]
+}

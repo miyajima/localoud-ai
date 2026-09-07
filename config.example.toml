@@ -1,0 +1,32 @@
+[hub]
+db_path = "~/.astra-codex-hub/hub.db"
+worktree_root = "~/.astra-codex-hub/worktrees"
+
+[spark]
+enabled = true
+endpoint = "http://127.0.0.1:8765"
+model = "Spark-X2.5-4B-MLX-8bit"
+quantization_bits = 8
+
+[routing]
+spark_confidence_threshold = 0.75
+spark_max_estimated_loc = 100
+codex_retry_limit = 2
+
+[context.spark]
+initial_tokens = 2000
+max_tokens = 8000
+
+[context.codex_normal]
+initial_tokens = 6000
+max_tokens = 24000
+
+[context.codex_deep]
+initial_tokens = 12000
+max_tokens = 64000
+
+[astra]
+mode = "codex_integrated"
+
+[orgbrain]
+enabled = false

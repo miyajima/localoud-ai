@@ -1,0 +1,206 @@
+import {setupMemory,memoryPanel,bindMemory} from './memory';
+import type {Capture} from './memory';
+import { invoke as nativeInvoke, isTauri } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import './style.css';
+async function invoke<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([nativeInvoke<T>(command, args), new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`操作の応答がありません (${command})。再開して状態を確認してください。`)), command === 'run_local' ? 240000 : 40000);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+type Project = { id: string; name: string; root: string };
+type Thread = { id: string; project_id: string; provider_thread_id: string; provider: string; title: string; status: string };
+type AgentEvent = { thread_id: string | null; turn_id: string | null; item_id: string | null; kind: string; text: string };
+type JournalEvent = { sequence: number; event: AgentEvent };
+type ChatMessage = { role: string; text: string; key: string };
+type Snapshot = { active_turn: { id: string } | null; messages: { role: string; text: string }[] };
+type View = { messages: ChatMessage[]; events: JournalEvent[]; diff: string; running: boolean; needsResume: boolean; sequence: number; route?: string; summary?: string; review?: string; finalReview?: {verdict:string;findings:string[];rework_instruction:string|null}; recovery?:{action:string;reason:string;instruction:string;replacement:unknown|null}; activeTurn?:string; completedTurns?:Set<string>; capture?:Capture; context?: ContextInspection|null };
+let projects: Project[] = [], threads: Thread[] = [], activeProject: string | null = null, activeThread: string | null = null;
+const views = new Map<string, View>();
+const tabs = ['Chat', 'Plan', 'Diff', 'Agents', 'Terminal', 'Context', 'Usage'];
+type Usage = { provider:string; model:string; prompt_tokens:number|null; completion_tokens:number|null; cached_tokens:number|null; latency_ms:number|null };
+let usage:Usage[]=[];
+type GraphTask = {id:string;title:string;description:string;status:string;dependencies:string[];worktree_id:string|null};
+type ContextInspection = {initial_tokens:number;retrieved_tokens:number;current_estimate:number;parent_conversation_inherited:boolean;capsule:{goal:string;budget:{max_total_tokens:number};items:{source:string;reference:string;text:string}[]};retrievals:{source:string;query:string;token_estimate:number;result_ref:string}[]};
+let graph:GraphTask[]=[];
+let planText=JSON.stringify({title:'実装計画',steps:[{key:'implementation',title:'実装と検証',goal:'ここに具体的な実装内容を記入',dependencies:[],brief:{acceptance_criteria:['ここに合格条件を記入'],constraints:['公開 API を変更しない'],context_items:[],budget:{initial_tokens:6000,max_total_tokens:24000,max_single_retrieval_tokens:2000}}}]},null,2);
+let activeTab = 'Chat', busy = false;
+const app = document.querySelector<HTMLDivElement>('#app')!;
+app.innerHTML = `<aside><div class="brand"><span class="mark">✳</span> Astra Hub <small>LOCAL WORKSPACE</small></div><button id="new" class="new">＋ 新しいタスク</button><div class="section-title">PROJECTS <button id="add" aria-label="プロジェクトを登録">＋</button></div><div id="projects"></div><div class="section-title">TASKS</div><div id="threads"></div><button id="settings" class="settings">接続設定</button><div class="sidebar-bottom"><span class="dot"></span> Local-first <small>Context stays intentional.</small></div></aside><main><header><div><span class="eyebrow">WORKSPACE</span><h1 id="project-title">プロジェクトを開く</h1></div><div class="header-actions"><span id="status" class="badge">Codex app-server</span><button id="resume" hidden>再開・状態を確認</button></div></header><nav aria-label="ワークスペースの表示">${tabs.map(t => `<button data-tab="${t}">${t}</button>`).join('')}</nav><div id="error" role="alert" hidden></div><section id="content" aria-live="polite"></section><footer><div class="compose"><textarea id="task-input" aria-label="タスクの指示" placeholder="実装したいことを入力…"></textarea><div class="compose-controls"><div class="executor-controls"><label for="preference">実行先</label><select id="preference"><option value="auto">Auto</option><option value="spark">Spark 8bit</option><option value="codex">Codex</option><option value="astra">Astra</option></select><input id="known-files" aria-label="対象ファイル" placeholder="対象ファイル（例: src/main.rs）"></div><div><button id="stop" hidden>停止</button><button id="send" class="primary">実行 ↑</button></div></div></div><div class="footnote">Astra plans. Codex builds. You stay in control.</div></footer></main><dialog id="register"><form><h2>プロジェクトを登録</h2><p>ローカル Git リポジトリのルートを指定してください。</p><label for="path">フォルダの絶対パス</label><input id="path" required placeholder="/Users/you/projects/my-app"><p id="form-error" role="alert"></p><div class="dialog-actions"><button type="button" id="cancel">キャンセル</button><button class="primary" type="submit">登録する</button></div></form></dialog><dialog id="connection-settings"><form id="settings-form"><h2>接続設定</h2><p>デスクトップアプリから使う Codex 実行ファイルを指定します。</p><label for="codex-path">Codex 実行ファイルの絶対パス</label><input id="codex-path" required placeholder="/opt/homebrew/bin/codex"><label for="astra-mode">Astra の利用経路</label><select id="astra-mode"><option value="disabled">無効（手動計画）</option><option value="codex_integrated">Codex 認証を利用</option></select><label for="astra-model">Astra モデル ID</label><input id="astra-model" value="gpt-6-astra"><p>直接 API の課金設定とは別です。</p><p id="settings-error" role="alert"></p><div class="dialog-actions"><button type="button" id="settings-cancel">閉じる</button><button type="submit" class="primary">保存する</button></div></form></dialog>`;
+const escape = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+function view(id: string): View { if (!views.has(id)) views.set(id, { messages: [], events: [], diff: '', running: false, needsResume: true, sequence: 0 }); return views.get(id)!; }
+function selectedView() { return activeThread ? view(activeThread) : null; }
+function error(message: string) { const el = document.querySelector<HTMLDivElement>('#error')!; el.hidden = !message; el.textContent = message; }
+function render() {
+  document.querySelector('#projects')!.innerHTML = projects.map(p => `<button class="project ${p.id === activeProject ? 'selected' : ''}" data-project="${p.id}">◈ <span>${escape(p.name)}</span></button>`).join('') || '<p class="muted side-empty">リポジトリを登録して<br>作業を始めましょう。</p>';
+  document.querySelector('#threads')!.innerHTML = threads.filter(t => t.project_id === activeProject).map(t => `<button class="thread ${t.id === activeThread ? 'selected' : ''}" data-thread="${t.id}">${escape(t.title)}<small>${escape(t.status)}</small></button>`).join('');
+  document.querySelector('#project-title')!.textContent = projects.find(p => p.id === activeProject)?.name || 'プロジェクトを開く';
+  document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b => { b.classList.toggle('active', b.dataset.tab === activeTab); b.onclick = () => { activeTab = b.dataset.tab!; render(); if(activeTab === 'Diff' && activeThread) void refreshDiff(activeThread); if(activeTab === 'Usage') void refreshUsage(); if(activeTab === 'Context' && activeThread) void refreshContext(activeThread); if(activeTab === 'Plan') void refreshGraph(); }; });
+  document.querySelectorAll<HTMLButtonElement>('[data-project]').forEach(b => b.onclick = () => { if (busy) return; activeProject = b.dataset.project!; activeThread = null; graph=[];render();if(activeTab==='Plan')void refreshGraph(); });
+  document.querySelectorAll<HTMLButtonElement>('[data-thread]').forEach(b => b.onclick = () => void selectThread(b.dataset.thread!));
+  const v = selectedView();
+  const current = threads.find(t=>t.id===activeThread);
+  const providerLabel = current?.provider === 'spark' ? 'Spark 8bit' : 'Codex';
+  (document.querySelector('#preference') as HTMLSelectElement).disabled = !!activeThread || busy;
+  const status = document.querySelector('#status')!;
+  status.textContent = v?.needsResume ? '状態確認が必要' : v?.running ? `${providerLabel} · 実行中` : current ? providerLabel : 'Local workspace';
+  const resume = document.querySelector<HTMLButtonElement>('#resume')!; resume.hidden = !activeThread; resume.disabled = busy;
+  const send = document.querySelector<HTMLButtonElement>('#send')!; send.disabled = busy || !activeProject || !!v?.needsResume || !isTauri(); send.textContent = v?.running ? '追記を送る ↑' : '実行 ↑';
+  const stop = document.querySelector<HTMLButtonElement>('#stop')!; stop.hidden = !v?.running || current?.provider === 'spark'; stop.disabled = busy || !!v?.needsResume;
+  const input = document.querySelector<HTMLTextAreaElement>('#task-input')!; input.disabled = !activeProject || !isTauri(); input.placeholder = v?.running ? '実行中のタスクに追加の指示…' : '実装したいことを入力…';
+  renderContent();
+}
+function renderContent() {
+  const content = document.querySelector('#content')!, v = selectedView();
+  const current=threads.find(t=>t.id===activeThread), label=current?.provider==='spark'?'Spark 8bit':'Codex';
+  if (activeTab === 'Chat') {
+    if (!v?.messages.length) content.innerHTML = `<div class="welcome"><span class="big-mark">✳</span><h2>次の一歩を、ここから。</h2><p>${activeProject ? '下の入力欄から Codex に作業を依頼できます。<br>変更と実行ログは、隣のタブで確認できます。' : 'プロジェクト、エージェント、必要なコンテキスト。<br>ひとつのワークスペースで見通せます。'}</p>${!activeProject ? '<button class="primary" id="welcome-add">プロジェクトを登録</button>' : ''}</div>`;
+    else content.innerHTML = `<div class="conversation">${v.messages.map(m => `<article class="message ${m.role === 'user' ? 'user' : ''}"><div class="message-role">${m.role === 'user' ? 'あなた' : label}</div><div class="message-text">${escape(m.text)}</div></article>`).join('')}${v.running ? `<div class="working">● ${label} が作業中</div>` : ''}</div>`;
+  } else if (activeTab === 'Diff') content.innerHTML = v?.diff ? `<pre class="diff">${escape(v.diff)}</pre>` : '<div class="empty"><h2>変更を確認する</h2><p>まだ差分は届いていません。</p></div>';
+  else if (activeTab === 'Terminal') content.innerHTML = v?.events.length ? `<div class="event-list">${v.events.filter(e => !['message_delta', 'message_completed'].includes(e.event.kind)).map(e => `<div class="event-row"><span>${escape(e.event.kind)}</span><pre>${escape(e.event.text)}</pre></div>`).join('')}</div>` : '<div class="empty"><h2>実行ログ</h2><p>ツールの実行と結果をここに表示します。</p></div>';
+  else if (activeTab === 'Agents') content.innerHTML = `<div class="inspector"><span class="eyebrow">EXECUTION</span><h2>実行エージェント</h2>${activeThread ? `<div class="agent-card"><strong>${label}</strong><span>${v?.running ? '実行中' : v?.needsResume ? '状態確認待ち' : '待機中'}</span><p>${escape(threads.find(t => t.id === activeThread)?.title || '')}</p><small>${escape(v?.route || current?.provider || '')}</small><div class="agent-actions"><button id="summarize">進捗を要約</button><button id="first-review">一次レビュー</button><button id="final-review">Astra 最終レビュー</button><button id="diagnose">Astra 診断・設計相談</button></div>${v?.summary ? `<pre class="summary">${escape(v.summary)}</pre>` : ''}${v?.review ? `<pre class="summary">${escape(v.review)}</pre>` : ''}${v?.finalReview?`<h3>最終レビュー: ${escape(v.finalReview.verdict)}</h3><pre class="summary">${escape(v.finalReview.findings.join('\n'))}</pre>${v.finalReview.verdict==='rework'?'<button id="apply-rework">既存 worker に修正を戻す</button>':''}`:''}${v?.recovery?`<h3>診断: ${escape(v.recovery.action)}</h3><pre class="summary">${escape(v.recovery.reason+'\n'+v.recovery.instruction)}</pre>${v.recovery.action==='retry_worker'?'<button id="apply-recovery">診断の修正を既存 worker へ</button>':''}${v.recovery.replacement?'<button id="use-replan">再計画を Plan で確認</button>':''}`:''}</div>` : '<p>まだエージェントは起動していません。</p>'}</div>`;
+  else if (activeTab === 'Context') {
+    const c=v?.context;
+    content.innerHTML = `<div class="inspector"><span class="eyebrow">CONTEXT INSPECTOR</span><h2>渡した情報が、見える。</h2>${c?`<p>${escape(c.capsule.goal)}</p><div class="context-row"><span>初期 Capsule（推定 tokens）</span><strong>${c.initial_tokens}</strong></div><div class="context-row"><span>追加取得（推定 tokens）</span><strong>${c.retrieved_tokens}</strong></div><div class="context-row"><span>現在 / 上限</span><strong>${c.current_estimate} / ${c.capsule.budget.max_total_tokens}</strong></div><div class="context-row"><span>親の会話の自動コピー</span><strong class="safe">${c.parent_conversation_inherited?'有効':'無効'}</strong></div><h3>参照元</h3>${c.capsule.items.map(i=>`<details><summary>${escape(i.source)} · ${escape(i.reference)}</summary><pre>${escape(i.text)}</pre></details>`).join('')||'<p>タスク目標・合格条件・制約のみ</p>'}<h3>追加取得の履歴</h3>${c.retrievals.map(r=>`<div class="context-row"><span>${escape(r.source)}: ${escape(r.query)}<small>${escape(r.result_ref)}</small></span><strong>${r.token_estimate}</strong></div>`).join('')||'<p>追加取得はありません。</p>'}<p class="muted">bytes / 3 の推定値です。Codex の共通指示・ツール定義・推論中の会話は含みません。プロバイダーの実測使用量は Usage に表示します。</p>`:'<p>Plan から起動した worker を選ぶと、Capsule と取得履歴を確認できます。この会話に記録済みの Capsule はありません。</p>'}</div>`;
+    content.insertAdjacentHTML('beforeend',memoryPanel(v?.capture));if(activeThread)content.insertAdjacentHTML('beforeend','<div class="inspector"><button id="capture-memory">完了結果からメモリ候補を抽出</button></div>');
+
+  }
+  else if(activeTab === 'Plan') content.innerHTML = `<div class="inspector"><span class="eyebrow">EXECUTION PLAN</span><h2>依存関係を確認して実行</h2><p>各ステップを独立した worktree で実行します。依存する成果の差分を受け取り、親ブランチへの統合は行いません。</p><button id="astra-plan">Astra で計画（下の指示欄を使用）</button><label for="plan-json">計画 JSON</label><textarea id="plan-json" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="計画 JSON" rows="16">${escape(planText)}</textarea><button id="run-plan" class="primary" ${!activeProject?'disabled':''}>計画を実行（最大2並列）</button><button id="resume-plan" ${!activeProject?'disabled':''}>保存済みの計画を再開</button><h3>タスクの状態</h3>${graph.map(t=>`<div class="agent-card"><strong>${escape(t.title)}</strong><span>${escape(t.status)}</span><p>依存: ${t.dependencies.map(id=>escape(graph.find(d=>d.id===id)?.title||id)).join(', ')||'なし'}</p><small>${escape(t.id)}</small></div>`).join('')||'<p>実行前です。</p>'}</div>`;
+  else if(activeTab === 'Usage') content.innerHTML = `<div class="inspector usage"><span class="eyebrow">MODEL USAGE</span><h2>保存済みの推論記録</h2><p>未取得の数値は — で表示します。失敗した推論の全使用量を含む集計ではありません。</p><table><thead><tr><th>モデル</th><th>入力</th><th>出力</th><th>キャッシュ</th><th>時間</th></tr></thead><tbody>${usage.map(u=>`<tr><td>${escape(u.model)}</td><td>${u.prompt_tokens??'—'}</td><td>${u.completion_tokens??'—'}</td><td>${u.cached_tokens??'—'}</td><td>${u.latency_ms===null?'—':(u.latency_ms/1000).toFixed(1)+' s'}</td></tr>`).join('')}</tbody></table></div>`;
+  else content.innerHTML = `<div class="empty"><h2>${escape(activeTab)}</h2><p>${activeTab === 'Plan' ? '計画機能は Milestone F で接続します。' : 'プロバイダーの使用量はまだ集計していません。'}</p><span class="muted">未取得の数値はゼロとして扱いません。</span></div>`;
+  bindMemory();
+  document.querySelector('#capture-memory')?.addEventListener('click',async()=>{if(!activeThread||busy)return;const id=activeThread;busy=true;try{await invoke('extract_memory',{threadId:id});await refreshContext(id);}catch(e){error(String(e));}finally{busy=false;}});
+  document.querySelector('#astra-plan')?.addEventListener('click',()=>void astraPlan());
+  document.querySelector('#final-review')?.addEventListener('click',()=>void astraInsight('final_review'));
+  document.querySelector('#diagnose')?.addEventListener('click',()=>void astraInsight('diagnose_task'));
+  document.querySelector('#apply-recovery')?.addEventListener('click',async()=>{if(!activeThread||busy)return;busy=true;try{await invoke('apply_recovery',{threadId:activeThread});}catch(e){error(String(e));}finally{busy=false;render();}});
+  document.querySelector('#apply-rework')?.addEventListener('click',()=>void applyRework());
+  document.querySelector('#use-replan')?.addEventListener('click',()=>{const p=selectedView()?.recovery?.replacement;if(p){planText=JSON.stringify(p,null,2);activeTab='Plan';render();}});
+  document.querySelector('#plan-json')?.addEventListener('input',e=>{planText=(e.target as HTMLTextAreaElement).value;});
+  document.querySelector('#resume-plan')?.addEventListener('click',()=>void resumePlan());
+  document.querySelector('#run-plan')?.addEventListener('click',()=>void runPlan());
+  document.querySelector('#welcome-add')?.addEventListener('click', openDialog);
+  document.querySelector('#summarize')?.addEventListener('click',()=>void localInsight('summarize_task'));
+  document.querySelector('#first-review')?.addEventListener('click',()=>void localInsight('review_task'));
+}
+function applyEvent(record: JournalEvent, replay = false) {
+  const e = record.event;
+  if (!e.thread_id) {
+    if(e.kind==='memory_unavailable')error(e.text);
+    if(['task_state','plan_finished','worker_assigned'].includes(e.kind)) {void refreshGraph();void refreshThreads();if(e.kind==='plan_finished')error(e.text);}
+    if (['disconnected', 'protocol_error', 'persistence_error'].includes(e.kind)) { for (const v of views.values()) v.needsResume = true; error(e.text); render(); }
+    return;
+  }
+  const thread = threads.find(t => t.provider_thread_id === e.thread_id); if (!thread) return;
+  const v = view(thread.id); if (record.sequence <= v.sequence) return; v.sequence = record.sequence;
+  v.events.push(record);
+  if (e.kind === 'diff') v.diff = e.text;
+  if(e.kind === 'routing') v.route = e.text;
+  if(e.kind === 'user_message') v.messages.push({key:`user-${e.turn_id}`,role:'user',text:e.text});
+  if (!replay && e.kind === 'message_delta') {
+    const key = e.item_id || e.turn_id || 'stream'; let message = v.messages.find(m => m.key === key);
+    if (!message) { message = { key, role: 'assistant', text: '' }; v.messages.push(message); }
+    message.text += e.text;
+  }
+  if ((!replay || thread.provider === 'spark') && e.kind === 'message_completed') {
+    const key = e.item_id || e.turn_id || 'stream'; const message = v.messages.find(m => m.key === key);
+    if (message) message.text = e.text; else v.messages.push({ key, role: 'assistant', text: e.text });
+  }
+  if (e.kind === 'turn_started' && (!e.turn_id || !v.completedTurns?.has(e.turn_id))) { v.running = true; v.activeTurn=e.turn_id||undefined; thread.status = 'running'; }
+  if (e.kind === 'turn_completed') { v.completedTurns??=new Set(); if(e.turn_id)v.completedTurns.add(e.turn_id); if(!v.activeTurn||v.activeTurn===e.turn_id){v.running=false;thread.status=e.text;} }
+  if (['error', 'approval_required'].includes(e.kind)) error(e.text);
+  if (thread.id === activeThread) render();
+}
+function knownFiles():string[] { return (document.querySelector('#known-files') as HTMLInputElement).value.split(',').map(s=>s.trim()).filter(Boolean); }
+async function astraPlan(){if(!activeProject||busy)return;const goal=(document.querySelector('#task-input') as HTMLTextAreaElement).value.trim();if(!goal){error('下の指示欄に、計画したい内容を入力してください。');return;}busy=true;error('');try{const p=await invoke('create_astra_plan',{projectId:activeProject,goal});planText=JSON.stringify(p,null,2);activeTab='Plan';}catch(e){error(String(e));}finally{busy=false;render();}}
+async function astraInsight(command:'final_review'|'diagnose_task'){if(!activeThread||busy)return;const id=activeThread;busy=true;error('');try{if(command==='final_review')view(id).finalReview=await invoke(command,{threadId:id});else view(id).recovery=await invoke(command,{threadId:id,question:(document.querySelector('#task-input') as HTMLTextAreaElement).value.trim()||null});}catch(e){error(String(e));}finally{busy=false;render();}}
+async function applyRework(){if(!activeThread||busy)return;busy=true;try{await invoke('apply_rework',{threadId:activeThread});}catch(e){error(String(e));}finally{busy=false;render();}}
+async function refreshThreads() {try {threads=await invoke<Thread[]>('threads');render();}catch(e){error(String(e));}}
+async function refreshGraph() {if(!activeProject)return;try {const id=activeProject;const tasks=await invoke<GraphTask[]>('task_graph',{projectId:id});if(activeProject!==id)return;graph=tasks;if(activeTab==='Plan')renderContent();}catch(e){error(String(e));}}
+async function refreshContext(id:string) {try {view(id).context=await invoke<ContextInspection|null>('inspect_context',{threadId:id});view(id).capture=await invoke<Capture>('memory_candidates',{threadId:id});if(activeThread===id&&activeTab==='Context')renderContent();}catch(e){error(String(e));}}
+async function runPlan() {if(!activeProject||busy)return;busy=true;error('');try {graph=await invoke<GraphTask[]>('run_plan',{projectId:activeProject,plan:JSON.parse(planText),concurrency:2});await refreshThreads();}catch(e){error(String(e));}finally{busy=false;render();}}
+async function refreshUsage() { try {usage=await invoke<Usage[]>('model_usage');if(activeTab==='Usage')renderContent();} catch(e){error(String(e));} }
+async function localInsight(command:'summarize_task'|'review_task') {
+  if(!activeThread || busy)return;busy=true;render();
+  try {const result=await invoke<Record<string,unknown>>(command,{threadId:activeThread});const v=view(activeThread); if(command==='summarize_task')v.summary=JSON.stringify(result,null,2);else v.review=JSON.stringify(result,null,2);}
+  catch(e){error(String(e));}finally{busy=false;render();}
+}
+async function refreshDiff(id: string) {
+  try { view(id).diff = await invoke<string>('repo_diff', {threadId:id}); if(activeThread === id && activeTab === 'Diff') renderContent(); }
+  catch(e) { error(String(e)); }
+}
+async function selectThread(id: string) {
+  if (busy) return; activeThread = id; busy = true; error(''); render();
+  try {
+    const snapshot = threads.find(t=>t.id===id)?.provider === 'spark' ? {active_turn:null,messages:[]} : await invoke<Snapshot>('resume_task', { threadId: id });
+    const v = view(id); if(threads.find(t=>t.id===id)?.provider === 'spark') {v.sequence=0;v.events=[];} v.messages = snapshot.messages.map((m, i) => ({ ...m, key: `restored-${i}` }));
+    let after = v.sequence;
+    for (;;) { const history = await invoke<JournalEvent[]>('event_history', { threadId: id, after }); for (const e of history) applyEvent(e, true); if (history.length < 2000) break; after = history[history.length - 1].sequence; }
+    const insights=await invoke<{review:View['finalReview'];recovery:View['recovery']}>('worker_insights',{threadId:id});v.finalReview=insights.review||undefined;v.recovery=insights.recovery||undefined;
+    v.running = !!snapshot.active_turn && !v.completedTurns?.has(snapshot.active_turn.id); v.activeTurn=snapshot.active_turn?.id; v.needsResume = false;
+  } catch (e) { view(id).needsResume = true; error(String(e)); } finally { busy = false; render(); }
+}
+async function send() {
+  const input = document.querySelector<HTMLTextAreaElement>('#task-input')!, text = input.value.trim();
+  if (!text || busy || !activeProject || selectedView()?.needsResume) return;
+  busy = true; error(''); render();
+  try {
+    if (!activeThread) {
+      const result = await invoke<{thread:Thread;route:{decision:{reason:string;executor:string}}}>('create_routed_task', { projectId: activeProject, text, knownFiles:knownFiles(), preference:(document.querySelector('#preference') as HTMLSelectElement).value });
+      const thread=result.thread; threads.unshift(thread); activeThread = thread.id; view(thread.id).needsResume = false; view(thread.id).route=`${result.route.decision.executor}: ${result.route.decision.reason}`;
+    }
+    const v = view(activeThread);
+    if(threads.find(t=>t.id===activeThread)?.provider === 'spark') { await invoke('run_local',{threadId:activeThread,text,knownFiles:knownFiles()}); }
+    else { v.messages.push({ role: 'user', text, key: `user-${Date.now()}` });
+    if (v.running) await invoke('steer_turn', { threadId: activeThread, text });
+    else { await invoke('send_turn', { threadId: activeThread, text }); }
+    }
+    input.value = '';
+  } catch (e) { if (activeThread) view(activeThread).needsResume = true; error(String(e)); }
+  finally { busy = false; render(); }
+}
+function openDialog() { (document.querySelector('#register') as HTMLDialogElement).showModal(); }
+document.querySelector('#settings')!.addEventListener('click', async () => {
+  (document.querySelector('#connection-settings') as HTMLDialogElement).showModal();
+  try { (document.querySelector('#codex-path') as HTMLInputElement).value = await invoke<string>('codex_binary'); const config=await invoke<{mode:string;model:string}>('astra_settings');(document.querySelector('#astra-mode') as HTMLSelectElement).value=config.mode;(document.querySelector('#astra-model') as HTMLInputElement).value=config.model; }
+  catch (e) { document.querySelector('#settings-error')!.textContent = String(e); }
+});
+document.querySelector('#settings-cancel')!.addEventListener('click', () => (document.querySelector('#connection-settings') as HTMLDialogElement).close());
+document.querySelector('#settings-form')!.addEventListener('submit', async e => {
+  e.preventDefault(); try {
+    const path=(document.querySelector('#codex-path') as HTMLInputElement).value;if(path!==await invoke<string>('codex_binary')) await invoke('set_codex_binary',{path});
+    await invoke('set_astra_settings',{config:{mode:(document.querySelector('#astra-mode') as HTMLSelectElement).value,model:(document.querySelector('#astra-model') as HTMLInputElement).value}});
+    document.querySelector('#settings-error')!.textContent = '';
+    (document.querySelector('#connection-settings') as HTMLDialogElement).close(); error('');
+  } catch(e) { document.querySelector('#settings-error')!.textContent = String(e); }
+});
+document.querySelector('#add')!.addEventListener('click', openDialog);
+document.querySelector('#new')!.addEventListener('click', () => { if (busy) return; activeThread = null; activeTab = 'Chat'; error(''); render(); });
+document.querySelector('#resume')!.addEventListener('click', () => { if (activeThread) void selectThread(activeThread); });
+document.querySelector('#send')!.addEventListener('click', () => void send());
+document.querySelector<HTMLTextAreaElement>('#task-input')!.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(); } });
+document.querySelector('#stop')!.addEventListener('click', async () => { if (!activeThread || busy) return; busy = true; render(); try { await invoke('interrupt_turn', { threadId: activeThread }); } catch (e) { view(activeThread).needsResume = true; error(String(e)); } finally { busy = false; render(); } });
+document.querySelector('#cancel')!.addEventListener('click', () => (document.querySelector('#register') as HTMLDialogElement).close());
+document.querySelector('form')!.addEventListener('submit', async e => {
+  e.preventDefault(); const formError = document.querySelector('#form-error')!;
+  try {
+    if (!isTauri()) throw new Error('登録にはデスクトップアプリを起動してください。');
+    const p = await invoke<Project>('register_project', { path: (document.querySelector('#path') as HTMLInputElement).value });
+    projects = await invoke<Project[]>('projects'); activeProject = p.id; activeThread = null; formError.textContent = '';
+    (document.querySelector('#register') as HTMLDialogElement).close(); render();
+  } catch (e) { formError.textContent = String(e); }
+});
+setupMemory(()=>activeProject,error);
+window.addEventListener('unhandledrejection', e => error(String(e.reason)));
+window.addEventListener('error', e => error(e.message));
+render();
+if (isTauri()) {
+  await listen<JournalEvent>('hub-event', e => applyEvent(e.payload));
+  await listen<number>('hub-stream-gap', () => { if (activeThread) { view(activeThread).needsResume = true; error('イベント配信が遅れました。「再開・状態を確認」で保存済み履歴を読み直してください。'); render(); } });
+  try { [projects, threads] = await Promise.all([invoke<Project[]>('projects'), invoke<Thread[]>('threads')]); activeProject = projects[0]?.id || null; render(); } catch (e) { error(String(e)); }
+}
+
+async function resumePlan() {if(!activeProject||busy)return;busy=true;error('');try{graph=await invoke<GraphTask[]>('resume_plan',{projectId:activeProject});await refreshThreads();}catch(e){error(String(e));}finally{busy=false;render();}}

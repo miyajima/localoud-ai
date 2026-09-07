@@ -1,0 +1,8 @@
+[package]
+name = "hub-policy"
+version.workspace = true
+edition.workspace = true
+[dependencies]
+regex = "1"
+serde_json.workspace = true
+sha2 = "0.10"

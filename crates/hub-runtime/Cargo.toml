@@ -1,0 +1,27 @@
+[package]
+name = "hub-runtime"
+version.workspace = true
+edition.workspace = true
+[dependencies]
+hub-memory = { path = "../hub-memory" }
+anyhow.workspace = true
+hub-core.workspace = true
+hub-db.workspace = true
+protocol-types = { path = "../protocol-types" }
+tokio.workspace = true
+uuid.workspace = true
+hub-events = { path = "../hub-events" }
+hub-policy = { path = "../hub-policy" }
+hub-router = { path = "../hub-router" }
+provider-spark = { path = "../provider-spark" }
+serde.workspace = true
+serde_json.workspace = true
+cap-std = "3"
+similar = "2"
+hub-context = { path = "../hub-context" }
+hub-worktree = { path = "../hub-worktree" }
+hub-scheduler = { path = "../hub-scheduler" }
+async-trait.workspace = true
+[dev-dependencies]
+provider-codex = { path = "../provider-codex" }
+tempfile = "3"

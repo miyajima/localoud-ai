@@ -1,0 +1,23 @@
+[package]
+name = "hub-planner"
+version.workspace = true
+edition.workspace = true
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hub-core.workspace = true
+hub-db.workspace = true
+hub-runtime = { path = "../hub-runtime" }
+provider-codex = { path = "../provider-codex" }
+protocol-types = { path = "../protocol-types" }
+tokio.workspace = true
+hub-policy = { path = "../hub-policy" }
+[dev-dependencies]
+tempfile = "3"
+hub-memory = { path = "../hub-memory" }
+hub-worktree = { path = "../hub-worktree" }
+hub-scheduler = { path = "../hub-scheduler" }
+hub-events = { path = "../hub-events" }
+provider-spark = { path = "../provider-spark" }

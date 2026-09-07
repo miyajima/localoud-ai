@@ -1,0 +1,27 @@
+[package]
+name = "astra-desktop"
+version.workspace = true
+edition.workspace = true
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+[dependencies]
+tauri = { version = "2", features = [] }
+hub-core.workspace = true
+hub-db.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hub-runtime = { path = "../../../crates/hub-runtime" }
+hub-events = { path = "../../../crates/hub-events" }
+provider-codex = { path = "../../../crates/provider-codex" }
+protocol-types = { path = "../../../crates/protocol-types" }
+tokio.workspace = true
+hub-router = { path = "../../../crates/hub-router" }
+provider-spark = { path = "../../../crates/provider-spark" }
+
+hub-context = { path = "../../../crates/hub-context" }
+hub-worktree = { path = "../../../crates/hub-worktree" }
+hub-scheduler = { path = "../../../crates/hub-scheduler" }
+hub-planner = { path = "../../../crates/hub-planner" }
+hub-memory = { path = "../../../crates/hub-memory" }
+keyring = { version = "3", features = ["apple-native"] }
+hub-policy = { path = "../../../crates/hub-policy" }

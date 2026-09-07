@@ -1,0 +1,12 @@
+[package]
+name = "hub-events"
+version.workspace = true
+edition.workspace = true
+[dependencies]
+anyhow.workspace = true
+hub-db.workspace = true
+hub-policy = { path = "../hub-policy" }
+protocol-types = { path = "../protocol-types" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

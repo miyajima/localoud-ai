@@ -1,0 +1,9 @@
+[package]
+name = "hub-scheduler"
+version.workspace = true
+edition.workspace = true
+[dependencies]
+anyhow.workspace = true
+hub-core.workspace = true
+async-trait.workspace = true
+tokio.workspace = true

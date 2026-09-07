@@ -1,0 +1,224 @@
+{
+  "memory_errors": [],
+  "orgbrain_retrievals": 3,
+  "orgbrain_transport": "loopback file-backed MCP fixture, not a real account",
+  "prior_attempts": [
+    "Initial query fixture did not match extracted policy; corrected to text_stats before workers ran",
+    "Worker tests absent from first final-review input; independent test output supplied",
+    "429/422 extraction failures diagnosed; compact completion facts and serialized local calls applied",
+    "Same-parent quality review rejected misread command-count memories; fixture-only records removed, unsupported failure claims blocked, and persistence now requires approval of exact goal/diff"
+  ],
+  "review": {
+    "findings": [
+      "The diff implements text_stats using both predecessor modules and adds integration tests; supplied byte-comparison evidence confirms both predecessor patches are preserved.",
+      "Supplied verification reports all 8 acceptance tests and all 13 worker/integration tests passing under python3.",
+      "Supplied evidence confirms the required policy retrieval preceded editing, acceptance.py is unchanged, and no branch merge occurred.",
+      "No defects are apparent in the supplied diff. Runtime and repository conclusions rely on the supplied evidence, without independent execution."
+    ],
+    "rework_instruction": null,
+    "verdict": "approve"
+  },
+  "root": "/private/var/folders/lm/s5hgvkpd7451pbw9pj889h780000gn/T/astra-full-fixture-eqoc8Q",
+  "tasks": [
+    {
+      "assigned_executor": "codex",
+      "attempts": 1,
+      "complexity": "normal",
+      "context_capsule_id": "f0d70c92-e34c-4877-a1e1-11e78b500eac",
+      "dependencies": [],
+      "description": "First retrieve prior policy via hub_context source org_brain query text_stats token_budget 1000. Then: Retrieve the fixture policy, implement count_lines(text) in lines.py and independent tests in test_lines.py, then run `python -m unittest -v test_lines`. Deliver a patch containing only owned files for integration.",
+      "id": "14df2ff6-a17c-4e82-b2cc-81835837bee2",
+      "max_attempts": 2,
+      "parent_task_id": null,
+      "plan_id": "a8112eb5-5b0a-4756-863f-c3b547f3dd20",
+      "preferred_executor": "auto",
+      "project_id": "ce3bedf2-29eb-455b-9779-6a2ea9437ceb",
+      "risk": "medium",
+      "status": "completed",
+      "title": "Implement line counting",
+      "worktree_id": "246c0d06-113f-4286-9858-11315956b936"
+    },
+    {
+      "assigned_executor": "codex",
+      "attempts": 1,
+      "complexity": "normal",
+      "context_capsule_id": "2a5aed81-9c3e-4521-9d54-7523c691c2a3",
+      "dependencies": [],
+      "description": "First retrieve prior policy via hub_context source org_brain query text_stats token_budget 1000. Then: Retrieve the fixture policy, implement count_words(text) in words.py and independent tests in test_words.py, then run `python -m unittest -v test_words`. Deliver a patch containing only owned files for integration.",
+      "id": "15efb144-9bae-43ed-8c41-3558b2c47d39",
+      "max_attempts": 2,
+      "parent_task_id": null,
+      "plan_id": "a8112eb5-5b0a-4756-863f-c3b547f3dd20",
+      "preferred_executor": "auto",
+      "project_id": "ce3bedf2-29eb-455b-9779-6a2ea9437ceb",
+      "risk": "medium",
+      "status": "completed",
+      "title": "Implement word counting",
+      "worktree_id": "68ef2e3b-ab7b-4335-a034-bd49e74d6b1a"
+    },
+    {
+      "assigned_executor": "codex",
+      "attempts": 1,
+      "complexity": "normal",
+      "context_capsule_id": "1db74cf2-b7a0-4bc3-84f7-2e96fba6e856",
+      "dependencies": [
+        "15efb144-9bae-43ed-8c41-3558b2c47d39",
+        "14df2ff6-a17c-4e82-b2cc-81835837bee2"
+      ],
+      "description": "First retrieve prior policy via hub_context source org_brain query text_stats token_budget 1000. Then: Apply both predecessor patches, implement stats.py text_stats(text) and test_stats.py, then run `python -m unittest discover -v` and `python acceptance.py`. Verify `git diff --exit-code HEAD -- acceptance.py` succeeds. Deliver the combined integration patch and verification results without merging any branch.",
+      "id": "b053fe1a-0a9f-44bf-9aa3-bde5f167b13e",
+      "max_attempts": 2,
+      "parent_task_id": null,
+      "plan_id": "a8112eb5-5b0a-4756-863f-c3b547f3dd20",
+      "preferred_executor": "auto",
+      "project_id": "ce3bedf2-29eb-455b-9779-6a2ea9437ceb",
+      "risk": "medium",
+      "status": "completed",
+      "title": "Integrate and verify text statistics",
+      "worktree_id": "d3925bd0-f37c-419d-8973-32bab4cc3152"
+    }
+  ],
+  "test_evidence": [
+    "Independent python3 acceptance.py returned exit 0:\n........\n----------------------------------------------------------------------\nRan 8 tests in 0.000s\n\nOK\n",
+    "Independent python3 -m unittest discover -v returned exit 0:\ntest_blank_lines (test_lines.CountLinesTests) ... ok\ntest_empty_input (test_lines.CountLinesTests) ... ok\ntest_mixed_line_boundaries (test_lines.CountLinesTests) ... ok\ntest_single_line (test_lines.CountLinesTests) ... ok\ntest_supported_line_boundaries (test_lines.CountLinesTests) ... ok\ntest_trailing_newlines (test_lines.CountLinesTests) ... ok\ntest_line_boundaries_and_terminal_breaks (test_stats.TextStatsTests) ... ok\ntest_policy_examples_and_exact_keys (test_stats.TextStatsTests) ... ok\ntest_apostrophes_stay_within_words (test_words.CountWordsTests) ... ok\ntest_empty_and_whitespace_only (test_words.CountWordsTests) ... ok\ntest_punctuation_does_not_separate_words (test_words.CountWordsTests) ... ok\ntest_repeated_and_mixed_whitespace (test_words.CountWordsTests) ... ok\ntest_unicode_whitespace (test_words.CountWordsTests) ... ok\n\n----------------------------------------------------------------------\nRan 13 tests in 0.001s\n\nOK\n",
+    "Hub retrieval ledger: [{\"id\":\"8a2e38c0-6a7c-48f5-94c5-52d1c2698cde\",\"task_id\":\"b053fe1a-0a9f-44bf-9aa3-bde5f167b13e\",\"source\":\"org_brain\",\"query\":\"text_stats\",\"token_budget\":1000,\"token_estimate\":438,\"result_ref\":\"astra-hub:76c6cf69-6f7a-40eb-8e6f-c5831e7c7e86:0,astra-hub:76c6cf69-6f7a-40eb-8e6f-c5831e7c7e86:1\"},{\"id\":\"a948ae00-b4fd-474d-89fd-eafaaef40792\",\"task_id\":\"b053fe1a-0a9f-44bf-9aa3-bde5f167b13e\",\"source\":\"task_history\",\"query\":\"predecessor patches words.py lines.py integration b053fe1a-0a9f-44bf-9aa3-bde5f167b13e\",\"token_budget\":1500,\"token_estimate\":23,\"result_ref\":\"\"},{\"id\":\"4d0b6e3f-3e66-4622-aab7-72ed5936788c\",\"task_id\":\"b053fe1a-0a9f-44bf-9aa3-bde5f167b13e\",\"source\":\"session_store\",\"query\":\"predecessor patches words.py lines.py applied integration worktree\",\"token_budget\":1500,\"token_estimate\":24,\"result_ref\":\"\"}]",
+    "Independent integrity check: git diff --exit-code HEAD -- acceptance.py returned exit 0 with empty stdout/stderr.",
+    "Independent Git check: integration HEAD equals its recorded baseline SHA c95db2e73f4e6dc029834af423bd615e9029d814; no merge commit or branch commit was introduced.",
+    "Independent byte comparison: predecessor output files are identical in integration worktree: ['test_words.py', 'words.py', 'lines.py', 'test_lines.py']. Hub task dependencies are ['15efb144-9bae-43ed-8c41-3558b2c47d39', '14df2ff6-a17c-4e82-b2cc-81835837bee2']. The baseline lacks these files.",
+    "Provider journal chronology establishes successful hub_context retrieval before the first file edit: [{\"journal_index\": 1716, \"method\": \"item/completed\", \"type\": \"dynamicToolCall\", \"tool\": \"hub_context\", \"arguments\": {\"path\": null, \"query\": \"text_stats\", \"source\": \"org_brain\", \"token_budget\": 1000}, \"success\": true}, {\"journal_index\": 1794, \"method\": \"item/started\", \"type\": \"fileChange\"}]"
+  ],
+  "usage": [
+    {
+      "cached_tokens": null,
+      "completion_tokens": 304,
+      "estimated_cost": null,
+      "id": "28f94bb4-18a1-4f84-9587-7ed88ff309c4",
+      "latency_ms": 6655,
+      "model": "Spark-X2.5-4B-MLX-8bit",
+      "prompt_tokens": 673,
+      "provider": "spark",
+      "task_id": "b053fe1a-0a9f-44bf-9aa3-bde5f167b13e",
+      "turn_id": null
+    },
+    {
+      "cached_tokens": null,
+      "completion_tokens": 313,
+      "estimated_cost": null,
+      "id": "6423849b-cebe-4b5b-8fc9-58f41a800d1e",
+      "latency_ms": 7018,
+      "model": "Spark-X2.5-4B-MLX-8bit",
+      "prompt_tokens": 651,
+      "provider": "spark",
+      "task_id": "15efb144-9bae-43ed-8c41-3558b2c47d39",
+      "turn_id": null
+    },
+    {
+      "cached_tokens": null,
+      "completion_tokens": 279,
+      "estimated_cost": null,
+      "id": "2cb75dc3-c629-4049-ac4c-b14fe7306ecb",
+      "latency_ms": 6457,
+      "model": "Spark-X2.5-4B-MLX-8bit",
+      "prompt_tokens": 643,
+      "provider": "spark",
+      "task_id": "14df2ff6-a17c-4e82-b2cc-81835837bee2",
+      "turn_id": null
+    },
+    {
+      "cached_tokens": null,
+      "completion_tokens": 424,
+      "estimated_cost": null,
+      "id": "79eaf8ce-5607-4c7f-bd6b-6a40f4f815e6",
+      "latency_ms": 10485,
+      "model": "Spark-X2.5-4B-MLX-8bit",
+      "prompt_tokens": 2663,
+      "provider": "spark",
+      "task_id": "b053fe1a-0a9f-44bf-9aa3-bde5f167b13e",
+      "turn_id": null
+    },
+    {
+      "cached_tokens": 0,
+      "completion_tokens": 122,
+      "estimated_cost": null,
+      "id": "75016757-2739-4499-9954-dc169cd6b125",
+      "latency_ms": null,
+      "model": "gpt-6-astra",
+      "prompt_tokens": 29371,
+      "provider": "codex",
+      "task_id": null,
+      "turn_id": "01a07cc7-1731-79e0-b450-51b3278a5d8b"
+    },
+    {
+      "cached_tokens": 201728,
+      "completion_tokens": 1893,
+      "estimated_cost": null,
+      "id": "c65e078d-89f2-492f-bfd1-14c5b3ac8154",
+      "latency_ms": null,
+      "model": "gpt-6-astra",
+      "prompt_tokens": 239661,
+      "provider": "codex",
+      "task_id": "b053fe1a-0a9f-44bf-9aa3-bde5f167b13e",
+      "turn_id": "01a07cc5-7e20-72c1-9b84-ce133c31f7d2"
+    },
+    {
+      "cached_tokens": null,
+      "completion_tokens": 285,
+      "estimated_cost": null,
+      "id": "564be649-589c-4a0b-ab0b-a697e645b0d1",
+      "latency_ms": 6216,
+      "model": "Spark-X2.5-4B-MLX-8bit",
+      "prompt_tokens": 298,
+      "provider": "spark",
+      "task_id": "b053fe1a-0a9f-44bf-9aa3-bde5f167b13e",
+      "turn_id": null
+    },
+    {
+      "cached_tokens": 158720,
+      "completion_tokens": 1315,
+      "estimated_cost": null,
+      "id": "96443ac6-0d6e-424b-9267-16b3d3de48cc",
+      "latency_ms": null,
+      "model": "gpt-6-astra",
+      "prompt_tokens": 195804,
+      "provider": "codex",
+      "task_id": "14df2ff6-a17c-4e82-b2cc-81835837bee2",
+      "turn_id": "01a07cc4-2d74-7550-b7f4-f0c2a1c5fe98"
+    },
+    {
+      "cached_tokens": 163456,
+      "completion_tokens": 1469,
+      "estimated_cost": null,
+      "id": "1b71b248-8963-407f-80fa-712eca12c8d0",
+      "latency_ms": null,
+      "model": "gpt-6-astra",
+      "prompt_tokens": 200038,
+      "provider": "codex",
+      "task_id": "15efb144-9bae-43ed-8c41-3558b2c47d39",
+      "turn_id": "01a07cc4-1994-7773-ab1e-7a673bc5ed62"
+    },
+    {
+      "cached_tokens": null,
+      "completion_tokens": 228,
+      "estimated_cost": null,
+      "id": "d42816de-9ea2-4af8-aa5b-31d07caf1370",
+      "latency_ms": 5158,
+      "model": "Spark-X2.5-4B-MLX-8bit",
+      "prompt_tokens": 278,
+      "provider": "spark",
+      "task_id": "14df2ff6-a17c-4e82-b2cc-81835837bee2",
+      "turn_id": null
+    },
+    {
+      "cached_tokens": 0,
+      "completion_tokens": 1076,
+      "estimated_cost": null,
+      "id": "188578b8-fdf0-43bf-b073-0ada49964db8",
+      "latency_ms": null,
+      "model": "gpt-6-astra",
+      "prompt_tokens": 25865,
+      "provider": "codex",
+      "task_id": null,
+      "turn_id": "01a07cc3-7d46-78a2-822a-93b814194ffb"
+    }
+  ]
+}
