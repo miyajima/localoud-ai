@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod astra;
+mod auto_routing;
 mod memory;
 mod models;
 mod plans;
@@ -34,6 +35,7 @@ struct AppState {
     data_dir: PathBuf,
     local: LocalExecutor,
     local_config: provider_spark::LocalServiceConfig,
+    auto_routes: Mutex<std::collections::HashMap<String, auto_routing::PreparedRoute>>,
     running_plans: Arc<AsyncMutex<std::collections::HashSet<ProjectId>>>,
 }
 impl AppState {
@@ -112,6 +114,10 @@ async fn set_codex_binary(path: String, state: tauri::State<'_, AppState>) -> Re
     if !path.is_absolute() || !path.is_file() {
         return Err("Codex 実行ファイルの絶対パスを指定してください。".into());
     }
+    let running = state.running_plans.lock().await;
+    if !running.is_empty() {
+        return Err("計画の実行が終了してから接続設定を変更してください。".into());
+    }
     let mut connection = state.connection.lock().await;
     if state
         .store
@@ -121,7 +127,6 @@ async fn set_codex_binary(path: String, state: tauri::State<'_, AppState>) -> Re
         .map_err(|e| e.to_string())?
         .iter()
         .any(|t| matches!(t.status.as_str(), "running" | "inProgress"))
-        || !state.running_plans.lock().await.is_empty()
     {
         return Err("実行中のタスクが終了してから接続設定を変更してください。".into());
     }
@@ -169,16 +174,36 @@ fn threads(state: tauri::State<AppState>) -> Result<Vec<ThreadMapping>, String> 
 struct RoutedTask {
     thread: ThreadMapping,
     route: RouteReport,
+    target: hub_router::automatic::ModelTarget,
 }
-#[tauri::command]
-async fn create_routed_task(
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateTaskRequest {
     project_id: String,
     text: String,
     known_files: Vec<String>,
     preference: ExecutorPreference,
     model: Option<String>,
+    reasoning: Option<String>,
+    auto_route_id: Option<String>,
+    auto_route_revision: Option<u64>,
+}
+#[tauri::command]
+async fn create_routed_task(
+    request: CreateTaskRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<RoutedTask, String> {
+    use hub_router::automatic::{ModelProvider, ModelTarget};
+    let CreateTaskRequest {
+        project_id,
+        text,
+        known_files,
+        preference,
+        model,
+        reasoning,
+        auto_route_id,
+        auto_route_revision,
+    } = request;
     if preference == ExecutorPreference::Codex && model.as_ref().is_none_or(|m| m.trim().is_empty())
     {
         return Err("モデルを選択してください。".into());
@@ -189,16 +214,79 @@ async fn create_routed_task(
         known_files,
         estimated_loc: None,
     };
-    let report = RoutingPolicy::default()
-        .route(&input, preference, state.local.provider.as_ref())
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-    if let Some(usage) = &report.usage {
-        state
-            .local
-            .record_usage(usage, None)
-            .map_err(|e| e.to_string())?;
-    }
+    let (report, target) = if preference == ExecutorPreference::Auto {
+        let preview = auto_routing::consume_route(
+            auto_route_id
+                .as_deref()
+                .ok_or("先に Auto の判定を行ってください。")?,
+            auto_route_revision.ok_or("判定の版がありません。")?,
+            project,
+            &input,
+            &state,
+        )
+        .await?;
+        let target = preview.target.clone().ok_or("振り分け先がありません。")?;
+        let decision = RoutingDecision {
+            executor: if target.provider == ModelProvider::Local {
+                ExecutorKind::Spark
+            } else {
+                ExecutorKind::Codex
+            },
+            complexity: match preview.level {
+                Some(1 | 2) => hub_core::Complexity::Trivial,
+                Some(4 | 5) => hub_core::Complexity::Deep,
+                _ => hub_core::Complexity::Normal,
+            },
+            risk: preview.risk.unwrap_or(hub_core::RiskLevel::Medium),
+            needs_plan: false,
+            needs_final_astra_review: false,
+            estimated_scope: preview.estimated_scope.clone().unwrap_or(EstimatedScope {
+                files: input.known_files.len() as u32,
+                loc: 0,
+            }),
+            confidence: preview.confidence.unwrap_or(0.0),
+            reason: format!(
+                "Auto: 難易度 {}{} → {} / reasoning={}\n{}",
+                preview
+                    .level
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "未判定".into()),
+                if preview.manual_override {
+                    "（手動調整）"
+                } else {
+                    ""
+                },
+                target.model,
+                target.reasoning.as_deref().unwrap_or("既定"),
+                preview.reason
+            ),
+        };
+        (
+            RouteReport {
+                decision,
+                usage: None,
+                fallback: preview.used_fallback,
+            },
+            target,
+        )
+    } else {
+        let report = RoutingPolicy::default()
+            .route(&input, preference, state.local.provider.as_ref())
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        let provider = match report.decision.executor {
+            ExecutorKind::Spark => ModelProvider::Local,
+            ExecutorKind::Codex => ModelProvider::Codex,
+            ExecutorKind::Astra => return Err("操作を「計画する」に切り替えてください。".into()),
+        };
+        let target = ModelTarget {
+            provider,
+            model: model.unwrap_or_else(|| state.local_config.model_id.clone()),
+            reasoning,
+        };
+        models::validate_target(&target, &state).await?;
+        (report, target)
+    };
     let title = text.chars().take(70).collect();
     let thread = match report.decision.executor {
         ExecutorKind::Spark => state
@@ -207,12 +295,7 @@ async fn create_routed_task(
             .map_err(|e| e.to_string())?,
         ExecutorKind::Codex => {
             let sessions = state.sessions().await?;
-            let selected = if let Some(model) = model { model } else {
-                let provider = state.connection.lock().await.as_ref().ok_or("接続がありません")?.provider.clone();
-                let catalog = provider.model_catalog().await.map_err(|e|e.to_string())?;
-                catalog.iter().find(|m|m["isDefault"].as_bool()==Some(true)).and_then(|m|m["model"].as_str().or(m["id"].as_str())).ok_or("既定のモデルを取得できません。モデルを明示的に選択してください。")?.to_string()
-            };
-            sessions.create_with_model(project, title, Some(&selected)).await.map_err(|e|format!("{e:#}"))?
+            sessions.create_with_model(project, title, Some(&target.model)).await.map_err(|e|format!("{e:#}"))?
         },
         ExecutorKind::Astra => {
             return Err(
@@ -220,6 +303,14 @@ async fn create_routed_task(
             )
         }
     };
+    if let Some(effort) = &target.reasoning {
+        state
+            .store
+            .lock()
+            .map_err(|e| e.to_string())?
+            .set_setting(&format!("thread_reasoning:{}", thread.id), effort)
+            .map_err(|e| e.to_string())?;
+    }
     state
         .bus
         .publish(protocol_types::AgentEvent {
@@ -234,6 +325,7 @@ async fn create_routed_task(
     Ok(RoutedTask {
         thread,
         route: report,
+        target,
     })
 }
 #[tauri::command]
@@ -467,11 +559,17 @@ fn main() {
                 data_dir: dir,
                 local,
                 local_config,
+                auto_routes: Mutex::new(std::collections::HashMap::new()),
                 running_plans: Arc::new(AsyncMutex::new(std::collections::HashSet::new())),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            auto_routing::auto_settings,
+            auto_routing::set_auto_settings,
+            auto_routing::preview_auto_route,
+            auto_routing::revise_auto_route,
+            models::thread_reasoning,
             models::available_models,
             models::local_model_settings,
             models::set_local_model_settings,

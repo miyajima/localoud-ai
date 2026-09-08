@@ -1,3 +1,4 @@
+pub mod automatic;
 use anyhow::{bail, Result};
 use hub_core::{Complexity, ExecutorKind, ExecutorPreference, RiskLevel};
 use protocol_types::local::*;

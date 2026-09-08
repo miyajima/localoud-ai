@@ -156,6 +156,7 @@ if __name__=='__main__': unittest.main()
         .await?,
     );
     let astra = Astra {
+        reasoning: None,
         mode: AstraAccessMode::CodexIntegrated,
         provider: p.clone(),
         root: root.clone(),

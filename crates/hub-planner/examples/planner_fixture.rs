@@ -27,6 +27,7 @@ async fn main() -> Result<()> {
             .await?,
     );
     let astra = Astra {
+        reasoning: None,
         mode: AstraAccessMode::CodexIntegrated,
         provider: p.clone(),
         root: d.clone(),
@@ -64,6 +65,7 @@ async fn main() -> Result<()> {
         .await?;
     println!("recovery={}", serde_json::to_string(&recovery)?);
     let disabled = Astra {
+        reasoning: None,
         mode: AstraAccessMode::Disabled,
         provider: p.clone(),
         root: d,

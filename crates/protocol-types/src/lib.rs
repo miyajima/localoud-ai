@@ -70,6 +70,18 @@ pub trait CodingAgentProvider: Send + Sync {
     }
     async fn read_thread(&self, thread: &ProviderThread) -> Result<ThreadSnapshot>;
     async fn start_turn(&self, thread: &ProviderThread, text: String) -> Result<ProviderTurn>;
+    async fn start_turn_with_reasoning(
+        &self,
+        thread: &ProviderThread,
+        text: String,
+        _model: &str,
+        effort: Option<&str>,
+    ) -> Result<ProviderTurn> {
+        if effort.is_some() {
+            anyhow::bail!("Reasoning selection is unavailable for this provider");
+        }
+        self.start_turn(thread, text).await
+    }
     async fn steer_turn(&self, turn: &ProviderTurn, text: String) -> Result<()>;
     async fn interrupt_turn(&self, turn: &ProviderTurn) -> Result<()>;
     fn events(&self) -> broadcast::Receiver<AgentEvent>;

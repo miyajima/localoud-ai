@@ -11,6 +11,14 @@
 - 設定画面のレビュー・診断モデルは、最終レビュー・診断の既定値です。入力欄で明示する計画モデルとは別です。
 - 新規タスクはモデル ID を保存します。Codex の再開時も同じ ID を要求・照合します。ローカルモデルを差し替えた後、以前のモデルのタスクを続けるには設定を戻すか新規タスクを作成します。以前の版のクラウドタスクで ID が未記録の場合は「モデル未取得」と表示し、現在のモデル名で過去を上書きしません。
 
+## Reasoning
+
+モデルの隣で、接続先がそのモデルに対応すると返した Reasoning を選択できます。`既定（medium）` などの表示はプロバイダーの既定値、`high` などの明示値は保存する指定値です。対応値はモデルごとに変わります。モデルや操作を切り替えると既定値へ戻ります。現在のローカルサービスは切り替え非対応のため「非対応（固定）」と表示します。
+
+新規タスクのモデルと明示した Reasoning は保存され、再開後の `turn/start` にも同じ `model` / `effort` を送ります。作成済みタスクでは固定表示です。変更したい場合は新規タスクを作成します。計画作成、および接続設定のレビュー・診断にも Reasoning を指定できます。計画の設定は DAG worker の設定へは引き継ぎません。
+
+「自動」では [Auto の振り分け設定](AUTO_ROUTING.md) に保存した難易度ごとのモデル・Reasoning を使います。
+
 ## 現在の設定
 
 | 項目 | 初期値 |
@@ -59,7 +67,7 @@ LOCAL_MODEL_CONFIG=/absolute/path/to/model.json \
 - `GET /health` → `status: "ready"`, `model`, `quantization_bits`
 - `POST /v1/generate` ← `model`, `task`, `messages`, `schema`, `max_tokens`, `temperature`
 - 成功応答 → `output`（要求 schema を満たす JSON）, `usage.prompt_tokens`, `usage.completion_tokens`, `latency_ms`, `model`, `quantization_bits`
-- `task` は `route`, `draft_context`, `implement`, `summarize`, `review`, `retrieval_query`, `memory_extract`
+- `task` は `difficulty`, `route`, `draft_context`, `implement`, `summarize`, `review`, `retrieval_query`, `memory_extract`
 
 通常の OpenAI 互換 `/v1/chat/completions` をそのまま指定することはできません。この契約への変換アダプターが必要です。互換性のため内部 crate 名・永続 provider key は `spark` を保持しますが、表示・照合・使用量のモデル名は固定していません。
 

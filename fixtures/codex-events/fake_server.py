@@ -8,12 +8,15 @@ for line in sys.stdin:
         continue
     p = v.get("params", {})
     if method == "initialize": result = {"userAgent": "fixture"}
-    elif method == "model/list": result = {"data":[{"id":"fixture-a","model":"fixture-a","isDefault":True},{"id":"fixture-b","model":"fixture-b"}],"nextCursor":None}
+    elif method == "model/list": result = {"data":[{"id":"fixture-a","model":"fixture-a","isDefault":True,"supportedReasoningEfforts":[{"reasoningEffort":"low"}]},{"id":"fixture-b","model":"fixture-b","supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high"}]}],"nextCursor":None}
     elif method == "thread/start":
         thread["model"] = p.get("model", "fixture-a")
         result = {"thread": thread,"model":thread["model"]}
     elif method in ("thread/read", "thread/resume"): result = {"thread": thread,"model":p.get("model",thread.get("model","fixture-a"))}
     elif method == "turn/start":
+        if p.get("input", [{}])[0].get("text") == "verify reasoning":
+            assert p.get("model") == "fixture-b", "wrong model sent"
+            assert p.get("effort") == "high", "reasoning was not sent"
         turn = {"id": "fixture-turn", "status": "inProgress", "items": []}
         thread["turns"] = [turn]
         result = {"turn": turn}

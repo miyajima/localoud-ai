@@ -72,6 +72,7 @@ pub struct Astra {
     pub provider: Arc<CodexProvider>,
     pub root: PathBuf,
     pub model: String,
+    pub reasoning: Option<String>,
 }
 impl Astra {
     async fn generate(&self, prompt: String, schema: Value) -> Result<Value> {
@@ -88,7 +89,13 @@ impl Astra {
             bail!("planning/review evidence exceeds 80 KB; select smaller evidence");
         }
         self.provider
-            .structured_read_only(self.root.clone(), &self.model, prompt, schema)
+            .structured_read_only_with_reasoning(
+                self.root.clone(),
+                &self.model,
+                self.reasoning.as_deref(),
+                prompt,
+                schema,
+            )
             .await
     }
 }

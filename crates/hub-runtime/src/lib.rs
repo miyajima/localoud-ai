@@ -242,16 +242,28 @@ impl Sessions {
             .map_err(|_| anyhow!("database lock poisoned"))?
             .record_turn_intent(id)?;
         state.reconciled = false;
-        match self
-            .provider
-            .start_turn(
-                &ProviderThread {
-                    id: m.provider_thread_id.clone(),
-                },
-                text,
+        let (pinned_model, pinned_effort) = {
+            let store = self
+                .store
+                .lock()
+                .map_err(|_| anyhow!("database lock poisoned"))?;
+            (
+                store.setting(&format!("thread_model:{id}"))?,
+                store.setting(&format!("thread_reasoning:{id}"))?,
             )
-            .await
-        {
+        };
+        let thread = ProviderThread {
+            id: m.provider_thread_id.clone(),
+        };
+        let started = match pinned_model {
+            Some(model) => {
+                self.provider
+                    .start_turn_with_reasoning(&thread, text, &model, pinned_effort.as_deref())
+                    .await
+            }
+            None => self.provider.start_turn(&thread, text).await,
+        };
+        match started {
             Ok(turn) => {
                 self.store
                     .lock()

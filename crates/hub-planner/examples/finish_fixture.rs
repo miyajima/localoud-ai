@@ -166,6 +166,7 @@ pub async fn finish(root: std::path::PathBuf) -> Result<()> {
                 .await?,
         );
         let astra = Astra {
+            reasoning: None,
             mode: AstraAccessMode::CodexIntegrated,
             provider: p.clone(),
             root: root.clone(),

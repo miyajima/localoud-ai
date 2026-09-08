@@ -36,4 +36,4 @@ Open a project folder with **⌘O** or the sidebar ＋. **⌘N** starts a new ta
 
 [The UX comparison](docs/UX_COMPARISON.md) lists 24 differences and the 19 adopted or partially adopted improvements, including native folder/file selection, rename/search/pin, safe Markdown, readable diffs and plan previews. Project registration still requires an existing Git repository.
 
-モデル名での選択・ローカルモデルの差し替え手順は [MODEL_CONFIGURATION.md](docs/MODEL_CONFIGURATION.md) を参照してください。
+モデル名・Reasoning の選択とローカルモデルの差し替えは [MODEL_CONFIGURATION.md](docs/MODEL_CONFIGURATION.md)、5段階の自動振り分けは [AUTO_ROUTING.md](docs/AUTO_ROUTING.md) を参照してください。

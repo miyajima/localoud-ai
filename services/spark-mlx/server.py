@@ -22,7 +22,7 @@ class Message(BaseModel):
 class GenerationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     model: str | None = None
-    task: Literal["route", "draft_context", "implement", "summarize", "review", "retrieval_query", "memory_extract"]
+    task: Literal["route", "difficulty", "draft_context", "implement", "summarize", "review", "retrieval_query", "memory_extract"]
     messages: list[Message] = Field(min_length=1, max_length=20)
     output_schema: dict = Field(alias="schema")
     max_tokens: int = Field(default=512, ge=1, le=4096)

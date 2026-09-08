@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 pub struct Settings {
     pub mode: AstraAccessMode,
     pub model: String,
+    #[serde(default)]
+    pub reasoning: Option<String>,
 }
 #[tauri::command]
 pub fn astra_settings(state: tauri::State<AppState>) -> Result<Settings, String> {
@@ -22,11 +24,15 @@ fn settings(state: &AppState) -> Result<Settings, String> {
         None => Ok(Settings {
             mode: AstraAccessMode::Disabled,
             model: "gpt-6-astra".into(),
+            reasoning: None,
         }),
     }
 }
 #[tauri::command]
-pub fn set_astra_settings(config: Settings, state: tauri::State<AppState>) -> Result<(), String> {
+pub async fn set_astra_settings(
+    config: Settings,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     if !matches!(
         config.mode,
         AstraAccessMode::Disabled | AstraAccessMode::CodexIntegrated
@@ -38,6 +44,13 @@ pub fn set_astra_settings(config: Settings, state: tauri::State<AppState>) -> Re
     }
     if config.model.trim().is_empty() {
         return Err("モデル ID が必要です。".into());
+    }
+    if matches!(config.mode, AstraAccessMode::CodexIntegrated) {
+        crate::models::codex_provider(&state)
+            .await?
+            .validate_model_reasoning(&config.model, config.reasoning.as_deref())
+            .await
+            .map_err(|e| e.to_string())?;
     }
     state
         .store
@@ -84,6 +97,7 @@ async fn adapter_with_config(
         .ok_or("project not found")?
         .root;
     Ok(Astra {
+        reasoning: config.reasoning,
         mode: config.mode,
         model: config.model,
         provider,
@@ -95,6 +109,7 @@ pub async fn create_astra_plan(
     project_id: String,
     goal: String,
     model: String,
+    reasoning: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<ExecutionPlan, String> {
     let id = ProjectId(project_id.parse().map_err(|_| "invalid project ID")?);
@@ -103,6 +118,7 @@ pub async fn create_astra_plan(
         Settings {
             mode: AstraAccessMode::CodexIntegrated,
             model,
+            reasoning,
         },
         &state,
     )

@@ -179,6 +179,18 @@ impl LocalModelProvider for SparkProvider {
         self.health().await?;
         Ok(())
     }
+    async fn assess_difficulty(
+        &self,
+        input: &RoutingInput,
+    ) -> Result<Generation<DifficultyAssessment>> {
+        self.generate(
+            "difficulty",
+            difficulty_prompt(input)?,
+            difficulty_schema(),
+            800,
+        )
+        .await
+    }
     async fn classify_task(&self, input: &RoutingInput) -> Result<Generation<RoutingDecision>> {
         let schema = object(
             json!({"executor":{"enum":["spark","codex","astra"]},"complexity":{"enum":["trivial","normal","deep"]},"risk":{"enum":["low","medium","high"]},"needs_plan":{"type":"boolean"},"needs_final_astra_review":{"type":"boolean"},"estimated_scope":object(json!({"files":{"type":"integer","minimum":0},"loc":{"type":"integer","minimum":0}}),&["files","loc"]),"confidence":{"type":"number","minimum":0,"maximum":1},"reason":{"type":"string","maxLength":1000}}),

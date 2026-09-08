@@ -3,6 +3,7 @@ name = "hub-router"
 version.workspace = true
 edition.workspace = true
 [dependencies]
+serde.workspace = true
 anyhow.workspace = true
 hub-core.workspace = true
 protocol-types = { path = "../protocol-types" }

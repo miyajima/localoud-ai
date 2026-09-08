@@ -90,6 +90,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+ "tempfile",
  "tokio",
 ]
 
@@ -1779,6 +1780,7 @@ dependencies = [
  "hub-core",
  "protocol-types",
  "provider-spark",
+ "serde",
  "tokio",
 ]
 
