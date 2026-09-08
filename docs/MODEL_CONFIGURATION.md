@@ -30,7 +30,7 @@
 | 接続先 | `http://127.0.0.1:8765` |
 | 量子化ビット数 | 8 |
 
-Astra Hub の「接続設定 → ローカルモデル」で変更します。保存前に接続先の `/health` が返す ID・ビット数・ready 状態を照合します。設定はアプリの SQLite に保存され、アプリ再起動後に反映されます。推論結果でもモデル ID とビット数を照合し、使用量は設定された実モデル ID で記録します。
+Astra Hub の「接続設定 → ローカルモデル」で変更します。保存前に接続先の `/health` が返す ID・ready 状態を照合し、量子化ビット数を自動取得します。ビット数は手入力しません。取得値は実行時のモデル照合に使用し、量子化や推論品質を変更する設定ではありません。設定はアプリの SQLite に保存され、アプリ再起動後に反映されます。推論結果でもモデル ID とビット数を照合し、使用量は設定された実モデル ID で記録します。
 
 ループバック HTTP 接続のみ対応します。URL に認証情報は入れられません。認証情報を使う別形式のプロバイダーには専用アダプターが必要です。
 
@@ -58,7 +58,7 @@ LOCAL_MODEL_CONFIG=/absolute/path/to/model.json \
   services/spark-mlx/.venv/bin/python services/spark-mlx/server.py
 ```
 
-サービスが ready になったら、アプリ側の表示名・モデル ID・ビット数を合わせて保存し、Astra Hub を再起動します。別ポートで並行して準備する場合は `SPARK_PORT` を指定し、アプリの接続先も合わせます。
+サービスが ready になったら、アプリ側の表示名・モデル IDを合わせて保存し、Astra Hub を再起動します。別ポートで並行して準備する場合は `SPARK_PORT` を指定し、アプリの接続先も合わせます。
 
 汎用 MLX-LM 経路は config.json のビット数、重み shard の存在、strict load を確認します。Spark のような配布元 checksum 検証は追加モデルには自動で付きません。モデルコードの `trust_remote_code` は無効です。新しいモデルの生成品質・JSON 応答適合性・メモリ使用量は別途確認が必要です。今回、追加モデルのダウンロードや実モデル比較は行っていません。
 
@@ -71,7 +71,7 @@ LOCAL_MODEL_CONFIG=/absolute/path/to/model.json \
 - 成功応答 → `output`（要求 schema を満たす JSON）, `usage.prompt_tokens`, `usage.completion_tokens`, `latency_ms`, `model`, `quantization_bits`
 - `task` は `difficulty`, `route`, `draft_context`, `implement`, `summarize`, `review`, `retrieval_query`, `memory_extract`
 
-通常の OpenAI 互換 `/v1/chat/completions` をそのまま指定することはできません。この契約への変換アダプターが必要です。互換性のため内部 crate 名・永続 provider key は `spark` を保持しますが、表示・照合・使用量のモデル名は固定していません。
+OpenAI Responses API（`/v1/responses`）や通常の OpenAI 互換 `/v1/chat/completions` をそのまま指定することはできません。この契約への変換アダプターが必要です。互換性のため内部 crate 名・永続 provider key は `spark` を保持しますが、表示・照合・使用量のモデル名は固定していません。
 
 ## 今回の確認
 

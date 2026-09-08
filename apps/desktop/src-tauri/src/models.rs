@@ -1,6 +1,6 @@
 use crate::AppState;
 use provider_spark::{LocalServiceConfig, SparkProvider};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub fn read_local(store: &hub_db::Store) -> Result<LocalServiceConfig, String> {
@@ -14,17 +14,23 @@ pub fn read_local(store: &hub_db::Store) -> Result<LocalServiceConfig, String> {
 pub fn local_model_settings(state: tauri::State<AppState>) -> Result<LocalServiceConfig, String> {
     read_local(&*state.store.lock().map_err(|e| e.to_string())?)
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalSettingsInput {
+    pub endpoint: String,
+    pub model_id: String,
+    pub display_name: String,
+}
 #[tauri::command]
 pub async fn set_local_model_settings(
-    config: LocalServiceConfig,
+    config: LocalSettingsInput,
     state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    // Validate the actual loaded identity before saving; changes take effect on restart.
-    SparkProvider::configured(config.clone())
-        .map_err(|e| e.to_string())?
-        .health()
-        .await
-        .map_err(|e| format!("接続確認に失敗しました。保存していません: {e:#}"))?;
+) -> Result<LocalServiceConfig, String> {
+    // Discover loaded quantization, retaining strict identity checks at runtime.
+    let config =
+        SparkProvider::discover_config(config.endpoint, config.model_id, config.display_name)
+            .await
+            .map_err(|e| format!("接続確認に失敗しました。保存していません: {e:#}"))?;
     state
         .store
         .lock()
@@ -33,7 +39,8 @@ pub async fn set_local_model_settings(
             "local_model_settings",
             &serde_json::to_string(&config).map_err(|e| e.to_string())?,
         )
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(config)
 }
 #[derive(Serialize)]
 pub struct Choice {

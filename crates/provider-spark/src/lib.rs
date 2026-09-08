@@ -78,7 +78,34 @@ impl SparkProvider {
                 .build()?,
         })
     }
-    pub async fn health(&self) -> Result<Value> {
+    pub async fn discover_config(
+        endpoint: String,
+        model_id: String,
+        display_name: String,
+    ) -> Result<LocalServiceConfig> {
+        let provider = Self::configured(LocalServiceConfig {
+            endpoint,
+            model_id,
+            display_name,
+            ..Default::default()
+        })?;
+        let health = provider.read_health().await?;
+        provider.config_from_health(&health)
+    }
+    fn config_from_health(&self, health: &Value) -> Result<LocalServiceConfig> {
+        if health["status"] != "ready" || health["model"].as_str() != Some(&self.config.model_id) {
+            bail!("Local model service is not ready or model ID does not match");
+        }
+        let bits = health["quantization_bits"]
+            .as_u64()
+            .filter(|n| (1..=32).contains(n))
+            .ok_or_else(|| anyhow::anyhow!("Local service must report quantization_bits (1–32)"))?;
+        Ok(LocalServiceConfig {
+            quantization_bits: bits as u8,
+            ..self.config.clone()
+        })
+    }
+    async fn read_health(&self) -> Result<Value> {
         let v: Value = self
             .client
             .get(self.endpoint.join("/health")?)
@@ -87,6 +114,10 @@ impl SparkProvider {
             .error_for_status()?
             .json()
             .await?;
+        Ok(v)
+    }
+    pub async fn health(&self) -> Result<Value> {
+        let v = self.read_health().await?;
         if v["status"] != "ready" {
             bail!("Local model service is not ready");
         }
@@ -284,6 +315,17 @@ mod tests {
             .is_err());
         assert!(p.validate_identity("fixture/other", 8).is_err());
         assert_eq!(p.model_id(), "fixture/other");
+    }
+    #[test]
+    fn detects_loaded_bits_without_changing_the_model() {
+        let p = SparkProvider::new("http://127.0.0.1:8765").unwrap();
+        let mut health = json!({"status":"ready","model":p.config.model_id,"quantization_bits":4});
+        assert_eq!(p.config_from_health(&health).unwrap().quantization_bits, 4);
+        health["quantization_bits"] = json!(0);
+        assert!(p.config_from_health(&health).is_err());
+        health["quantization_bits"] = json!(8);
+        health["model"] = json!("unexpected/model");
+        assert!(p.config_from_health(&health).is_err());
     }
     #[test]
     fn rejects_remote_endpoints() {
