@@ -213,6 +213,16 @@ impl Sessions {
         Ok(result)
     }
     pub async fn start(&self, id: HubThreadId, text: String) -> Result<ProviderTurn> {
+        self.start_with_options(id, text, protocol_types::composer::TurnOptions::default())
+            .await
+    }
+    pub async fn start_with_options(
+        &self,
+        id: HubThreadId,
+        text: String,
+        options: protocol_types::composer::TurnOptions,
+    ) -> Result<ProviderTurn> {
+        options.validate()?;
         if text.trim().is_empty() {
             bail!("task input is empty");
         }
@@ -236,6 +246,17 @@ impl Sessions {
                 bail!("thread already has an active turn; use steer");
             }
         }
+        if !options.is_empty() {
+            let store = self
+                .store
+                .lock()
+                .map_err(|_| anyhow!("database lock poisoned"))?;
+            anyhow::ensure!(
+                store.setting(&format!("thread_model:{id}"))?.is_some(),
+                "この既存タスクにはモデル指定がありません。新規タスクを作成してください。"
+            );
+        }
+        let requested_mode = options.mode;
         let intent = self
             .store
             .lock()
@@ -258,7 +279,13 @@ impl Sessions {
         let started = match pinned_model {
             Some(model) => {
                 self.provider
-                    .start_turn_with_reasoning(&thread, text, &model, pinned_effort.as_deref())
+                    .start_turn_with_options(
+                        &thread,
+                        text,
+                        &model,
+                        pinned_effort.as_deref(),
+                        options,
+                    )
                     .await
             }
             None => self.provider.start_turn(&thread, text).await,
@@ -269,6 +296,15 @@ impl Sessions {
                     .lock()
                     .map_err(|_| anyhow!("database lock poisoned"))?
                     .resolve_turn_intent(&intent, Some(&turn.id), &turn.status)?;
+                if let Some(mode) = requested_mode {
+                    self.store
+                        .lock()
+                        .map_err(|_| anyhow!("database lock poisoned"))?
+                        .set_setting(
+                            &format!("thread_mode:{id}"),
+                            &serde_json::to_string(&mode)?,
+                        )?;
+                }
                 state.active = Some(turn.clone());
                 state.reconciled = true;
                 // Lifecycle status is journaled by the event sink. Do not overwrite

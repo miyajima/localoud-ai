@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod astra;
 mod auto_routing;
+mod composer;
 mod memory;
 mod models;
 mod plans;
@@ -570,6 +571,18 @@ fn main() {
             auto_routing::preview_auto_route,
             auto_routing::revise_auto_route,
             models::thread_reasoning,
+            composer::composer_catalog,
+            composer::composer_files,
+            composer::send_composed_turn,
+            composer::composer_thread_state,
+            composer::answer_composer_question,
+            composer::pause_composer_goal,
+            composer::prompt_history,
+            composer::remember_prompt,
+            composer::clear_prompt_history,
+            composer::completion_settings,
+            composer::set_completion_settings,
+            composer::complete_prompt,
             models::available_models,
             models::local_model_settings,
             models::set_local_model_settings,

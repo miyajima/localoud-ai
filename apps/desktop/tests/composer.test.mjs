@@ -1,0 +1,40 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {JSDOM} from 'jsdom';
+import {triggerAt,historySuffix,canAcceptSuffix} from '../src/composer-model.ts';
+import {readFile} from 'node:fs/promises';
+import ts from 'typescript';
+const source=(await readFile(new URL('../src/composer.ts',import.meta.url),'utf8')).replaceAll("'./composer-model'",JSON.stringify(new URL('../src/composer-model.ts',import.meta.url).href)).replaceAll("'./model-controls'",JSON.stringify(new URL('../src/model-controls.ts',import.meta.url).href));
+const {outputText}=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}});
+const {setupComposer}=await import('data:text/javascript;base64,'+Buffer.from(outputText).toString('base64'));
+test('triggers exclude email addresses and preserve Unicode cursor positions',()=>{
+ assert.equal(triggerAt('mail@example.com',16),null);
+ assert.deepEqual(triggerAt('調べて @src',8),{start:4,end:8,sigil:'@',query:'src'});
+ assert.equal(triggerAt('https://example.com',19),null);
+ assert.equal(historySuffix('修正',['修正してください','他の依頼']),'してください');
+ assert.equal(canAcceptSuffix('old','new','p:t','p:t',3),false);
+ assert.equal(canAcceptSuffix('same','same','p:t','q:t',4),false);
+});
+test('skill selection carries metadata, IME Enter does not accept, and history is opt-in per candidate',async()=>{
+ const dom=new JSDOM('<main><section id="content"></section><div class="compose"><textarea id="task-input"></textarea></div></main>',{url:'https://fixture.local'});
+ globalThis.document=dom.window.document;globalThis.HTMLSelectElement=dom.window.HTMLSelectElement;dom.window.HTMLElement.prototype.scrollIntoView=function(){};
+ let saved=0,mode='implement';const calls=[];
+ const deps={call:async(command)=>{calls.push(command);if(command==='completion_settings')return {enabled:false,model:'gpt-5.6-luna',reasoning:'none'};if(command==='prompt_history')return ['修正してください'];if(command==='composer_catalog')return {entries:[{kind:'skill',name:'test-skill',label:'Test',description:'Fixture',path:'/fixture/SKILL.md'}],modes:['plan'],warnings:[]};return [];},project:()=> 'p',thread:()=>null,busy:()=>false,running:()=>false,codex:()=>false,mode:()=>mode,setMode:v=>{mode=v;return true;},models:()=>[],changed:()=>{saved++;},notice:()=>{},error:message=>{throw Error(message);}};
+ const c=setupComposer(deps);c.syncContext();await new Promise(r=>setImmediate(r));
+ const input=document.querySelector('#task-input');input.value='/test';input.setSelectionRange(5,5);input.dispatchEvent(new dom.window.Event('input'));await new Promise(r=>setImmediate(r));
+ assert.match(document.querySelector('#composer-menu').textContent,/test-skill/);
+ input.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true}));assert.equal(c.getMentions().length,0);
+ input.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));assert.deepEqual(c.getMentions(),[{kind:'skill',name:'test-skill',path:'/fixture/SKILL.md'}]);assert.equal(input.value,'');
+ input.value='修正';input.setSelectionRange(2,2);input.dispatchEvent(new dom.window.Event('input'));assert.equal(input.value,'修正');assert.equal(document.querySelector('#composer-suffix').hidden,false);
+ input.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));assert.equal(input.value,'修正してください');assert.ok(saved>0);assert.ok(!calls.includes('complete_prompt'));
+ dom.window.close();
+});
+test('late AI completion cannot cross project or replace edited input',async()=>{
+ const dom=new JSDOM('<main><section id="content"></section><div><textarea id="task-input"></textarea></div></main>',{url:'https://fixture.local'});
+ globalThis.document=dom.window.document;dom.window.HTMLElement.prototype.scrollIntoView=function(){};
+ let project='p',resolve;const errors=[];
+ const c=setupComposer({call:async command=>{if(command==='completion_settings')return {enabled:true,model:'gpt-5.6-luna',reasoning:'low'};if(command==='complete_prompt')return new Promise(r=>{resolve=r;});return [];},project:()=>project,thread:()=>null,busy:()=>false,running:()=>false,codex:()=>false,mode:()=> 'implement',setMode:()=>true,models:()=>[],changed:()=>{},notice:()=>{},error:x=>errors.push(x)});
+ c.syncContext();await new Promise(r=>setImmediate(r));const input=document.querySelector('#task-input');input.value='修正してください';input.setSelectionRange(input.value.length,input.value.length);
+ input.dispatchEvent(new dom.window.KeyboardEvent('keydown',{ctrlKey:true,code:'Space',bubbles:true,cancelable:true}));await new Promise(r=>setImmediate(r));assert.equal(typeof resolve,'function');
+ project='q';c.syncContext();input.value='別の依頼';resolve('。まず確認を');await new Promise(r=>setImmediate(r));assert.equal(document.querySelector('#composer-suffix').hidden,true);assert.equal(input.value,'別の依頼');assert.deepEqual(errors,[]);dom.window.close();
+});

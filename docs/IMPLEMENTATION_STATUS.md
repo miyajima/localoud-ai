@@ -47,3 +47,5 @@ Latest checks: 42 Rust tests, 9 frontend tests, 4 Python service tests passed; w
 ## Desktop UX follow-up
 
 [UX comparison and verification](UX_COMPARISON.md): native project/file chooser, keyboard commands, search/pin/rename, local drafts/workspace restoration, sanitized Markdown, diff colors/copy, plan preview and interaction feedback are implemented. Four frontend safety/rendering tests and three hub-db tests passed; workspace clippy and the macOS bundle build passed. Native UI checks include registration/cancel, search, rename/pin, restart/draft restoration and final layout. Codex Desktop's comparison baseline is official documentation; its UI could not be controlled under this environment's Computer Use policy.
+
+入力欄のスラッシュコマンド、メンション、プランモード、履歴補完は [COMPOSER.md](COMPOSER.md) を参照してください。

@@ -82,11 +82,27 @@ pub trait CodingAgentProvider: Send + Sync {
         }
         self.start_turn(thread, text).await
     }
+    async fn start_turn_with_options(
+        &self,
+        thread: &ProviderThread,
+        text: String,
+        model: &str,
+        effort: Option<&str>,
+        options: composer::TurnOptions,
+    ) -> Result<ProviderTurn> {
+        anyhow::ensure!(
+            options.is_empty(),
+            "Composer extensions are unavailable for this provider"
+        );
+        self.start_turn_with_reasoning(thread, text, model, effort)
+            .await
+    }
     async fn steer_turn(&self, turn: &ProviderTurn, text: String) -> Result<()>;
     async fn interrupt_turn(&self, turn: &ProviderTurn) -> Result<()>;
     fn events(&self) -> broadcast::Receiver<AgentEvent>;
 }
 
+pub mod composer;
 pub mod local;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -30,7 +30,9 @@ pub struct CodexProvider {
     events: broadcast::Sender<AgentEvent>,
     alive: Arc<AtomicBool>,
     handlers: Arc<Mutex<HashMap<String, Arc<dyn AgentTool>>>>,
+    questions: Arc<Mutex<HashMap<String, composer::PendingQuestion>>>,
 }
+pub mod composer;
 impl CodexProvider {
     pub async fn spawn(binary: &str) -> Result<Self> {
         Self::spawn_command(binary, &["app-server", "--listen", "stdio://"]).await
@@ -78,6 +80,9 @@ impl CodexProvider {
         let handlers: Arc<Mutex<HashMap<String, Arc<dyn AgentTool>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let handler_map = handlers.clone();
+        let questions: Arc<Mutex<HashMap<String, composer::PendingQuestion>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let question_map = questions.clone();
         let models: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
         let (p, tx, input, life) = (
             pending.clone(),
@@ -135,6 +140,44 @@ impl CodexProvider {
                 }
                 if v.get("method").is_some() {
                     if let Some(id) = v.get("id") {
+                        if v["method"] == "item/tool/requestUserInput" {
+                            let params = &v["params"];
+                            if let (Some(thread), Some(turn), Some(items)) = (
+                                params["threadId"].as_str(),
+                                params["turnId"].as_str(),
+                                params["questions"].as_array(),
+                            ) {
+                                if !items.is_empty()
+                                    && items.len() <= 3
+                                    && items
+                                        .iter()
+                                        .all(|q| q["id"].is_string() && q["question"].is_string())
+                                {
+                                    question_map.lock().await.insert(
+                                        id.to_string(),
+                                        composer::PendingQuestion {
+                                            request_id: id.to_string(),
+                                            thread_id: thread.into(),
+                                            turn_id: turn.into(),
+                                            questions: items.clone(),
+                                        },
+                                    );
+                                    let _ = dispatch(
+                                        &tx,
+                                        sink.as_ref(),
+                                        AgentEvent {
+                                            details: None,
+                                            thread_id: Some(thread.into()),
+                                            turn_id: Some(turn.into()),
+                                            item_id: None,
+                                            kind: "input_required".into(),
+                                            text: "確認質問への回答を待っています。".into(),
+                                        },
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
                         if v["method"] == "item/tool/call" {
                             let p = &v["params"];
                             let handler = handler_map
@@ -201,6 +244,12 @@ impl CodexProvider {
                             },
                         );
                     } else if let Some(mut e) = normalize(&v) {
+                        if e.kind == "turn_completed" {
+                            question_map.lock().await.retain(|_, q| {
+                                Some(q.thread_id.as_str()) != e.thread_id.as_deref()
+                                    || Some(q.turn_id.as_str()) != e.turn_id.as_deref()
+                            });
+                        }
                         if let Some(EventDetails::Usage { model, .. }) = &mut e.details {
                             *model = models
                                 .lock()
@@ -244,6 +293,7 @@ impl CodexProvider {
                     }
                 }
             }
+            question_map.lock().await.clear();
             life.store(false, Ordering::SeqCst);
             for (_, reply) in p.lock().await.drain() {
                 let _ = reply.send(Err(
@@ -273,6 +323,7 @@ impl CodexProvider {
             events,
             alive,
             handlers,
+            questions,
         };
         provider
             .request(
@@ -583,6 +634,22 @@ impl CodingAgentProvider for CodexProvider {
             status: v["turn"]["status"].as_str().unwrap_or("unknown").into(),
         })
     }
+    async fn start_turn_with_options(
+        &self,
+        thread: &ProviderThread,
+        text: String,
+        model: &str,
+        effort: Option<&str>,
+        options: protocol_types::composer::TurnOptions,
+    ) -> Result<ProviderTurn> {
+        if options.is_empty() {
+            return self
+                .start_turn_with_reasoning(thread, text, model, effort)
+                .await;
+        }
+        self.send_composer_turn(thread, text, model, effort, options)
+            .await
+    }
     async fn steer_turn(&self, turn: &ProviderTurn, text: String) -> Result<()> {
         self.request("turn/steer",json!({"threadId":turn.thread_id,"expectedTurnId":turn.id,"input":[{"type":"text","text":text}]})).await?;
         Ok(())
@@ -693,6 +760,9 @@ fn normalize(v: &Value) -> Option<AgentEvent> {
     };
     let (kind, text) = match method {
         "thread/tokenUsage/updated" => ("usage", "Provider usage updated".into()),
+        "thread/goal/updated" | "thread/goal/cleared" => {
+            ("goal_updated", "ゴールの状態が更新されました。".into())
+        }
         "item/agentMessage/delta" => (
             "message_delta",
             p["delta"].as_str().unwrap_or("").to_owned(),

@@ -105,7 +105,7 @@ impl RoutingPolicy {
         .any(|w| text.contains(w))
         {
             if preference == ExecutorPreference::Spark {
-                bail!("この依頼には計画が必要です。モデルは切り替えていません。「計画する」で確認してください。");
+                bail!("この依頼には計画が必要です。モデルは切り替えていません。「プランモード」で確認してください。");
             }
             let mut d = decision(
                 ExecutorKind::Astra,
