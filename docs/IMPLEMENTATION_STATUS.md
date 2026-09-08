@@ -37,3 +37,7 @@ Reproduce a new full fixture with `ASTRA_LIVE_FIXTURE=1 cargo run -p hub-planner
 ## Final local checks
 
 Rust workspace: 31 tests passed; subsequent runtime recovery checks: 7 passed. Workspace clippy with warnings denied passed. TypeScript/Vite and the macOS debug `.app` bundle built successfully. Spark service tests: 2 passed. Latest native visual confirmation completed after unlocking the Mac: Plan/restart controls, restored worker history and Context ledger (195 initial + 71 retrieved / 4000), and the OrgBrain settings dialog were verified. An old plan without a runtime envelope returned a visible no-recoverable-plan error without dispatch. Fixed clipped dialog actions and viewport overflow, rebuilt the macOS bundle, and verified all dialog fields/actions fit. Auto-storage remained unchecked; no credentials were entered or saved. Live crash recovery of an active whole DAG remains distinct from these UI checks.
+
+## Desktop UX follow-up
+
+[UX comparison and verification](UX_COMPARISON.md): native project/file chooser, keyboard commands, search/pin/rename, local drafts/workspace restoration, sanitized Markdown, diff colors/copy, plan preview and interaction feedback are implemented. Four frontend safety/rendering tests and three hub-db tests passed; workspace clippy and the macOS bundle build passed. Native UI checks include registration/cancel, search, rename/pin, restart/draft restoration and final layout. Codex Desktop's comparison baseline is official documentation; its UI could not be controlled under this environment's Computer Use policy.

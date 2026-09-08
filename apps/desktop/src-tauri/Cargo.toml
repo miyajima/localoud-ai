@@ -25,3 +25,5 @@ hub-planner = { path = "../../../crates/hub-planner" }
 hub-memory = { path = "../../../crates/hub-memory" }
 keyring = { version = "3", features = ["apple-native"] }
 hub-policy = { path = "../../../crates/hub-policy" }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"

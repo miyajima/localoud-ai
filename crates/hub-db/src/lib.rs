@@ -103,6 +103,20 @@ impl Store {
         self.conn.execute("INSERT INTO provider_threads(id,project_id,provider,provider_thread_id,title,status) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=CURRENT_TIMESTAMP",params![t.id.to_string(),t.project_id.to_string(),t.provider,t.provider_thread_id,t.title,t.status])?;
         Ok(())
     }
+    pub fn rename_thread(&self, id: HubThreadId, title: &str) -> Result<()> {
+        let title = title.trim();
+        if title.is_empty() || title.chars().count() > 120 || title.chars().any(char::is_control) {
+            bail!("タスク名は改行を含まない1〜120文字で入力してください。");
+        }
+        if self.conn.execute(
+            "UPDATE provider_threads SET title=?1 WHERE id=?2",
+            params![title, id.to_string()],
+        )? != 1
+        {
+            bail!("タスクが見つかりません。");
+        }
+        Ok(())
+    }
     pub fn save_plan(&self, id: hub_core::PlanId, project: ProjectId, body: &str) -> Result<()> {
         self.conn.execute(
             "INSERT INTO plans(id,project_id,body) VALUES (?1,?2,?3)",
@@ -531,6 +545,12 @@ mod tests {
             s.update_provider_status("remote", status, Some(turn))?;
         }
         assert_eq!(s.threads()?[0].status, "inProgress");
+        s.rename_thread(t.id, "  確認済みタスク  ")?;
+        s.save_thread(&t)?; // Provider lifecycle updates must preserve the operator's title.
+        assert_eq!(s.threads()?[0].title, "確認済みタスク");
+        assert!(s.rename_thread(t.id, "\n").is_err());
+        assert_eq!(s.threads()?[0].title, "確認済みタスク");
+
         let details = protocol_types::EventDetails::Usage {
             model: Some("fixture".into()),
             last_input_tokens: 100,

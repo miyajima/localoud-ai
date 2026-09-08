@@ -2,6 +2,7 @@
 mod astra;
 mod memory;
 mod plans;
+mod workspace_ui;
 use hub_core::{ExecutorKind, ExecutorPreference, ModelUsageRecord};
 use hub_core::{HubThreadId, Project, ProjectId, ThreadMapping};
 use hub_db::Store;
@@ -402,6 +403,8 @@ fn parse_thread(id: String) -> Result<HubThreadId, String> {
 }
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -439,6 +442,9 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            workspace_ui::choose_path,
+            workspace_ui::open_web_link,
+            workspace_ui::rename_thread,
             memory::extract_memory,
             memory::orgbrain_settings,
             memory::set_orgbrain_settings,

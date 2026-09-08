@@ -1,3 +1,4 @@
+import { markdown, diffMarkup, statusLabel, planPreview } from './presentation';
 import {setupMemory,memoryPanel,bindMemory} from './memory';
 import type {Capture} from './memory';
 import { invoke as nativeInvoke, isTauri } from '@tauri-apps/api/core';
@@ -21,45 +22,69 @@ type View = { messages: ChatMessage[]; events: JournalEvent[]; diff: string; run
 let projects: Project[] = [], threads: Thread[] = [], activeProject: string | null = null, activeThread: string | null = null;
 const views = new Map<string, View>();
 const tabs = ['Chat', 'Plan', 'Diff', 'Agents', 'Terminal', 'Context', 'Usage'];
+let taskFilter = '';
+let picking = false;
+type Draft = {text:string;files:string;preference:string};
+type UiState = {project?:string|null;thread?:string|null;tab?:string;sidebarHidden?:boolean;pins?:string[];drafts?:Record<string,Draft>;plans?:Record<string,string>};
+let ui: UiState = {};
+try { ui = JSON.parse(localStorage.getItem('astra-ui-v1') || '{}') || {}; } catch { ui = {}; }
+if(!ui || typeof ui!=='object' || Array.isArray(ui))ui={};
+if(!ui.drafts || typeof ui.drafts!=='object' || Array.isArray(ui.drafts))ui.drafts={};
+if(!ui.plans || typeof ui.plans!=='object' || Array.isArray(ui.plans))ui.plans={};
+if(!Array.isArray(ui.pins))ui.pins=[];
+
 type Usage = { provider:string; model:string; prompt_tokens:number|null; completion_tokens:number|null; cached_tokens:number|null; latency_ms:number|null };
 let usage:Usage[]=[];
 type GraphTask = {id:string;title:string;description:string;status:string;dependencies:string[];worktree_id:string|null};
 type ContextInspection = {initial_tokens:number;retrieved_tokens:number;current_estimate:number;parent_conversation_inherited:boolean;capsule:{goal:string;budget:{max_total_tokens:number};items:{source:string;reference:string;text:string}[]};retrievals:{source:string;query:string;token_estimate:number;result_ref:string}[]};
 let graph:GraphTask[]=[];
 let planText=JSON.stringify({title:'実装計画',steps:[{key:'implementation',title:'実装と検証',goal:'ここに具体的な実装内容を記入',dependencies:[],brief:{acceptance_criteria:['ここに合格条件を記入'],constraints:['公開 API を変更しない'],context_items:[],budget:{initial_tokens:6000,max_total_tokens:24000,max_single_retrieval_tokens:2000}}}]},null,2);
+const defaultPlanText=planText;
 let activeTab = 'Chat', busy = false;
+let renderedContentKey='';
 const app = document.querySelector<HTMLDivElement>('#app')!;
-app.innerHTML = `<aside><div class="brand"><span class="mark">✳</span> Astra Hub <small>LOCAL WORKSPACE</small></div><button id="new" class="new">＋ 新しいタスク</button><div class="section-title">PROJECTS <button id="add" aria-label="プロジェクトを登録">＋</button></div><div id="projects"></div><div class="section-title">TASKS</div><div id="threads"></div><button id="settings" class="settings">接続設定</button><div class="sidebar-bottom"><span class="dot"></span> Local-first <small>Context stays intentional.</small></div></aside><main><header><div><span class="eyebrow">WORKSPACE</span><h1 id="project-title">プロジェクトを開く</h1></div><div class="header-actions"><span id="status" class="badge">Codex app-server</span><button id="resume" hidden>再開・状態を確認</button></div></header><nav aria-label="ワークスペースの表示">${tabs.map(t => `<button data-tab="${t}">${t}</button>`).join('')}</nav><div id="error" role="alert" hidden></div><section id="content" aria-live="polite"></section><footer><div class="compose"><textarea id="task-input" aria-label="タスクの指示" placeholder="実装したいことを入力…"></textarea><div class="compose-controls"><div class="executor-controls"><label for="preference">実行先</label><select id="preference"><option value="auto">Auto</option><option value="spark">Spark 8bit</option><option value="codex">Codex</option><option value="astra">Astra</option></select><input id="known-files" aria-label="対象ファイル" placeholder="対象ファイル（例: src/main.rs）"></div><div><button id="stop" hidden>停止</button><button id="send" class="primary">実行 ↑</button></div></div></div><div class="footnote">Astra plans. Codex builds. You stay in control.</div></footer></main><dialog id="register"><form><h2>プロジェクトを登録</h2><p>ローカル Git リポジトリのルートを指定してください。</p><label for="path">フォルダの絶対パス</label><input id="path" required placeholder="/Users/you/projects/my-app"><p id="form-error" role="alert"></p><div class="dialog-actions"><button type="button" id="cancel">キャンセル</button><button class="primary" type="submit">登録する</button></div></form></dialog><dialog id="connection-settings"><form id="settings-form"><h2>接続設定</h2><p>デスクトップアプリから使う Codex 実行ファイルを指定します。</p><label for="codex-path">Codex 実行ファイルの絶対パス</label><input id="codex-path" required placeholder="/opt/homebrew/bin/codex"><label for="astra-mode">Astra の利用経路</label><select id="astra-mode"><option value="disabled">無効（手動計画）</option><option value="codex_integrated">Codex 認証を利用</option></select><label for="astra-model">Astra モデル ID</label><input id="astra-model" value="gpt-6-astra"><p>直接 API の課金設定とは別です。</p><p id="settings-error" role="alert"></p><div class="dialog-actions"><button type="button" id="settings-cancel">閉じる</button><button type="submit" class="primary">保存する</button></div></form></dialog>`;
+app.innerHTML = `<aside><div class="brand"><span class="mark">✳</span> Astra Hub <small>LOCAL WORKSPACE</small></div><button id="new" class="new" title="新しいタスク ⌘N">＋ 新しいタスク <kbd>⌘N</kbd></button><button id="command-menu" class="command-trigger">タスク・操作を検索 <kbd>⌘K</kbd></button><div class="section-title">PROJECTS <button id="add" aria-label="フォルダを開く" title="フォルダを開く ⌘O">＋</button></div><div id="projects"></div><div class="section-title">TASKS</div><input id="task-filter" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="タスクを絞り込む" placeholder="タスクを絞り込む"><div id="threads"></div><button id="settings" class="settings">接続設定</button><div class="sidebar-bottom"><span class="dot"></span> Local-first <small>Context stays intentional.</small></div></aside><main><header><div><span class="eyebrow">WORKSPACE</span><h1 id="project-title">プロジェクトを開く</h1><button id="project-path" class="project-path" title="フォルダのパスをコピー"></button></div><div class="header-actions"><button id="sidebar-toggle" title="サイドバーを切り替え ⌘B" aria-label="サイドバーを切り替え">☰</button><button id="rename-task" title="タスク名を変更" hidden>名前を変更</button><span id="status" class="badge">Codex app-server</span><button id="resume" hidden>再開・状態を確認</button></div></header><nav aria-label="ワークスペースの表示">${tabs.map(t => `<button data-tab="${t}">${t}</button>`).join('')}</nav><div id="error" role="alert" hidden></div><div id="notice" role="status" hidden></div><section id="content" aria-live="polite"></section><footer><div class="compose"><textarea id="task-input" aria-label="タスクの指示" placeholder="実装したいことを入力…"></textarea><div class="compose-controls"><div class="executor-controls"><label for="preference">実行先</label><select id="preference"><option value="auto">Auto</option><option value="spark">Spark 8bit</option><option value="codex">Codex</option><option value="astra">Astra</option></select><input spellcheck="false" autocorrect="off" autocapitalize="off" id="known-files" aria-label="対象ファイル" placeholder="対象ファイル（例: src/main.rs）"></div><div><button id="stop" hidden>停止</button><button id="send" class="primary">実行 ↑</button></div></div></div><div class="footnote"><span id="draft-status"></span><span>⌘Enter で送信 · Enter で改行</span></div></footer></main><dialog id="register"><form><h2>プロジェクトを登録</h2><p>作業する Git リポジトリのフォルダを選択してください。</p><button id="browse-project" type="button" class="primary">フォルダを選択…</button><label for="path">フォルダの絶対パス</label><input spellcheck="false" autocorrect="off" autocapitalize="off" id="path" required placeholder="/Users/you/projects/my-app"><p id="form-error" role="alert"></p><div class="dialog-actions"><button type="button" id="cancel">キャンセル</button><button class="primary" type="submit">登録する</button></div></form></dialog><dialog id="connection-settings"><form id="settings-form"><h2>接続設定</h2><p>デスクトップアプリから使う Codex 実行ファイルを指定します。</p><label for="codex-path">Codex 実行ファイルの絶対パス</label><button id="browse-codex" type="button">ファイルを選択…</button><input spellcheck="false" autocorrect="off" autocapitalize="off" id="codex-path" required placeholder="/opt/homebrew/bin/codex"><label for="astra-mode">Astra の利用経路</label><select id="astra-mode"><option value="disabled">無効（手動計画）</option><option value="codex_integrated">Codex 認証を利用</option></select><label for="astra-model">Astra モデル ID</label><input id="astra-model" value="gpt-6-astra"><p>直接 API の課金設定とは別です。</p><p id="settings-error" role="alert"></p><div class="dialog-actions"><button type="button" id="settings-cancel">閉じる</button><button type="submit" class="primary">保存する</button></div></form></dialog>`;
+document.body.insertAdjacentHTML('beforeend', `<dialog id="commands" aria-label="タスク・操作を検索"><label for="command-query">タスク・操作を検索</label><input id="command-query" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="タスク名、プロジェクト名、操作…" autocomplete="off"><div id="command-results"></div><small>↑↓ で選択 · Enter で開く · Esc で閉じる</small></dialog><dialog id="rename-dialog"><form id="rename-form"><h2>タスク名を変更</h2><label for="task-name">タスク名</label><input id="task-name" required maxlength="120"><p id="rename-error" role="alert"></p><div class="dialog-actions"><button type="button" id="rename-cancel">キャンセル</button><button type="submit" class="primary">保存</button></div></form></dialog>`);
 const escape = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 function view(id: string): View { if (!views.has(id)) views.set(id, { messages: [], events: [], diff: '', running: false, needsResume: true, sequence: 0 }); return views.get(id)!; }
 function selectedView() { return activeThread ? view(activeThread) : null; }
-function error(message: string) { const el = document.querySelector<HTMLDivElement>('#error')!; el.hidden = !message; el.textContent = message; }
+function error(message: string) { if(message)notice(''); const el = document.querySelector<HTMLDivElement>('#error')!; el.hidden = !message; el.innerHTML = message ? `<span>${escape(message)}</span><button aria-label="エラーを閉じる" id="dismiss-error">×</button>` : ''; document.querySelector('#dismiss-error')?.addEventListener('click',()=>error('')); }
 function render() {
-  document.querySelector('#projects')!.innerHTML = projects.map(p => `<button class="project ${p.id === activeProject ? 'selected' : ''}" data-project="${p.id}">◈ <span>${escape(p.name)}</span></button>`).join('') || '<p class="muted side-empty">リポジトリを登録して<br>作業を始めましょう。</p>';
-  document.querySelector('#threads')!.innerHTML = threads.filter(t => t.project_id === activeProject).map(t => `<button class="thread ${t.id === activeThread ? 'selected' : ''}" data-thread="${t.id}">${escape(t.title)}<small>${escape(t.status)}</small></button>`).join('');
+  document.querySelector('#app')!.classList.toggle('sidebar-hidden',!!ui.sidebarHidden);
+  document.querySelector('#projects')!.innerHTML = projects.map(p => `<button class="project ${p.id === activeProject ? 'selected' : ''}" data-project="${p.id}" title="${escape(p.root)}">◈ <span>${escape(p.name)}</span></button>`).join('') || '<p class="muted side-empty">リポジトリを登録して<br>作業を始めましょう。</p>';
+  renderThreads();
+  const project = projects.find(p=>p.id===activeProject);
+  const path = document.querySelector<HTMLButtonElement>('#project-path')!; path.textContent=project?.root || ''; path.hidden=!project; path.title=`${project?.root || ''} — クリックでコピー`;
+  document.querySelector<HTMLButtonElement>('#rename-task')!.hidden=!activeThread;
   document.querySelector('#project-title')!.textContent = projects.find(p => p.id === activeProject)?.name || 'プロジェクトを開く';
-  document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b => { b.classList.toggle('active', b.dataset.tab === activeTab); b.onclick = () => { activeTab = b.dataset.tab!; render(); if(activeTab === 'Diff' && activeThread) void refreshDiff(activeThread); if(activeTab === 'Usage') void refreshUsage(); if(activeTab === 'Context' && activeThread) void refreshContext(activeThread); if(activeTab === 'Plan') void refreshGraph(); }; });
-  document.querySelectorAll<HTMLButtonElement>('[data-project]').forEach(b => b.onclick = () => { if (busy) return; activeProject = b.dataset.project!; activeThread = null; graph=[];render();if(activeTab==='Plan')void refreshGraph(); });
+  document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b => { b.classList.toggle('active', b.dataset.tab === activeTab); b.onclick = () => { activeTab = b.dataset.tab!; rememberSelection(); render(); if(activeTab === 'Diff' && activeThread) void refreshDiff(activeThread); if(activeTab === 'Usage') void refreshUsage(); if(activeTab === 'Context' && activeThread) void refreshContext(activeThread); if(activeTab === 'Plan') void refreshGraph(); }; });
+  document.querySelectorAll<HTMLButtonElement>('[data-project]').forEach(b => b.onclick = () => { switchProject(b.dataset.project!); });
   document.querySelectorAll<HTMLButtonElement>('[data-thread]').forEach(b => b.onclick = () => void selectThread(b.dataset.thread!));
   const v = selectedView();
   const current = threads.find(t=>t.id===activeThread);
   const providerLabel = current?.provider === 'spark' ? 'Spark 8bit' : 'Codex';
   (document.querySelector('#preference') as HTMLSelectElement).disabled = !!activeThread || busy;
   const status = document.querySelector('#status')!;
-  status.textContent = v?.needsResume ? '状態確認が必要' : v?.running ? `${providerLabel} · 実行中` : current ? providerLabel : 'Local workspace';
+  status.textContent = busy ? '処理中…' : v?.needsResume ? '状態確認が必要' : v?.running ? `${providerLabel} · 実行中` : current ? providerLabel : 'Local workspace';
   const resume = document.querySelector<HTMLButtonElement>('#resume')!; resume.hidden = !activeThread; resume.disabled = busy;
-  const send = document.querySelector<HTMLButtonElement>('#send')!; send.disabled = busy || !activeProject || !!v?.needsResume || !isTauri(); send.textContent = v?.running ? '追記を送る ↑' : '実行 ↑';
+  const send = document.querySelector<HTMLButtonElement>('#send')!; send.disabled = busy || !activeProject || !!v?.needsResume || !isTauri(); send.textContent = busy ? '処理中…' : v?.running ? '追記を送る ↑' : '実行 ↑';
   const stop = document.querySelector<HTMLButtonElement>('#stop')!; stop.hidden = !v?.running || current?.provider === 'spark'; stop.disabled = busy || !!v?.needsResume;
-  const input = document.querySelector<HTMLTextAreaElement>('#task-input')!; input.disabled = !activeProject || !isTauri(); input.placeholder = v?.running ? '実行中のタスクに追加の指示…' : '実装したいことを入力…';
+  const input = document.querySelector<HTMLTextAreaElement>('#task-input')!; input.disabled = busy || !activeProject || !isTauri(); input.placeholder = v?.running ? '実行中のタスクに追加の指示…' : '実装したいことを入力…';
   renderContent();
 }
 function renderContent() {
   const content = document.querySelector('#content')!, v = selectedView();
+  const key=`${activeProject}:${activeThread}:${activeTab}`, sameView=key===renderedContentKey;renderedContentKey=key;
+  const oldScroll = sameView?content.scrollTop:0, follow = !sameView || content.scrollHeight-content.clientHeight-oldScroll < 64;
+  const focused = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
+  const focusId = sameView && content.contains(focused) ? focused?.id : undefined;
+  const selection = focusId && (focused instanceof HTMLTextAreaElement || focused instanceof HTMLInputElement) ? [focused.selectionStart, focused.selectionEnd] : null;
+  const expanded = sameView ? Array.from(content.querySelectorAll<HTMLDetailsElement>('details[id][open]')).map(d=>d.id) : [];
   const current=threads.find(t=>t.id===activeThread), label=current?.provider==='spark'?'Spark 8bit':'Codex';
   if (activeTab === 'Chat') {
     if (!v?.messages.length) content.innerHTML = `<div class="welcome"><span class="big-mark">✳</span><h2>次の一歩を、ここから。</h2><p>${activeProject ? '下の入力欄から Codex に作業を依頼できます。<br>変更と実行ログは、隣のタブで確認できます。' : 'プロジェクト、エージェント、必要なコンテキスト。<br>ひとつのワークスペースで見通せます。'}</p>${!activeProject ? '<button class="primary" id="welcome-add">プロジェクトを登録</button>' : ''}</div>`;
-    else content.innerHTML = `<div class="conversation">${v.messages.map(m => `<article class="message ${m.role === 'user' ? 'user' : ''}"><div class="message-role">${m.role === 'user' ? 'あなた' : label}</div><div class="message-text">${escape(m.text)}</div></article>`).join('')}${v.running ? `<div class="working">● ${label} が作業中</div>` : ''}</div>`;
-  } else if (activeTab === 'Diff') content.innerHTML = v?.diff ? `<pre class="diff">${escape(v.diff)}</pre>` : '<div class="empty"><h2>変更を確認する</h2><p>まだ差分は届いていません。</p></div>';
+    else content.innerHTML = `<div class="conversation">${v.messages.map((m,index) => `<article class="message ${m.role === 'user' ? 'user' : ''}"><div class="message-role">${m.role === 'user' ? 'あなた' : label}<button class="copy-message" data-copy-message="${index}" title="本文をコピー">コピー</button></div><div class="message-text ${m.role === 'user' ? '' : 'markdown'}">${m.role === 'user' ? escape(m.text) : markdown(m.text)}</div></article>`).join('')}${v.running ? `<div class="working">● ${label} が作業中</div>` : ''}</div>`;
+  } else if (activeTab === 'Diff') content.innerHTML = v?.diff ? `<div class="diff-toolbar"><button id="refresh-diff">更新</button><button id="copy-diff">差分をコピー</button></div>${diffMarkup(v.diff)}` : '<div class="empty"><h2>変更を確認する</h2><p>変更がないか、まだ取得されていません。</p><button id="refresh-diff">差分を更新</button><p></p></div>';
   else if (activeTab === 'Terminal') content.innerHTML = v?.events.length ? `<div class="event-list">${v.events.filter(e => !['message_delta', 'message_completed'].includes(e.event.kind)).map(e => `<div class="event-row"><span>${escape(e.event.kind)}</span><pre>${escape(e.event.text)}</pre></div>`).join('')}</div>` : '<div class="empty"><h2>実行ログ</h2><p>ツールの実行と結果をここに表示します。</p></div>';
   else if (activeTab === 'Agents') content.innerHTML = `<div class="inspector"><span class="eyebrow">EXECUTION</span><h2>実行エージェント</h2>${activeThread ? `<div class="agent-card"><strong>${label}</strong><span>${v?.running ? '実行中' : v?.needsResume ? '状態確認待ち' : '待機中'}</span><p>${escape(threads.find(t => t.id === activeThread)?.title || '')}</p><small>${escape(v?.route || current?.provider || '')}</small><div class="agent-actions"><button id="summarize">進捗を要約</button><button id="first-review">一次レビュー</button><button id="final-review">Astra 最終レビュー</button><button id="diagnose">Astra 診断・設計相談</button></div>${v?.summary ? `<pre class="summary">${escape(v.summary)}</pre>` : ''}${v?.review ? `<pre class="summary">${escape(v.review)}</pre>` : ''}${v?.finalReview?`<h3>最終レビュー: ${escape(v.finalReview.verdict)}</h3><pre class="summary">${escape(v.finalReview.findings.join('\n'))}</pre>${v.finalReview.verdict==='rework'?'<button id="apply-rework">既存 worker に修正を戻す</button>':''}`:''}${v?.recovery?`<h3>診断: ${escape(v.recovery.action)}</h3><pre class="summary">${escape(v.recovery.reason+'\n'+v.recovery.instruction)}</pre>${v.recovery.action==='retry_worker'?'<button id="apply-recovery">診断の修正を既存 worker へ</button>':''}${v.recovery.replacement?'<button id="use-replan">再計画を Plan で確認</button>':''}`:''}</div>` : '<p>まだエージェントは起動していません。</p>'}</div>`;
   else if (activeTab === 'Context') {
@@ -68,18 +93,26 @@ function renderContent() {
     content.insertAdjacentHTML('beforeend',memoryPanel(v?.capture));if(activeThread)content.insertAdjacentHTML('beforeend','<div class="inspector"><button id="capture-memory">完了結果からメモリ候補を抽出</button></div>');
 
   }
-  else if(activeTab === 'Plan') content.innerHTML = `<div class="inspector"><span class="eyebrow">EXECUTION PLAN</span><h2>依存関係を確認して実行</h2><p>各ステップを独立した worktree で実行します。依存する成果の差分を受け取り、親ブランチへの統合は行いません。</p><button id="astra-plan">Astra で計画（下の指示欄を使用）</button><label for="plan-json">計画 JSON</label><textarea id="plan-json" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="計画 JSON" rows="16">${escape(planText)}</textarea><button id="run-plan" class="primary" ${!activeProject?'disabled':''}>計画を実行（最大2並列）</button><button id="resume-plan" ${!activeProject?'disabled':''}>保存済みの計画を再開</button><h3>タスクの状態</h3>${graph.map(t=>`<div class="agent-card"><strong>${escape(t.title)}</strong><span>${escape(t.status)}</span><p>依存: ${t.dependencies.map(id=>escape(graph.find(d=>d.id===id)?.title||id)).join(', ')||'なし'}</p><small>${escape(t.id)}</small></div>`).join('')||'<p>実行前です。</p>'}</div>`;
+  else if(activeTab === 'Plan') content.innerHTML = `<div class="inspector"><span class="eyebrow">EXECUTION PLAN</span><h2>依存関係を確認して実行</h2><p>各ステップを独立した worktree で実行します。依存する成果の差分を受け取り、親ブランチへの統合は行いません。</p><button id="astra-plan">Astra で計画（下の指示欄を使用）</button><div id="plan-preview-area">${planText===defaultPlanText?'<p>指示欄に実装したい内容を入力して計画を作成してください。手動で作成する場合は、下の詳細を開いて編集できます。</p>':planPreview(planText)}</div><details id="plan-source"><summary>詳細を編集（JSON）</summary><label for="plan-json">計画 JSON</label><textarea id="plan-json" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="計画 JSON" rows="16">${escape(planText)}</textarea></details><button id="run-plan" class="primary" ${!activeProject||planText===defaultPlanText?'disabled':''}>計画を実行（最大2並列）</button><button id="resume-plan" ${!activeProject?'disabled':''}>保存済みの計画を再開</button><h3>タスクの状態</h3>${graph.map(t=>`<div class="agent-card"><strong>${escape(t.title)}</strong><span>${escape(statusLabel(t.status))}</span><p>依存: ${t.dependencies.map(id=>escape(graph.find(d=>d.id===id)?.title||id)).join(', ')||'なし'}</p><small>${escape(t.id)}</small></div>`).join('')||'<p>実行前です。</p>'}</div>`;
   else if(activeTab === 'Usage') content.innerHTML = `<div class="inspector usage"><span class="eyebrow">MODEL USAGE</span><h2>保存済みの推論記録</h2><p>未取得の数値は — で表示します。失敗した推論の全使用量を含む集計ではありません。</p><table><thead><tr><th>モデル</th><th>入力</th><th>出力</th><th>キャッシュ</th><th>時間</th></tr></thead><tbody>${usage.map(u=>`<tr><td>${escape(u.model)}</td><td>${u.prompt_tokens??'—'}</td><td>${u.completion_tokens??'—'}</td><td>${u.cached_tokens??'—'}</td><td>${u.latency_ms===null?'—':(u.latency_ms/1000).toFixed(1)+' s'}</td></tr>`).join('')}</tbody></table></div>`;
   else content.innerHTML = `<div class="empty"><h2>${escape(activeTab)}</h2><p>${activeTab === 'Plan' ? '計画機能は Milestone F で接続します。' : 'プロバイダーの使用量はまだ集計していません。'}</p><span class="muted">未取得の数値はゼロとして扱いません。</span></div>`;
+  content.querySelectorAll<HTMLButtonElement>('button').forEach(b=>b.disabled ||= busy);
+  expanded.forEach(id=>{const d=document.getElementById(id);if(d instanceof HTMLDetailsElement)d.open=true;});
+  if(focusId){const next=document.getElementById(focusId);if(next instanceof HTMLInputElement || next instanceof HTMLTextAreaElement){next.focus({preventScroll:true});if(selection&&selection[0]!==null&&selection[1]!==null)next.setSelectionRange(selection[0],selection[1]);}}
+  content.scrollTop = activeTab==='Chat' && follow ? content.scrollHeight : oldScroll;
+  content.querySelectorAll<HTMLAnchorElement>('a').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();if(a.dataset.externalUrl)void invoke('open_web_link',{url:a.dataset.externalUrl}).catch(e=>error(String(e)));}));
+  content.querySelectorAll<HTMLButtonElement>('[data-copy-message]').forEach(b=>b.onclick=()=>void copyText(v?.messages[Number(b.dataset.copyMessage)]?.text || '',b));
+  document.querySelector('#refresh-diff')?.addEventListener('click',()=>{if(activeThread)void refreshDiff(activeThread);});
+  document.querySelector<HTMLButtonElement>('#copy-diff')?.addEventListener('click',e=>void copyText(v?.diff || '',e.currentTarget as HTMLButtonElement));
   bindMemory();
-  document.querySelector('#capture-memory')?.addEventListener('click',async()=>{if(!activeThread||busy)return;const id=activeThread;busy=true;try{await invoke('extract_memory',{threadId:id});await refreshContext(id);}catch(e){error(String(e));}finally{busy=false;}});
+  document.querySelector('#capture-memory')?.addEventListener('click',async()=>{if(!activeThread||busy)return;const id=activeThread;busy=true;render();try{await invoke('extract_memory',{threadId:id});await refreshContext(id);}catch(e){error(String(e));}finally{busy=false;}});
   document.querySelector('#astra-plan')?.addEventListener('click',()=>void astraPlan());
   document.querySelector('#final-review')?.addEventListener('click',()=>void astraInsight('final_review'));
   document.querySelector('#diagnose')?.addEventListener('click',()=>void astraInsight('diagnose_task'));
-  document.querySelector('#apply-recovery')?.addEventListener('click',async()=>{if(!activeThread||busy)return;busy=true;try{await invoke('apply_recovery',{threadId:activeThread});}catch(e){error(String(e));}finally{busy=false;render();}});
+  document.querySelector('#apply-recovery')?.addEventListener('click',async()=>{if(!activeThread||busy)return;busy=true;render();try{await invoke('apply_recovery',{threadId:activeThread});}catch(e){error(String(e));}finally{busy=false;render();}});
   document.querySelector('#apply-rework')?.addEventListener('click',()=>void applyRework());
-  document.querySelector('#use-replan')?.addEventListener('click',()=>{const p=selectedView()?.recovery?.replacement;if(p){planText=JSON.stringify(p,null,2);activeTab='Plan';render();}});
-  document.querySelector('#plan-json')?.addEventListener('input',e=>{planText=(e.target as HTMLTextAreaElement).value;});
+  document.querySelector('#use-replan')?.addEventListener('click',()=>{const p=selectedView()?.recovery?.replacement;if(p){planText=JSON.stringify(p,null,2);if(activeProject)ui.plans![activeProject]=planText;saveUi();activeTab='Plan';rememberSelection();render();}});
+  document.querySelector('#plan-json')?.addEventListener('input',e=>{planText=(e.target as HTMLTextAreaElement).value;if(activeProject){ui.plans![activeProject]=planText;saveUi();}const preview=document.getElementById('plan-preview-area');if(preview)preview.innerHTML=planPreview(planText);const run=document.querySelector<HTMLButtonElement>('#run-plan');if(run)run.disabled=busy||!activeProject||planText===defaultPlanText;});
   document.querySelector('#resume-plan')?.addEventListener('click',()=>void resumePlan());
   document.querySelector('#run-plan')?.addEventListener('click',()=>void runPlan());
   document.querySelector('#welcome-add')?.addEventListener('click', openDialog);
@@ -90,7 +123,7 @@ function applyEvent(record: JournalEvent, replay = false) {
   const e = record.event;
   if (!e.thread_id) {
     if(e.kind==='memory_unavailable')error(e.text);
-    if(['task_state','plan_finished','worker_assigned'].includes(e.kind)) {void refreshGraph();void refreshThreads();if(e.kind==='plan_finished')error(e.text);}
+    if(['task_state','plan_finished','worker_assigned'].includes(e.kind)) {void refreshGraph();void refreshThreads();if(e.kind==='plan_finished')notice(e.text);}
     if (['disconnected', 'protocol_error', 'persistence_error'].includes(e.kind)) { for (const v of views.values()) v.needsResume = true; error(e.text); render(); }
     return;
   }
@@ -115,13 +148,13 @@ function applyEvent(record: JournalEvent, replay = false) {
   if (thread.id === activeThread) render();
 }
 function knownFiles():string[] { return (document.querySelector('#known-files') as HTMLInputElement).value.split(',').map(s=>s.trim()).filter(Boolean); }
-async function astraPlan(){if(!activeProject||busy)return;const goal=(document.querySelector('#task-input') as HTMLTextAreaElement).value.trim();if(!goal){error('下の指示欄に、計画したい内容を入力してください。');return;}busy=true;error('');try{const p=await invoke('create_astra_plan',{projectId:activeProject,goal});planText=JSON.stringify(p,null,2);activeTab='Plan';}catch(e){error(String(e));}finally{busy=false;render();}}
-async function astraInsight(command:'final_review'|'diagnose_task'){if(!activeThread||busy)return;const id=activeThread;busy=true;error('');try{if(command==='final_review')view(id).finalReview=await invoke(command,{threadId:id});else view(id).recovery=await invoke(command,{threadId:id,question:(document.querySelector('#task-input') as HTMLTextAreaElement).value.trim()||null});}catch(e){error(String(e));}finally{busy=false;render();}}
-async function applyRework(){if(!activeThread||busy)return;busy=true;try{await invoke('apply_rework',{threadId:activeThread});}catch(e){error(String(e));}finally{busy=false;render();}}
+async function astraPlan(){if(!activeProject||busy)return;const goal=(document.querySelector('#task-input') as HTMLTextAreaElement).value.trim();if(!goal){error('下の指示欄に、計画したい内容を入力してください。');return;}busy=true;error('');render();try{const p=await invoke('create_astra_plan',{projectId:activeProject,goal});planText=JSON.stringify(p,null,2);if(activeProject)ui.plans![activeProject]=planText;saveUi();activeTab='Plan';rememberSelection();}catch(e){error(String(e));}finally{busy=false;render();}}
+async function astraInsight(command:'final_review'|'diagnose_task'){if(!activeThread||busy)return;const id=activeThread;busy=true;error('');render();try{if(command==='final_review')view(id).finalReview=await invoke(command,{threadId:id});else view(id).recovery=await invoke(command,{threadId:id,question:(document.querySelector('#task-input') as HTMLTextAreaElement).value.trim()||null});}catch(e){error(String(e));}finally{busy=false;render();}}
+async function applyRework(){if(!activeThread||busy)return;busy=true;render();try{await invoke('apply_rework',{threadId:activeThread});}catch(e){error(String(e));}finally{busy=false;render();}}
 async function refreshThreads() {try {threads=await invoke<Thread[]>('threads');render();}catch(e){error(String(e));}}
 async function refreshGraph() {if(!activeProject)return;try {const id=activeProject;const tasks=await invoke<GraphTask[]>('task_graph',{projectId:id});if(activeProject!==id)return;graph=tasks;if(activeTab==='Plan')renderContent();}catch(e){error(String(e));}}
 async function refreshContext(id:string) {try {view(id).context=await invoke<ContextInspection|null>('inspect_context',{threadId:id});view(id).capture=await invoke<Capture>('memory_candidates',{threadId:id});if(activeThread===id&&activeTab==='Context')renderContent();}catch(e){error(String(e));}}
-async function runPlan() {if(!activeProject||busy)return;busy=true;error('');try {graph=await invoke<GraphTask[]>('run_plan',{projectId:activeProject,plan:JSON.parse(planText),concurrency:2});await refreshThreads();}catch(e){error(String(e));}finally{busy=false;render();}}
+async function runPlan() {if(!activeProject||busy)return;busy=true;error('');render();try {graph=await invoke<GraphTask[]>('run_plan',{projectId:activeProject,plan:JSON.parse(planText),concurrency:2});await refreshThreads();}catch(e){error(String(e));}finally{busy=false;render();}}
 async function refreshUsage() { try {usage=await invoke<Usage[]>('model_usage');if(activeTab==='Usage')renderContent();} catch(e){error(String(e));} }
 async function localInsight(command:'summarize_task'|'review_task') {
   if(!activeThread || busy)return;busy=true;render();
@@ -133,7 +166,7 @@ async function refreshDiff(id: string) {
   catch(e) { error(String(e)); }
 }
 async function selectThread(id: string) {
-  if (busy) return; activeThread = id; busy = true; error(''); render();
+  if (busy) return; notice(''); saveDraft(); const t=threads.find(t=>t.id===id); if(t)activeProject=t.project_id; activeThread = id; restoreDraft(); rememberSelection(); busy = true; error(''); render();
   try {
     const snapshot = threads.find(t=>t.id===id)?.provider === 'spark' ? {active_turn:null,messages:[]} : await invoke<Snapshot>('resume_task', { threadId: id });
     const v = view(id); if(threads.find(t=>t.id===id)?.provider === 'spark') {v.sequence=0;v.events=[];} v.messages = snapshot.messages.map((m, i) => ({ ...m, key: `restored-${i}` }));
@@ -142,6 +175,7 @@ async function selectThread(id: string) {
     const insights=await invoke<{review:View['finalReview'];recovery:View['recovery']}>('worker_insights',{threadId:id});v.finalReview=insights.review||undefined;v.recovery=insights.recovery||undefined;
     v.running = !!snapshot.active_turn && !v.completedTurns?.has(snapshot.active_turn.id); v.activeTurn=snapshot.active_turn?.id; v.needsResume = false;
   } catch (e) { view(id).needsResume = true; error(String(e)); } finally { busy = false; render(); }
+  if(activeTab==='Diff')void refreshDiff(id);if(activeTab==='Context')void refreshContext(id);
 }
 async function send() {
   const input = document.querySelector<HTMLTextAreaElement>('#task-input')!, text = input.value.trim();
@@ -150,7 +184,7 @@ async function send() {
   try {
     if (!activeThread) {
       const result = await invoke<{thread:Thread;route:{decision:{reason:string;executor:string}}}>('create_routed_task', { projectId: activeProject, text, knownFiles:knownFiles(), preference:(document.querySelector('#preference') as HTMLSelectElement).value });
-      const thread=result.thread; threads.unshift(thread); activeThread = thread.id; view(thread.id).needsResume = false; view(thread.id).route=`${result.route.decision.executor}: ${result.route.decision.reason}`;
+      const thread=result.thread; delete ui.drafts![draftKey()]; threads.unshift(thread); activeThread = thread.id; saveDraft(); rememberSelection(); view(thread.id).needsResume = false; view(thread.id).route=`${result.route.decision.executor}: ${result.route.decision.reason}`;
     }
     const v = view(activeThread);
     if(threads.find(t=>t.id===activeThread)?.provider === 'spark') { await invoke('run_local',{threadId:activeThread,text,knownFiles:knownFiles()}); }
@@ -158,11 +192,31 @@ async function send() {
     if (v.running) await invoke('steer_turn', { threadId: activeThread, text });
     else { await invoke('send_turn', { threadId: activeThread, text }); }
     }
-    input.value = '';
+    input.value = ''; saveDraft();
   } catch (e) { if (activeThread) view(activeThread).needsResume = true; error(String(e)); }
   finally { busy = false; render(); }
 }
-function openDialog() { (document.querySelector('#register') as HTMLDialogElement).showModal(); }
+function openDialog() { void pickProject(); }
+async function pickProject() {
+  if(picking || busy)return;
+  if(!isTauri()){error('フォルダ選択はデスクトップアプリで利用できます。');return;}
+  picking=true; error('');
+  try {
+    const path=await nativeInvoke<string|null>('choose_path',{kind:'project'});
+    if(path)await registerProject(path);
+  } catch(e){error(String(e));} finally {picking=false;}
+}
+async function registerProject(path:string) {
+  try {
+    const p=await invoke<Project>('register_project',{path:path.trim()});
+    projects=await invoke<Project[]>('projects'); switchProject(p.id,true); activeTab='Chat'; rememberSelection(); render();
+    (document.querySelector('#register') as HTMLDialogElement).close(); notice(`${p.name} を開きました。`); focusComposer();
+  } catch(e){
+    (document.querySelector('#path') as HTMLInputElement).value=path;
+    document.querySelector('#form-error')!.textContent=String(e).includes('Git repository')?'Git リポジトリのフォルダを選んでください。既存のファイルは変更していません。':String(e);
+    const dialog=document.querySelector<HTMLDialogElement>('#register')!;if(!dialog.open)dialog.showModal();
+  }
+}
 document.querySelector('#settings')!.addEventListener('click', async () => {
   (document.querySelector('#connection-settings') as HTMLDialogElement).showModal();
   try { (document.querySelector('#codex-path') as HTMLInputElement).value = await invoke<string>('codex_binary'); const config=await invoke<{mode:string;model:string}>('astra_settings');(document.querySelector('#astra-mode') as HTMLSelectElement).value=config.mode;(document.querySelector('#astra-model') as HTMLInputElement).value=config.model; }
@@ -178,21 +232,17 @@ document.querySelector('#settings-form')!.addEventListener('submit', async e => 
   } catch(e) { document.querySelector('#settings-error')!.textContent = String(e); }
 });
 document.querySelector('#add')!.addEventListener('click', openDialog);
-document.querySelector('#new')!.addEventListener('click', () => { if (busy) return; activeThread = null; activeTab = 'Chat'; error(''); render(); });
+document.querySelector('#new')!.addEventListener('click', newTask);
 document.querySelector('#resume')!.addEventListener('click', () => { if (activeThread) void selectThread(activeThread); });
 document.querySelector('#send')!.addEventListener('click', () => void send());
-document.querySelector<HTMLTextAreaElement>('#task-input')!.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(); } });
+document.querySelector<HTMLTextAreaElement>('#task-input')!.addEventListener('keydown', e => { if (!e.isComposing && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(); } });
 document.querySelector('#stop')!.addEventListener('click', async () => { if (!activeThread || busy) return; busy = true; render(); try { await invoke('interrupt_turn', { threadId: activeThread }); } catch (e) { view(activeThread).needsResume = true; error(String(e)); } finally { busy = false; render(); } });
 document.querySelector('#cancel')!.addEventListener('click', () => (document.querySelector('#register') as HTMLDialogElement).close());
-document.querySelector('form')!.addEventListener('submit', async e => {
-  e.preventDefault(); const formError = document.querySelector('#form-error')!;
-  try {
-    if (!isTauri()) throw new Error('登録にはデスクトップアプリを起動してください。');
-    const p = await invoke<Project>('register_project', { path: (document.querySelector('#path') as HTMLInputElement).value });
-    projects = await invoke<Project[]>('projects'); activeProject = p.id; activeThread = null; formError.textContent = '';
-    (document.querySelector('#register') as HTMLDialogElement).close(); render();
-  } catch (e) { formError.textContent = String(e); }
+document.querySelector('#register form')!.addEventListener('submit', async e => {
+  e.preventDefault(); if(busy)return; busy=true;render();try{await registerProject((document.querySelector('#path') as HTMLInputElement).value);}finally{busy=false;render();focusComposer();}
 });
+document.querySelector('#browse-project')!.addEventListener('click',()=>{(document.querySelector('#register') as HTMLDialogElement).close();void pickProject();});
+document.querySelector('#browse-codex')!.addEventListener('click',async()=>{if(picking)return;picking=true;try{const path=await nativeInvoke<string|null>('choose_path',{kind:'codex_binary'});if(path)(document.querySelector('#codex-path') as HTMLInputElement).value=path;}catch(e){document.querySelector('#settings-error')!.textContent=String(e);}finally{picking=false;}});
 setupMemory(()=>activeProject,error);
 window.addEventListener('unhandledrejection', e => error(String(e.reason)));
 window.addEventListener('error', e => error(e.message));
@@ -200,7 +250,87 @@ render();
 if (isTauri()) {
   await listen<JournalEvent>('hub-event', e => applyEvent(e.payload));
   await listen<number>('hub-stream-gap', () => { if (activeThread) { view(activeThread).needsResume = true; error('イベント配信が遅れました。「再開・状態を確認」で保存済み履歴を読み直してください。'); render(); } });
-  try { [projects, threads] = await Promise.all([invoke<Project[]>('projects'), invoke<Thread[]>('threads')]); activeProject = projects[0]?.id || null; render(); } catch (e) { error(String(e)); }
+  try { [projects, threads] = await Promise.all([invoke<Project[]>('projects'), invoke<Thread[]>('threads')]); activeProject = projects.find(p=>p.id===ui.project)?.id || projects[0]?.id || null; activeTab=tabs.includes(ui.tab||'')?ui.tab!:'Chat';planText=activeProject?ui.plans![activeProject]||planText:planText;restoreDraft();render();if(ui.thread && threads.some(t=>t.id===ui.thread&&t.project_id===activeProject))await selectThread(ui.thread);if(activeTab==='Plan')void refreshGraph();if(activeTab==='Diff'&&activeThread)void refreshDiff(activeThread);if(activeTab==='Context'&&activeThread)void refreshContext(activeThread);if(activeTab==='Usage')void refreshUsage(); } catch (e) { error(String(e)); }
 }
 
-async function resumePlan() {if(!activeProject||busy)return;busy=true;error('');try{graph=await invoke<GraphTask[]>('resume_plan',{projectId:activeProject});await refreshThreads();}catch(e){error(String(e));}finally{busy=false;render();}}
+async function resumePlan() {if(!activeProject||busy)return;busy=true;error('');render();try{graph=await invoke<GraphTask[]>('resume_plan',{projectId:activeProject});await refreshThreads();}catch(e){error(String(e));}finally{busy=false;render();}}
+
+function saveUi() {
+  try { localStorage.setItem('astra-ui-v1',JSON.stringify(ui)); }
+  catch { notice('下書きを端末に保存できません。閉じる前に本文をコピーしてください。'); }
+}
+function rememberSelection() { ui.project=activeProject;ui.thread=activeThread;ui.tab=activeTab;saveUi(); }
+function draftKey() { return activeThread || `new:${activeProject || 'none'}`; }
+function saveDraft() {
+  const input=document.querySelector<HTMLTextAreaElement>('#task-input')!;
+  ui.drafts![draftKey()]={text:input.value,files:(document.querySelector('#known-files') as HTMLInputElement).value,preference:(document.querySelector('#preference') as HTMLSelectElement).value};
+  saveUi(); document.querySelector('#draft-status')!.textContent=input.value?'下書きはこの端末に保存':'';
+}
+function restoreDraft() {
+  const draft=ui.drafts![draftKey()];
+  (document.querySelector('#task-input') as HTMLTextAreaElement).value=typeof draft?.text==='string'?draft.text:'';
+  (document.querySelector('#known-files') as HTMLInputElement).value=typeof draft?.files==='string'?draft.files:'';
+  (document.querySelector('#preference') as HTMLSelectElement).value=['auto','spark','codex','astra'].includes(draft?.preference)?draft.preference:'auto';
+  document.querySelector('#draft-status')!.textContent=draft?.text?'保存した下書き':'';
+}
+function focusComposer() { document.querySelector<HTMLTextAreaElement>('#task-input')!.focus(); }
+function switchProject(id:string, force=false) {
+  if(busy&&!force)return; notice(''); saveDraft();activeProject=id;activeThread=null;activeTab='Chat';graph=[];
+  planText=ui.plans![id] || defaultPlanText;restoreDraft();rememberSelection();render();
+  if(activeTab==='Plan')void refreshGraph();focusComposer();
+}
+function newTask() {
+  if(busy)return;notice('');saveDraft();activeThread=null;activeTab='Chat';restoreDraft();rememberSelection();error('');render();focusComposer();
+  if(!activeProject)void pickProject();
+}
+function notice(message:string) { const el=document.querySelector<HTMLDivElement>('#notice')!;el.hidden=!message;el.textContent=message; }
+async function copyText(text:string, button?:HTMLButtonElement) {
+  try { await navigator.clipboard.writeText(text); if(button){const old=button.textContent;button.textContent='コピー済み';setTimeout(()=>{if(button.isConnected)button.textContent=old;},1400);} else notice('コピーしました。'); }
+  catch { error('コピーできませんでした。テキストを選択して ⌘C を押してください。'); }
+}
+function renderThreads() {
+  const matches=threads.filter(t=>t.project_id===activeProject&&`${t.title} ${statusLabel(t.status)}`.toLowerCase().includes(taskFilter.toLowerCase()));
+  matches.sort((a,b)=>Number(ui.pins!.includes(b.id))-Number(ui.pins!.includes(a.id)));
+  document.querySelector('#threads')!.innerHTML=matches.map(t=>`<div class="thread-row"><button class="thread ${t.id===activeThread?'selected':''}" data-thread="${t.id}" title="${escape(t.title)}"><span>${escape(t.title)}</span><small class="state-${escape(t.status)}">${escape(statusLabel(t.status))}</small></button><button class="pin-thread ${ui.pins!.includes(t.id)?'pinned':''}" data-pin="${t.id}" aria-label="${escape(t.title)}を${ui.pins!.includes(t.id)?'固定解除':'固定'}" aria-pressed="${ui.pins!.includes(t.id)}">${ui.pins!.includes(t.id)?'★':'☆'}</button></div>`).join('')||`<p class="side-empty muted">${taskFilter?'一致するタスクがありません。':'新しいタスクから始めましょう。'}</p>`;
+  document.querySelectorAll<HTMLButtonElement>('[data-thread]').forEach(b=>b.onclick=()=>void selectThread(b.dataset.thread!));
+  document.querySelectorAll<HTMLButtonElement>('[data-pin]').forEach(b=>b.onclick=()=>{const id=b.dataset.pin!;ui.pins=ui.pins!.includes(id)?ui.pins!.filter(p=>p!==id):[...ui.pins!,id];saveUi();renderThreads();});
+}
+type MenuAction={title:string;detail:string;run:()=>void};
+function menuActions():MenuAction[] {
+  return [
+    {title:'フォルダを開く',detail:'⌘O',run:()=>void pickProject()},
+    {title:'新しいタスク',detail:'⌘N',run:newTask},
+    {title:'接続設定',detail:'⌘,',run:()=>document.querySelector<HTMLButtonElement>('#settings')!.click()},
+    ...tabs.map(tab=>({title:`${tab} を表示`,detail:'表示を切り替え',run:()=>{activeTab=tab;rememberSelection();render();if(tab==='Diff'&&activeThread)void refreshDiff(activeThread);if(tab==='Plan')void refreshGraph();if(tab==='Context'&&activeThread)void refreshContext(activeThread);if(tab==='Usage')void refreshUsage();}})),
+    ...projects.map(p=>({title:p.name,detail:p.root,run:()=>switchProject(p.id)})),
+    ...threads.map(t=>({title:t.title,detail:`${projects.find(p=>p.id===t.project_id)?.name||''} · ${statusLabel(t.status)}`,run:()=>{activeTab='Chat';void selectThread(t.id);}})),
+  ];
+}
+function renderCommands() {
+  const query=(document.querySelector('#command-query') as HTMLInputElement).value.toLowerCase();
+  const matches=menuActions().filter(a=>`${a.title} ${a.detail}`.toLowerCase().includes(query));
+  document.querySelector('#command-results')!.innerHTML=matches.map((a,i)=>`<button class="command-result" data-command="${i}"><strong>${escape(a.title)}</strong><small>${escape(a.detail)}</small></button>`).join('')||'<p>一致するタスク・操作がありません。</p>';
+  document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach(b=>b.onclick=()=>{(document.querySelector('#commands') as HTMLDialogElement).close();matches[Number(b.dataset.command)].run();});
+}
+function openCommands() { if(picking||document.querySelector('dialog[open]'))return;const d=document.querySelector<HTMLDialogElement>('#commands')!; (document.querySelector('#command-query') as HTMLInputElement).value='';renderCommands();d.showModal();document.querySelector<HTMLInputElement>('#command-query')!.focus(); }
+function toggleSidebar() { ui.sidebarHidden=!ui.sidebarHidden;saveUi();render(); }
+for(const id of ['task-input','known-files','preference'])document.getElementById(id)!.addEventListener('input',saveDraft);
+document.querySelector<HTMLInputElement>('#task-filter')!.addEventListener('input',e=>{taskFilter=(e.target as HTMLInputElement).value;renderThreads();});
+document.querySelector('#command-menu')!.addEventListener('click',openCommands);
+document.querySelector('#sidebar-toggle')!.addEventListener('click',toggleSidebar);
+document.querySelector('#project-path')!.addEventListener('click',()=>{const p=projects.find(p=>p.id===activeProject);if(p)void copyText(p.root);});
+document.querySelector('#command-query')!.addEventListener('input',renderCommands);
+document.querySelector('#commands')!.addEventListener('keydown',e=>{
+  const event=e as KeyboardEvent;if(event.isComposing)return;
+  const buttons=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-command]'));const index=buttons.indexOf(document.activeElement as HTMLButtonElement);
+  if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();buttons[(index+(event.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}
+  if(event.key==='Enter'&&document.activeElement?.id==='command-query'){event.preventDefault();buttons[0]?.click();}
+});
+document.querySelector('#rename-task')!.addEventListener('click',()=>{if(!activeThread||busy)return;(document.querySelector('#task-name') as HTMLInputElement).value=threads.find(t=>t.id===activeThread)?.title||'';document.querySelector('#rename-error')!.textContent='';(document.querySelector('#rename-dialog') as HTMLDialogElement).showModal();document.querySelector<HTMLInputElement>('#task-name')!.select();});
+document.querySelector('#rename-cancel')!.addEventListener('click',()=> (document.querySelector('#rename-dialog') as HTMLDialogElement).close());
+document.querySelector('#rename-form')!.addEventListener('submit',async e=>{e.preventDefault();if(!activeThread||busy)return;const id=activeThread;busy=true;render();try{await invoke('rename_thread',{threadId:id,title:(document.querySelector('#task-name') as HTMLInputElement).value});await refreshThreads();(document.querySelector('#rename-dialog') as HTMLDialogElement).close();}catch(e){document.querySelector('#rename-error')!.textContent=String(e);}finally{busy=false;render();}});
+document.addEventListener('keydown',e=>{
+  if(e.isComposing||!(e.metaKey||e.ctrlKey)||e.altKey||picking||document.querySelector('dialog[open]'))return;
+  const action=({o:()=>void pickProject(),n:newTask,k:openCommands,',':()=>document.querySelector<HTMLButtonElement>('#settings')!.click(),b:toggleSidebar} as Record<string,()=>void>)[e.key.toLowerCase()];
+  if(action&&!e.shiftKey){e.preventDefault();action();}
+});

@@ -4,7 +4,7 @@ Local-first desktop coding workspace. Rust owns lifecycle and persistence; Tauri
 
 ## Development
 
-Requires Rust stable, Node 22+, Xcode command line tools on macOS.
+Requires Rust stable, Node 22.22.2+ (or 24.15+ / 26+), Xcode command line tools on macOS.
 
 ```sh
 cd apps/desktop
@@ -29,3 +29,9 @@ The verified debug bundle is `target/debug/bundle/macos/Astra Hub.app`. Open it,
 Use Chat for a task, Plan for DAG dispatch/restart, Agents for review/rework, Context for capsule/pull budgets and memory provenance, and Usage for observed model tokens. `config.example.toml` is illustrative; active settings are saved through the UI in SQLite. Review-required provider operations currently stop with a visible error. Branch integration remains a user action.
 
 The [measured context benchmark](docs/CONTEXT_BENCHMARK.md) contains one real paired comparison and its limits. Full acceptance and optional/unverified integrations are listed in [implementation status](docs/IMPLEMENTATION_STATUS.md).
+
+## Desktop UX
+
+Open a project folder with **⌘O** or the sidebar ＋. **⌘N** starts a new task, **⌘K** searches tasks/projects/actions, **⌘,** opens settings, and **⌘B** toggles the sidebar. Send with **⌘Enter**; Enter inserts a newline. Drafts, the last workspace and pinned tasks are restored locally.
+
+[The UX comparison](docs/UX_COMPARISON.md) lists 24 differences and the 19 adopted or partially adopted improvements, including native folder/file selection, rename/search/pin, safe Markdown, readable diffs and plan previews. Project registration still requires an existing Git repository.
