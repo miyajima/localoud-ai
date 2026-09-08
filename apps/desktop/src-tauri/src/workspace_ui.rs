@@ -65,3 +65,81 @@ pub fn open_web_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
         .open_url(parsed.as_str(), None::<&str>)
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn archived_threads(state: tauri::State<AppState>) -> Result<Vec<String>, String> {
+    state
+        .store
+        .lock()
+        .map_err(|e| e.to_string())?
+        .archived_threads()
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub async fn manage_session(
+    thread_id: String,
+    action: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let _workflow = state.workflow_lock.lock().await;
+    let id = crate::parse_thread(thread_id)?;
+    let running = state.running_plans.lock().await;
+    let mut store = state.store.lock().map_err(|e| e.to_string())?;
+    let thread = store
+        .threads()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|t| t.id == id)
+        .ok_or("セッションが見つかりません。")?;
+    if running.contains(&thread.project_id) {
+        return Err("計画の実行が終了してから操作してください。".into());
+    }
+    let mut ids = vec![id];
+    if let Some(w) = crate::workflow::load(&store, &id.to_string())? {
+        for leg in [w.chatgpt, w.codex].into_iter().flatten() {
+            let leg = crate::parse_thread(leg)?;
+            if !ids.contains(&leg) {
+                ids.push(leg);
+            }
+        }
+    }
+    let all = store.threads().map_err(|e| e.to_string())?;
+    if ids.iter().any(|id| {
+        all.iter().any(|t| {
+            t.id == *id && matches!(t.status.as_str(), "running" | "inProgress" | "dispatching")
+        })
+    }) {
+        return Err("実行完了後に操作してください".into());
+    }
+    store.check_threads_idle(&ids).map_err(|e| e.to_string())?;
+    // Children first; the visible root is removed only after its legs succeed.
+    ids.reverse();
+    for id in ids {
+        match action.as_str() {
+            "archive" => store.set_thread_archived(id, true),
+            "restore" => store.set_thread_archived(id, false),
+            "delete" => store.delete_thread(id),
+            _ => return Err("不明な操作です。".into()),
+        }
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+#[tauri::command]
+pub async fn unregister_project(
+    project_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let _workflow = state.workflow_lock.lock().await;
+    let id = hub_core::ProjectId(project_id.parse().map_err(|_| "invalid project ID")?);
+    let running = state.running_plans.lock().await;
+    if running.contains(&id) {
+        return Err("計画の実行が終了してからプロジェクトを削除してください。".into());
+    }
+    state
+        .store
+        .lock()
+        .map_err(|e| e.to_string())?
+        .unregister_project(id)
+        .map_err(|e| e.to_string())
+}

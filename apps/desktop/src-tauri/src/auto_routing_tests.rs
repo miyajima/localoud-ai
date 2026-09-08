@@ -99,7 +99,11 @@ async fn fixture() -> Fixture {
         provider: Arc::new(SparkProvider::configured(local_config.clone()).unwrap()),
         lock: tokio::sync::Mutex::new(()),
     };
+    let browser = crate::chatgpt::Browser::new(store.clone(), bus.clone()).unwrap();
     let state = AppState {
+        workflow_lock: tokio::sync::Mutex::new(()),
+        browser,
+        local_stops: tokio::sync::Mutex::new(HashMap::new()),
         store,
         bus,
         connection: tokio::sync::Mutex::new(None),

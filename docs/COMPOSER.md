@@ -54,3 +54,7 @@ AI補完は既定で有効です。履歴に一致しない入力は設定済み
 ### ローカル優先補完の実接続確認（2026-09-08）
 
 更新したSpark X-2.5 8bitサービスのHTTP接続で、入力補完の生成に成功しました。検証入力1件の処理時間は824msでした。最終版のアプリでも、ローカルのSpark 8bitを補完元として候補が表示されることを確認しました。ローカル補完が未対応の条件では、アプリがLuna / lowへ切り替わり、実際の候補が画面に表示されることも確認しました。ローカルは完成した依頼文を生成し、入力したprefixと完全一致する先頭部分を除いてsuffixを返します。一致しない出力は拒否します。
+
+## Compact controls and ChatGPT
+
+Secondary controls now live under **＋**. The send control is round and changes to Stop during execution. For ChatGPT, local-only completion prevents the Luna fallback from using Codex quota. See [ChatGPT and lifecycle](CHATGPT.md) for setup and verification boundaries.

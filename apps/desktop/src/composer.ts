@@ -4,25 +4,30 @@ import type {ModelChoice} from './model-controls';
 type Call=<T=unknown>(command:string,args?:Record<string,unknown>)=>Promise<T>;
 type Catalog={entries:Entry[];modes:string[];warnings:string[]};
 type CompletionConfig={enabled:boolean;model:string;reasoning:string};
-type Dependencies={call:Call;project:()=>string|null;thread:()=>string|null;busy:()=>boolean;running:()=>boolean;codex:()=>boolean;mode:()=>string;setMode:(mode:string)=>boolean;models:()=>ModelChoice[];changed:()=>void;notice:(text:string)=>void;error:(text:string)=>void};
+type Dependencies={call:Call;localOnly?:()=>boolean;project:()=>string|null;thread:()=>string|null;busy:()=>boolean;running:()=>boolean;codex:()=>boolean;mode:()=>string;setMode:(mode:string)=>boolean;models:()=>ModelChoice[];changed:()=>void;notice:(text:string)=>void;error:(text:string)=>void};
 type Candidate={label:string;detail:string;choose:()=>void};
 type Question={request_id:string;questions:{id:string;header:string;question:string;isSecret?:boolean;options?:{label:string;description:string}[]|null}[]};
 export function setupComposer(deps:Dependencies){
   const input=document.querySelector<HTMLTextAreaElement>('#task-input')!;
   const assist=document.createElement('div');assist.id='composer-assist';input.after(assist);
-  assist.innerHTML='<div id="composer-chips"></div><div id="composer-suffix" hidden></div><div class="composer-tools"><button type="button" id="composer-slash">/ コマンド</button><button type="button" id="composer-at">@ 参照</button><button type="button" id="composer-history">入力履歴</button><button type="button" id="composer-ai">AI補完</button><button type="button" id="composer-settings">補完設定</button><span id="composer-hint">候補は Tab で採用 · Esc で閉じる</span></div><div id="composer-menu" role="listbox" aria-label="入力候補" hidden></div>';
+  assist.innerHTML='<div id="composer-chips"></div><div id="composer-suffix" role="status" aria-live="polite" hidden></div><div class="composer-tools"><button type="button" id="composer-slash">/ コマンド</button><button type="button" id="composer-at">@ 参照</button><button type="button" id="composer-history">入力履歴</button><button type="button" id="composer-ai">AI補完</button><button type="button" id="composer-settings">補完設定</button><span id="composer-hint" role="status" aria-live="polite"></span></div><div id="composer-menu" role="listbox" aria-label="入力候補" hidden></div>';
+  const tools=assist.querySelector('.composer-tools')!;
+  const panel=document.querySelector('#compose-more .compose-more-panel');
+  if(panel){for(const button of Array.from(tools.querySelectorAll('button')))panel.append(button);}
   const interactions=document.createElement('div');interactions.id='composer-interactions';interactions.hidden=true;document.querySelector('#content')!.before(interactions);
-  const settings=document.createElement('dialog');settings.id='completion-settings-dialog';settings.innerHTML='<form><h2>入力補完</h2><p>このプロジェクトの入力履歴から、続きの候補を表示します。候補を採用するまで入力は変わりません。</p><label><input type="checkbox" id="completion-enabled"> 履歴で補えない場合はAI補完を使う</label><p>入力履歴を優先し、一致する候補がなければ設定済みのローカルLLMで補完します。ローカルが未接続・未対応・生成失敗の場合はLuna / lowを使います。</p><p>補完に使うのは現在の入力と、このプロジェクトの直近の入力履歴です。Lunaへ切り替える場合はそれらを送信します。リポジトリ本文は送信しません。</p><p id="completion-error" role="alert"></p><div class="dialog-actions"><button type="button" id="completion-close">閉じる</button><button type="submit" class="primary">保存</button></div></form>';document.body.append(settings);
+  const settings=document.createElement('dialog');settings.id='completion-settings-dialog';settings.innerHTML='<form><h2>入力補完</h2><p>このプロジェクトの入力履歴から、続きの候補を表示します。候補を採用するまで入力は変わりません。</p><label><input type="checkbox" id="completion-enabled"> 履歴で補えない場合はAI補完を使う</label><p>入力履歴を優先し、一致する候補がなければ設定済みのローカルLLMで補完します。ローカルが未接続・未対応・生成失敗の場合はLunaを使います。</p><p>補完に使うのは現在の入力と、このプロジェクトの直近の入力履歴です。Lunaへ切り替える場合はそれらを送信します。リポジトリ本文は送信しません。</p><p>候補が表示されたらTabで採用、Escで閉じます。候補のないTabは入力欄に留まります。Shift+Tab、またはEscのあとTabで次の項目へ移動できます。</p><p id="completion-error" role="alert"></p><div class="dialog-actions"><button type="button" id="completion-close">閉じる</button><button type="submit" class="primary">保存</button></div></form>';document.body.append(settings);
   const menu=assist.querySelector<HTMLDivElement>('#composer-menu')!,suffixPanel=assist.querySelector<HTMLDivElement>('#composer-suffix')!;
   const chips=assist.querySelector<HTMLDivElement>('#composer-chips')!,hint=assist.querySelector<HTMLSpanElement>('#composer-hint')!;
   const byId=<T extends HTMLElement=HTMLElement>(id:string)=>document.getElementById(id) as T;
   let mentions:Mention[]=[],catalog:Catalog|null=null,catalogPromise:Promise<Catalog>|null=null,context='',history:string[]=[],generation=0,composing=false;
   let trigger:Trigger|null=null,category='',candidates:Candidate[]=[],selected=0,suffix='',suffixPrefix='',suffixContext='',dismissed='',aiBusy=false,lastAI=0;
+  let tabNavigation=false;
   let timer:ReturnType<typeof setTimeout>|undefined,config:CompletionConfig={enabled:true,model:'local-first',reasoning:'low'},interactionVersion=0,lastInteraction='';
   function key(){return `${deps.project()||''}:${deps.thread()||''}`;}
   function args(){return {projectId:deps.project(),threadId:deps.thread()};}
   function hideMenu(){menu.hidden=true;input.removeAttribute('aria-activedescendant');input.setAttribute('aria-expanded','false');candidates=[];}
-  function hideSuffix(){suffix='';suffixPanel.hidden=true;suffixPanel.replaceChildren();}
+  function hideSuffix(){suffix='';suffixPanel.hidden=true;suffixPanel.replaceChildren();hint.textContent='';hint.title='';hint.classList.remove('pending');}
+  function sourceName(source:string){return source.startsWith('Luna')?'Luna':source==='入力履歴'?'履歴':'ローカルLLM';}
   function changed(){deps.changed();}
   function label(m:Mention){return m.kind==='skill'?`/${m.name}`:m.kind==='plugin'?`/${m.name}`:m.kind==='agent'?`@agent/${m.name}`:`@${m.name}`;}
   function renderChips(){
@@ -90,21 +95,22 @@ export function setupComposer(deps:Dependencies){
   }
   function showSuffix(value:string,source:string,original:string,expected:string){
     if(!value||dismissed===original||!canAcceptSuffix(original,input.value,expected,key(),input.selectionStart)||input.selectionStart!==input.selectionEnd||composing)return;
-    suffix=value;suffixPrefix=original;suffixContext=expected;suffixPanel.replaceChildren();const sourceLabel=document.createElement('small');sourceLabel.textContent=source;const text=document.createElement('span');text.textContent=value;const accept=document.createElement('button');accept.type='button';accept.textContent='Tab で採用';accept.onmousedown=e=>e.preventDefault();accept.onclick=acceptSuffix;suffixPanel.append(sourceLabel,text,accept);suffixPanel.hidden=false;
+    suffix=value;suffixPrefix=original;suffixContext=expected;hint.textContent='';hint.classList.remove('pending');suffixPanel.replaceChildren();const sourceLabel=document.createElement('small');sourceLabel.textContent=sourceName(source);const text=document.createElement('span');text.className='completion-text';text.textContent=value;const accept=document.createElement('button');accept.type='button';accept.className='completion-accept';accept.setAttribute('aria-label','Tabで補完候補を採用');accept.innerHTML='<kbd>Tab</kbd> 採用';accept.onmousedown=e=>e.preventDefault();accept.onclick=acceptSuffix;const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='completion-dismiss';dismiss.textContent='×';dismiss.setAttribute('aria-label','補完候補を閉じる');dismiss.title='Escで閉じる';dismiss.onmousedown=e=>e.preventDefault();dismiss.onclick=()=>{dismissed=input.value;hideSuffix();input.focus();};suffixPanel.append(sourceLabel,text,accept,dismiss);suffixPanel.hidden=false;
   }
   function acceptSuffix(){if(!suffix||!canAcceptSuffix(suffixPrefix,input.value,suffixContext,key(),input.selectionStart))return;const tail=suffix;hideSuffix();input.setRangeText(tail,input.value.length,input.value.length,'end');changed();input.focus();}
   async function complete(manual=false){
+    if(manual){input.focus();dismissed='';}
     if(composing||input.disabled||deps.busy()||deps.running()||!menu.hidden||aiBusy)return;
     if(!config.enabled){if(manual)void openSettings();return;}
     if(!manual&&Date.now()-lastAI<12000)return;
     const original=input.value,expected=key();if(original.trim().length<4||original.length>2000||input.selectionStart!==original.length)return;
-    aiBusy=true;lastAI=Date.now();hint.textContent='ローカル優先で補完中…';
-    try{const value=await deps.call<{suffix:string;source:string;fallback_reason:string|null}>('complete_prompt',{projectId:deps.project(),prefix:original});if(key()===expected){showSuffix(value.suffix,value.source,original,expected);hint.textContent=value.fallback_reason?`${value.source} · ${value.fallback_reason}`:`${value.source} で補完`; }}
-    catch(e){if(key()===expected)hint.textContent=String(e);}
-    finally{aiBusy=false;if(hint.textContent?.includes('補完中'))hint.textContent='候補は Tab で採用 · Esc で閉じる';}
+    aiBusy=true;lastAI=Date.now();hint.title='';hint.classList.add('pending');hint.textContent='補完中…';
+    try{const value=await deps.call<{suffix:string;source:string;fallback_reason:string|null}>('complete_prompt',{projectId:deps.project(),prefix:original,localOnly:deps.localOnly?.()||false});if(key()===expected&&input.value===original&&dismissed!==original){showSuffix(value.suffix,value.source,original,expected);hint.title=value.fallback_reason||'';if(!value.suffix)hint.textContent='候補なし'; }}
+    catch(e){if(key()===expected&&input.value===original&&dismissed!==original){hint.textContent='補完を利用できません';hint.title=String(e);}}
+    finally{aiBusy=false;hint.classList.remove('pending');if(hint.textContent?.includes('補完中'))hint.textContent='';}
   }
   function onInput(){
-    clearTimeout(timer);dismissed='';hideSuffix();if(composing)return;
+    clearTimeout(timer);tabNavigation=false;dismissed='';hideSuffix();if(composing)return;
     const next=triggerAt(input.value,input.selectionStart);
     if(next){if(trigger?.start!==next.start)category='';trigger=next;void search(next.query);return;}
     trigger=null;category='';generation++;hideMenu();
@@ -117,13 +123,16 @@ export function setupComposer(deps:Dependencies){
   input.addEventListener('keydown',e=>{
     if(composing||e.isComposing||e.keyCode===229)return;
     const take=()=>{e.preventDefault();e.stopImmediatePropagation();};
-    if(e.key==='Escape'){take();dismissed=input.value;generation++;clearTimeout(timer);hideMenu();hideSuffix();return;}
+    if(e.key==='Escape'){take();tabNavigation=true;dismissed=input.value;generation++;clearTimeout(timer);hideMenu();hideSuffix();hint.textContent='Tabで次の項目へ移動';return;}
+    if(e.key==='Tab'&&(e.shiftKey||e.ctrlKey||e.metaKey||e.altKey||tabNavigation)){tabNavigation=false;hideSuffix();return;}
     if(e.ctrlKey&&e.code==='Space'){take();void complete(true);return;}
     if(!menu.hidden&&['ArrowDown','ArrowUp'].includes(e.key)){take();selected=(selected+(e.key==='ArrowDown'?1:-1)+Math.max(1,candidates.length))%Math.max(1,candidates.length);paint();return;}
     if(!menu.hidden&&((e.key==='Enter'&&!e.metaKey&&!e.ctrlKey)||e.key==='Tab')&&candidates[selected]){take();candidates[selected].choose();return;}
-    if(e.key==='Tab'&&suffix){take();acceptSuffix();}
+    if(e.key==='Tab'){take();if(suffix)acceptSuffix();else{hint.textContent=aiBusy?'補完中…':'候補はまだありません';hint.title='入力を続けてください。Shift+Tab、またはEsc → Tabで入力欄から移動できます。';}}
   },true);
-  input.addEventListener('click',()=>{if(input.selectionStart!==input.value.length)hideSuffix();});
+  const checkCaret=()=>{if(input.selectionStart!==input.value.length||input.selectionStart!==input.selectionEnd)hideSuffix();};
+  input.addEventListener('click',checkCaret);input.addEventListener('keyup',checkCaret);input.addEventListener('select',checkCaret);
+  input.addEventListener('blur',()=>{dismissed=input.value;clearTimeout(timer);hideSuffix();});
   byId('composer-slash').onclick=()=>open('/');byId('composer-at').onclick=()=>open('@');byId('composer-history').onclick=()=>open('/','history');byId('composer-ai').onclick=()=>void complete(true);byId('composer-settings').onclick=()=>void openSettings();
   byId('completion-close').onclick=()=>settings.close();
   async function openSettings(){
@@ -133,7 +142,7 @@ export function setupComposer(deps:Dependencies){
   }
   settings.querySelector('form')!.onsubmit=async e=>{
     e.preventDefault();const next={enabled:byId<HTMLInputElement>('completion-enabled').checked,model:'local-first',reasoning:'low'};
-    try{await deps.call('set_completion_settings',{config:next});config=next;settings.close();hint.textContent=config.enabled?'履歴 → ローカル → Luna / low':'入力履歴から補完';}catch(err){byId('completion-error').textContent=String(err);}
+    try{await deps.call('set_completion_settings',{config:next});config=next;settings.close();hint.textContent='';}catch(err){byId('completion-error').textContent=String(err);}
   };
   async function remember(text:string){const project=deps.project();if(!project||!text.trim())return;try{await deps.call('remember_prompt',{projectId:project,text});const loaded=await deps.call<string[]>('prompt_history',{projectId:project});if(deps.project()===project)history=loaded;}catch(e){deps.notice(`入力履歴を保存できませんでした: ${e}`);}}
   async function seedHistory(texts:string[],project:string){
@@ -172,6 +181,6 @@ export function setupComposer(deps:Dependencies){
     }
     hideMenu();return true;
   }
-  void deps.call<CompletionConfig>('completion_settings').then(value=>{config=value;hint.textContent=value.enabled?'履歴 → ローカル → Luna / low':'入力履歴から補完';}).catch(e=>deps.notice(String(e)));
+  void deps.call<CompletionConfig>('completion_settings').then(value=>{config=value;hint.textContent='';}).catch(e=>deps.notice(String(e)));
   return {getMentions:()=>mentions.map(m=>({...m})),setMentions:(items:Mention[])=>{mentions=items;renderChips();},clear:()=>{mentions=[];renderChips();hideMenu();hideSuffix();changed();},syncContext,refreshThread,remember,seedHistory,beforeSend,openSettings};
 }

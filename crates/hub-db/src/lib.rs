@@ -12,7 +12,7 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if version > 3 {
+        if version > 4 {
             bail!("database version {version} is newer than this application");
         }
         if version == 0 {
@@ -36,6 +36,13 @@ impl Store {
                 "COMMIT;"
             ))?;
         }
+        if version < 4 {
+            conn.execute_batch(concat!(
+                "BEGIN;",
+                include_str!("../../../migrations/004_lifecycle.sql"),
+                "COMMIT;"
+            ))?;
+        }
         Ok(Self { conn })
     }
     pub fn register_project(&self, path: &Path) -> Result<Project> {
@@ -56,6 +63,10 @@ impl Store {
         if git_root != root {
             bail!("register the repository root: {}", git_root.display());
         }
+        self.conn.execute(
+            "UPDATE projects SET registered=1 WHERE root=?1",
+            [root.to_string_lossy().as_ref()],
+        )?;
         if let Some(p) = self.projects()?.into_iter().find(|p| p.root == root) {
             return Ok(p);
         }
@@ -81,7 +92,7 @@ impl Store {
     pub fn projects(&self) -> Result<Vec<Project>> {
         let mut q = self
             .conn
-            .prepare("SELECT id,name,root FROM projects ORDER BY name")?;
+            .prepare("SELECT id,name,root FROM projects WHERE registered=1 ORDER BY name")?;
         let rows = q.query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -98,6 +109,82 @@ impl Store {
             })
         })
         .collect()
+    }
+    /// Removes only the app registration; repository files and task records remain intact.
+    pub fn unregister_project(&self, id: ProjectId) -> Result<()> {
+        let running: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM provider_threads WHERE project_id=?1 AND status IN ('running','inProgress','dispatching'))", [id.to_string()], |r| r.get(0))?;
+        if running {
+            bail!("実行中のセッションがあるため、プロジェクトを削除できません。");
+        }
+        if self.conn.execute(
+            "UPDATE projects SET registered=0 WHERE id=?1 AND registered=1",
+            [id.to_string()],
+        )? != 1
+        {
+            bail!("プロジェクトが見つかりません。");
+        }
+        Ok(())
+    }
+    pub fn archived_threads(&self) -> Result<Vec<String>> {
+        let mut q = self
+            .conn
+            .prepare("SELECT id FROM provider_threads WHERE archived=1")?;
+        let rows = q.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+    pub fn set_thread_archived(&self, id: HubThreadId, archived: bool) -> Result<()> {
+        self.check_thread_idle(id)?;
+        self.conn.execute(
+            "UPDATE provider_threads SET archived=?2 WHERE id=?1",
+            params![id.to_string(), archived],
+        )?;
+        Ok(())
+    }
+    pub fn check_threads_idle(&self, ids: &[HubThreadId]) -> Result<()> {
+        for id in ids {
+            self.check_thread_idle(*id)?;
+        }
+        Ok(())
+    }
+    fn check_thread_idle(&self, id: HubThreadId) -> Result<()> {
+        let status: String = self
+            .conn
+            .query_row(
+                "SELECT status FROM provider_threads WHERE id=?1",
+                [id.to_string()],
+                |r| r.get(0),
+            )
+            .optional()?
+            .context("セッションが見つかりません。")?;
+        let pending: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM turns WHERE thread_id=?1 AND status IN ('running','inProgress','dispatching'))", [id.to_string()], |r| r.get(0))?;
+        if pending || matches!(status.as_str(), "running" | "inProgress" | "dispatching") {
+            bail!("実行が終了してから操作してください。");
+        }
+        Ok(())
+    }
+    /// Delete this app's transcript and mapping, never the provider's remote conversation.
+    pub fn delete_thread(&mut self, id: HubThreadId) -> Result<()> {
+        self.check_thread_idle(id)?;
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM provider_usage_snapshots WHERE provider_thread_id=(SELECT provider_thread_id FROM provider_threads WHERE id=?1)", [id.to_string()])?;
+        tx.execute("DELETE FROM events WHERE thread_id=?1", [id.to_string()])?;
+        tx.execute("DELETE FROM turns WHERE thread_id=?1", [id.to_string()])?;
+        for prefix in [
+            "thread_model:",
+            "thread_reasoning:",
+            "chatgpt_messages:",
+            "chatgpt_conversation:",
+            "chatgpt_turn:",
+            "workflow:",
+        ] {
+            tx.execute(
+                "DELETE FROM settings WHERE key=?1",
+                [format!("{prefix}{id}")],
+            )?;
+        }
+        tx.execute("DELETE FROM provider_threads WHERE id=?1", [id.to_string()])?;
+        tx.commit()?;
+        Ok(())
     }
     pub fn save_thread(&self, t: &ThreadMapping) -> Result<()> {
         self.conn.execute("INSERT INTO provider_threads(id,project_id,provider,provider_thread_id,title,status) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=CURRENT_TIMESTAMP",params![t.id.to_string(),t.project_id.to_string(),t.provider,t.provider_thread_id,t.title,t.status])?;
@@ -399,6 +486,11 @@ impl Store {
             })
             .optional()?)
     }
+    pub fn remove_setting(&self, key: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM settings WHERE key=?1", [key])?;
+        Ok(())
+    }
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![key,value])?;
         Ok(())
@@ -494,6 +586,50 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn archive_delete_and_unregister_preserve_workspace() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        assert!(std::process::Command::new("git")
+            .args(["init", "-q"])
+            .arg(dir.path())
+            .status()?
+            .success());
+        std::fs::write(dir.path().join("keep.txt"), "preserved")?;
+        let mut store = Store::open(&dir.path().join("hub.db"))?;
+        let project = store.register_project(dir.path())?;
+        let mut thread = ThreadMapping {
+            id: HubThreadId::default(),
+            project_id: project.id,
+            provider: "chatgpt".into(),
+            provider_thread_id: "test-browser".into(),
+            title: "test".into(),
+            status: "running".into(),
+        };
+        store.save_thread(&thread)?;
+        assert!(store.unregister_project(project.id).is_err());
+        assert!(store.delete_thread(thread.id).is_err());
+        assert!(store.set_thread_archived(thread.id, true).is_err());
+        thread.status = "completed".into();
+        store.save_thread(&thread)?;
+        store.set_thread_archived(thread.id, true)?;
+        assert_eq!(store.archived_threads()?, vec![thread.id.to_string()]);
+        store.set_thread_archived(thread.id, false)?;
+        assert!(store.archived_threads()?.is_empty());
+        store.unregister_project(project.id)?;
+        assert!(store.projects()?.is_empty());
+        assert_eq!(store.register_project(dir.path())?.id, project.id);
+        assert_eq!(store.threads()?.len(), 1);
+        let key = format!("chatgpt_messages:{}", thread.id);
+        store.set_setting(&key, "private transcript")?;
+        store.delete_thread(thread.id)?;
+        assert!(store.threads()?.is_empty());
+        assert_eq!(store.setting(&key)?, None);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("keep.txt"))?,
+            "preserved"
+        );
+        Ok(())
+    }
     #[test]
     fn migration_is_idempotent_and_persists() -> Result<()> {
         let dir = tempfile::tempdir()?;

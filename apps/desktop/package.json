@@ -1,5 +1,5 @@
 {
-  "name": "astra-codex-hub",
+  "name": "localoud-ai",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -20,5 +20,6 @@
     "jsdom": "^30.0.1",
     "typescript": "^5.9.0",
     "vite": "^7.0.0"
-  }
+  },
+  "license": "MIT"
 }

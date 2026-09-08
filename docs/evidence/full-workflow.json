@@ -18,7 +18,7 @@
     "rework_instruction": null,
     "verdict": "approve"
   },
-  "root": "/private/var/folders/lm/s5hgvkpd7451pbw9pj889h780000gn/T/astra-full-fixture-eqoc8Q",
+  "root": "/tmp/astra-full-fixture-eqoc8Q",
   "tasks": [
     {
       "assigned_executor": "codex",

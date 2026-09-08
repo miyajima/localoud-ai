@@ -390,6 +390,7 @@ pub struct CompletionResult {
 static COMPLETION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 #[tauri::command]
 pub async fn complete_prompt(
+    local_only: Option<bool>,
     project_id: String,
     prefix: String,
     state: tauri::State<'_, AppState>,
@@ -445,6 +446,11 @@ pub async fn complete_prompt(
         Ok(Err(e)) => format!("ローカル補完を利用できません: {e}"),
         Err(_) => "ローカル補完が15秒以内に完了しませんでした。".into(),
     };
+    if local_only == Some(true) {
+        return Err(format!(
+            "{fallback_reason} ChatGPT選択中はCodex枠を使うLuna補完を呼びません。"
+        ));
+    }
     let suffix = models::codex_provider(&state)
         .await?
         .complete_composer_text(root, "gpt-5.6-luna", "low", prompt)

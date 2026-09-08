@@ -328,7 +328,7 @@ impl CodexProvider {
         provider
             .request(
                 "initialize",
-                json!({"clientInfo":{"name":"astra_hub","title":"Astra Hub","version":"0.1.0"},"capabilities":{"experimentalApi":true}}),
+                json!({"clientInfo":{"name":"astra_hub","title":"Localoud AI","version":"0.1.0"},"capabilities":{"experimentalApi":true}}),
             )
             .await?;
         provider.write(json!({"method":"initialized"})).await?;

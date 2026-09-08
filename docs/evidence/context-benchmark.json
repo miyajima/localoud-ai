@@ -46,7 +46,7 @@
         "model": "gpt-6-astra",
         "output_tokens": 1901
       },
-      "worktree": "/private/var/folders/lm/s5hgvkpd7451pbw9pj889h780000gn/T/astra-context-benchmark-WmY9CA/.agent-worktrees/task-5958739f-d1c7-4667-afa3-dac0f7e8e0d0"
+      "worktree": "/tmp/astra-context-benchmark-WmY9CA/.agent-worktrees/task-5958739f-d1c7-4667-afa3-dac0f7e8e0d0"
     },
     {
       "acceptance_output": ".........\n----------------------------------------------------------------------\nRan 9 tests in 0.000s\n\nOK\n",
@@ -77,7 +77,7 @@
         "model": "gpt-6-astra",
         "output_tokens": 2052
       },
-      "worktree": "/private/var/folders/lm/s5hgvkpd7451pbw9pj889h780000gn/T/astra-context-benchmark-WmY9CA/.agent-worktrees/task-9db47d22-d4db-4062-b26e-294527d5799c"
+      "worktree": "/tmp/astra-context-benchmark-WmY9CA/.agent-worktrees/task-9db47d22-d4db-4062-b26e-294527d5799c"
     }
   ]
 }

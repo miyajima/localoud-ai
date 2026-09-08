@@ -1,10 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod astra;
 mod auto_routing;
+mod chatgpt;
 mod composer;
 mod memory;
 mod models;
 mod plans;
+mod workflow;
 mod workspace_ui;
 use hub_core::{ExecutorKind, ExecutorPreference, ModelUsageRecord};
 use hub_core::{HubThreadId, Project, ProjectId, ThreadMapping};
@@ -30,6 +32,9 @@ struct Connection {
     sessions: Arc<Sessions>,
 }
 struct AppState {
+    workflow_lock: AsyncMutex<()>,
+    browser: Arc<chatgpt::Browser>,
+    local_stops: AsyncMutex<std::collections::HashMap<HubThreadId, Arc<tokio::sync::Notify>>>,
     store: Arc<Mutex<Store>>,
     bus: EventBus,
     connection: AsyncMutex<Option<Connection>>,
@@ -164,12 +169,7 @@ fn register_project(path: String, state: tauri::State<AppState>) -> Result<Proje
 }
 #[tauri::command]
 fn threads(state: tauri::State<AppState>) -> Result<Vec<ThreadMapping>, String> {
-    state
-        .store
-        .lock()
-        .map_err(|e| format!("{e:#}"))?
-        .threads()
-        .map_err(|e| format!("{e:#}"))
+    workflow::project_threads(&*state.store.lock().map_err(|e| e.to_string())?)
 }
 #[derive(serde::Serialize)]
 struct RoutedTask {
@@ -336,11 +336,25 @@ async fn run_local(
     known_files: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<LocalResult, String> {
-    state
-        .local
-        .run(parse_thread(thread_id)?, text, known_files)
-        .await
-        .map_err(|e| format!("{e:#}"))
+    let id = parse_thread(thread_id)?;
+    let stop = Arc::new(tokio::sync::Notify::new());
+    {
+        let mut stops = state.local_stops.lock().await;
+        if stops.contains_key(&id) {
+            return Err("このセッションは実行中です。".into());
+        }
+        stops.insert(id, stop.clone());
+    }
+    let result = tokio::select! {
+       result=state.local.run(id,text,known_files)=>result.map_err(|e|format!("{e:#}")),
+       _=stop.notified()=>{
+         let thread=state.store.lock().map_err(|e|e.to_string())?.threads().map_err(|e|e.to_string())?.into_iter().find(|t|t.id==id).ok_or("セッションが見つかりません。")?;
+         let _=state.bus.publish(protocol_types::AgentEvent{thread_id:Some(thread.provider_thread_id),turn_id:None,item_id:None,kind:"turn_completed".into(),text:"interrupted".into(),details:None});
+         Err("ローカル処理を停止しました。".into())
+       }
+    };
+    state.local_stops.lock().await.remove(&id);
+    result
 }
 #[tauri::command]
 fn model_usage(state: tauri::State<AppState>) -> Result<Vec<ModelUsageRecord>, String> {
@@ -441,6 +455,10 @@ async fn resume_task(
     thread_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<ThreadSnapshot, String> {
+    let id = parse_thread(thread_id.clone())?;
+    if state.browser.is_thread(id)? {
+        return state.browser.resume(id).await;
+    }
     state
         .sessions()
         .await?
@@ -479,6 +497,15 @@ async fn interrupt_turn(
     thread_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    let local_id = parse_thread(thread_id.clone())?;
+    if let Some(stop) = state.local_stops.lock().await.get(&local_id) {
+        stop.notify_one();
+        return Ok(());
+    }
+    let id = parse_thread(thread_id.clone())?;
+    if state.browser.is_thread(id)? {
+        return state.browser.stop(id).await;
+    }
     state
         .sessions()
         .await?
@@ -553,7 +580,13 @@ fn main() {
                 provider: Arc::new(SparkProvider::configured(local_config.clone())?),
                 lock: AsyncMutex::new(()),
             };
+            let browser =
+                chatgpt::Browser::new(store.clone(), bus.clone()).map_err(std::io::Error::other)?;
+            browser.start();
             app.manage(AppState {
+                workflow_lock: AsyncMutex::new(()),
+                browser,
+                local_stops: AsyncMutex::new(std::collections::HashMap::new()),
                 store,
                 bus,
                 connection: AsyncMutex::new(None),
@@ -566,6 +599,12 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            workflow::workflow_run,
+            workflow::workflow_snapshot,
+            workflow::workflow_stop,
+            chatgpt::chatgpt_status,
+            chatgpt::chatgpt_create,
+            chatgpt::chatgpt_send,
             auto_routing::auto_settings,
             auto_routing::set_auto_settings,
             auto_routing::preview_auto_route,
@@ -590,6 +629,9 @@ fn main() {
             workspace_ui::choose_path,
             workspace_ui::open_web_link,
             workspace_ui::rename_thread,
+            workspace_ui::archived_threads,
+            workspace_ui::manage_session,
+            workspace_ui::unregister_project,
             memory::extract_memory,
             memory::orgbrain_settings,
             memory::set_orgbrain_settings,
@@ -626,5 +668,5 @@ fn main() {
             repo_diff
         ])
         .run(tauri::generate_context!())
-        .expect("failed to run Astra Hub");
+        .expect("failed to run Localoud AI");
 }

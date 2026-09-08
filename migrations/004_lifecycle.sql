@@ -1,0 +1,3 @@
+ALTER TABLE projects ADD COLUMN registered INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE provider_threads ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+PRAGMA user_version=4;

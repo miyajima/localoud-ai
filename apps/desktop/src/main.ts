@@ -18,7 +18,7 @@ async function invoke<T = unknown>(command: string, args?: Record<string, unknow
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([nativeInvoke<T>(command, args), new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`操作の応答がありません (${command})。再開して状態を確認してください。`)), ['preview_auto_route','create_astra_plan','final_review','diagnose_task','composer_catalog','send_composed_turn','complete_prompt'].includes(command) ? 270000 : command === 'run_local' ? 240000 : 40000);
+      timer = setTimeout(() => reject(new Error(`操作の応答がありません (${command})。再開して状態を確認してください。`)), ['preview_auto_route','create_astra_plan','final_review','diagnose_task','composer_catalog','send_composed_turn','complete_prompt','chatgpt_send','workflow_run'].includes(command) ? 270000 : command === 'run_local' ? 240000 : 40000);
     })]);
   } finally { clearTimeout(timer); }
 }
@@ -26,13 +26,58 @@ type Project = { id: string; name: string; root: string };
 type Thread = { id: string; project_id: string; provider_thread_id: string; provider: string; title: string; status: string };
 type AgentEvent = { thread_id: string | null; turn_id: string | null; item_id: string | null; kind: string; text: string };
 type JournalEvent = { sequence: number; event: AgentEvent };
-type ChatMessage = { role: string; text: string; key: string };
+type ChatMessage = { role: string; text: string; key: string; label?:string };
 type Snapshot = { active_turn: { id: string } | null; messages: { role: string; text: string }[] };
 type View = { messages: ChatMessage[]; events: JournalEvent[]; diff: string; running: boolean; needsResume: boolean; sequence: number; route?: string; summary?: string; review?: string; finalReview?: {verdict:string;findings:string[];rework_instruction:string|null}; recovery?:{action:string;reason:string;instruction:string;replacement:unknown|null}; activeTurn?:string; completedTurns?:Set<string>; capture?:Capture; context?: ContextInspection|null };
 let projects: Project[] = [], threads: Thread[] = [], activeProject: string | null = null, activeThread: string | null = null;
 const views = new Map<string, View>();
 const tabs = ['Chat', 'Plan', 'Diff', 'Agents', 'Terminal', 'Context', 'Usage'];
 let taskFilter = '';
+function workflowPhase(){const mode=composerMode();return mode.startsWith('workflow-')?mode.slice(9):null;}
+function workflowThread(){return threads.find(t=>t.id===activeThread)?.provider==='workflow';}
+function choosePhase(phase:string){
+  if(busy||selectedView()?.running)return;
+  (document.querySelector('#task-mode') as HTMLSelectElement).value='workflow-'+phase;
+  pendingPreference=undefined;composerReasoning=null;
+  const remembered=activeThread?workflowTargets[activeThread]?.[phase]:undefined;
+  const current=threads.find(t=>t.id===activeThread);
+  const existing=phase==='implement'&&current?.provider==='codex'?modelChoices.find(m=>!m.chatgpt&&!m.local&&m.model===threadModels[current.id])?.key:undefined;
+  updateModelOptions(remembered?.key||existing||'');
+  if(remembered)composerReasoning=remembered.reasoning;
+  activeTab='Chat';saveDraft();render();focusComposer();
+}
+const workflowTargets:Record<string,Record<string,{key:string;reasoning:string|null}>>={};
+async function refreshWorkflow(id:string,resume=false){
+  const snapshot=await invoke<{running:boolean;status:string;messages:ChatMessage[];phase:string;model:string;handoff:string;targets:Record<string,{model:string;reasoning:string|null;chatgpt:boolean}>}>('workflow_snapshot',{threadId:id,resume});
+  workflowTargets[id]??={};
+  for(const [phase,target] of Object.entries(snapshot.targets)){const choice=modelChoices.find(m=>m.model===target.model&&!!m.chatgpt===target.chatgpt&&!m.local);workflowTargets[id][phase]={key:choice?.key||(target.chatgpt?'chatgpt:':'codex:')+target.model,reasoning:target.reasoning};}
+  threadModels[id]=snapshot.model;
+  const v=view(id);v.messages=snapshot.messages;v.running=snapshot.running;v.needsResume=false;
+  v.route=snapshot.handoff?'自動で引き継いだ内容\n'+snapshot.handoff:undefined;
+  if(snapshot.status==='failed'){v.route='直前の実行は失敗しました。内容と接続を確認してから再送してください。\n'+(v.route||'');}
+  const t=threads.find(t=>t.id===id);if(t)t.status=snapshot.running?'running':snapshot.status||'idle';
+  if(activeThread===id)render();
+}
+async function sendWorkflow(){
+  const phase=workflowPhase(),model=selectedModel(),input=document.querySelector<HTMLTextAreaElement>('#task-input')!;
+  if(!phase||busy||!activeProject||selectedView()?.running)return;
+  if(!model||model.local||(phase==='implement'&&!!model.chatgpt)){error('この操作に使うモデルを選択してください。ChatGPTが表示されない場合は接続設定を確認してください。');return;}
+  if((composer?.getMentions().length||0)||knownFiles().length){error('この操作では参照欄を空にしてください。プラン・実装結果と、レビュー時の作業差分は自動で引き継ぎます。');return;}
+  const text=input.value.trim()||(phase==='review'?'実装を要件・プランと照合してレビューしてください。':phase==='implement'?'上のプラン・レビューを引き継いで実装し、検証してください。':'');
+  if(!text){error('計画したい内容を入力してください。');return;}
+  busy=true;error('');render();
+  try{
+    const reasoning=selectedReasoning();
+    const thread=await invoke<Thread>('workflow_run',{request:{threadId:activeThread,projectId:activeProject,phase,provider:model.chatgpt?'chatgpt':'codex',model:model.model,reasoning,text}});
+    if(!activeThread)delete ui.drafts![draftKey()];
+    activeThread=thread.id;workflowTargets[thread.id]??={};workflowTargets[thread.id][phase]={key:model.key,reasoning};
+    threads=await invoke<Thread[]>('threads');threadModels[thread.id]=model.model;
+    input.value='';composer?.clear();saveDraft();rememberSelection();await refreshWorkflow(thread.id);
+  }catch(e){error(String(e));if(activeThread)view(activeThread).needsResume=true;await refreshThreads();}
+  finally{busy=false;render();}
+}
+
+let archivedThreads:string[]=[],showArchived=false;
 let picking = false;
 type Draft = {text:string;files:string;preference:string;mode?:string;reasoning?:string|null;mentions?:Mention[]};
 let composerReasoning:string|null=null;
@@ -42,14 +87,15 @@ function refreshComposerReasoning(){
   const select=document.querySelector<HTMLSelectElement>('#reasoning')!;
   if(!activeThread&&(document.querySelector('#preference') as HTMLSelectElement).value==='auto'){select.replaceChildren(new Option('Auto 設定を使用',''));select.disabled=true;return;}
   const current=threads.find(t=>t.id===activeThread);
-  const model=activeThread?modelChoices.find(m=>m.model===threadModels[activeThread!]&&m.local===(current?.provider==='spark')):selectedModel();
-  fillReasoningSelect(select,model,activeThread?threadReasoning[activeThread]||null:composerReasoning);
-  select.disabled ||= !!activeThread||busy;
+  const model=activeThread&&!workflowPhase()?modelChoices.find(m=>m.model===threadModels[activeThread!]&&m.local===(current?.provider==='spark')):selectedModel();
+  fillReasoningSelect(select,model,activeThread&&!workflowPhase()?threadReasoning[activeThread]||null:composerReasoning);
+  select.disabled ||= (!!activeThread&&!workflowPhase())||busy;
 }
 type LocalConfig = {endpoint:string;model_id:string;display_name:string;quantization_bits:number};
 let modelChoices:ModelChoice[]=[], modelWarnings:string[]=[], threadModels:Record<string,string>={}, localConfig:LocalConfig|null=null;
 let loadingModels=false;let modelRefresh:Promise<void>|null=null;let pendingPreference:string|undefined;
 function threadModelLabel(t:Thread|undefined){return t ? threadModels[t.id] || (t.provider==='spark'?'ローカルモデル（過去のタスク）':'モデル未取得') : '';}
+function chatgptSelected(){const phase=workflowPhase();if(phase)return !!selectedModel()?.chatgpt;return activeThread?threads.find(t=>t.id===activeThread)?.provider==='chatgpt':!!selectedModel()?.chatgpt;}
 function selectedModel(){return modelChoices.find(m=>m.key===(document.querySelector('#preference') as HTMLSelectElement).value);}
 function planningMode(){return (document.querySelector('#task-mode') as HTMLSelectElement).value==='plan';}
 function composerMode(){return (document.querySelector('#task-mode') as HTMLSelectElement).value;}
@@ -61,19 +107,20 @@ function setComposerMode(mode:string){
 }
 function updateModelOptions(preferred?:string){
   const select=document.querySelector<HTMLSelectElement>('#preference')!, previous=preferred??pendingPreference??select.value;pendingPreference=previous;
-  const choices=modelChoices.filter(m=>!cloudMode()||!m.local);
+  const phase=workflowPhase();const choices=modelChoices.filter(m=>phase?(!m.local&&(phase!=='implement'||!m.chatgpt)):!cloudMode()||(!m.local&&!m.chatgpt));
   select.replaceChildren();
-  if(!cloudMode())select.add(new Option('自動','auto'));
+  if(!cloudMode()&&!phase)select.add(new Option('自動','auto'));
   appendModelOptions(select,choices);
+  if(phase&&!choices.length){const empty=new Option('モデル一覧を更新してください','');empty.disabled=true;select.add(empty);}
   if(Array.from(select.options).some(o=>o.value===previous))select.value=previous;
   else if(previous && previous!=='auto'){const missing=new Option('選択したモデルは利用できません',previous);missing.disabled=true;select.add(missing);select.value=previous;}
-  else select.value=cloudMode()?(choices[0]?.key||''):'auto';
+  else select.value=cloudMode()?((phase&&phase!=='implement'?choices.find(m=>m.chatgpt)?.key:undefined)||choices[0]?.key||''):'auto';
   refreshComposerReasoning();
   renderModelHint();
 }
 function renderModelHint(){
   const m=selectedModel(), select=document.querySelector<HTMLSelectElement>('#preference')!;
-  document.querySelector('#model-hint')!.textContent=loadingModels?'モデル一覧を確認中…':activeThread?'このタスクのモデル: '+threadModelLabel(threads.find(t=>t.id===activeThread)):composerMode()==='codex-plan'?'Codexのプランモードで相談・調査します。実装へ移るときは操作を切り替えてください。':composerMode()==='goal'?'入力した目標をCodexのゴールに設定して実行します。':planningMode()?'Planタブ用の実行計画を作ります。実装は計画の確認後に開始します。':m?.local?'対象ファイルを1〜2件指定してください。':select.value==='auto'?'依頼に応じてモデルを選びます。計画が必要な場合は実装を開始せず案内します。':m?'選択したモデルで実装します。':'接続設定を確認し、モデル一覧を更新してください。';
+  document.querySelector('#model-hint')!.textContent=loadingModels?'モデル一覧を確認中…':workflowPhase()?`同じセッションで ${workflowPhase()==='implement'?'Codexにプラン・レビューを引き継いで実装':workflowPhase()==='review'?`${m?.chatgpt?'ChatGPT':'Codex'}に会話・実装結果・差分を渡してレビュー`:`${m?.chatgpt?'ChatGPT':'Codex'}でプランを相談`}します。モデルを確認して送信してください。`:activeThread?'このタスクのモデル: '+threadModelLabel(threads.find(t=>t.id===activeThread)):composerMode()==='codex-plan'?'Codexのプランモードで相談・調査します。実装へ移るときは操作を切り替えてください。':composerMode()==='goal'?'入力した目標をCodexのゴールに設定して実行します。':planningMode()?'Planタブ用の実行計画を作ります。実装は計画の確認後に開始します。':m?.chatgpt?'ChatGPTの会話枠を使用します。Codexは呼び出しません。':m?.local?'対象ファイルを1〜2件指定してください。':select.value==='auto'?'依頼に応じてモデルを選びます。計画が必要な場合は実装を開始せず案内します。':m?'選択したモデルで実装します。':'接続設定を確認し、モデル一覧を更新してください。';
 }
 function refreshModels():Promise<void>{
   if(modelRefresh)return modelRefresh;
@@ -82,7 +129,7 @@ function refreshModels():Promise<void>{
 }
 async function loadModels(){
   loadingModels=true;renderModelHint();
-  try{const result=await invoke<{models:ModelChoice[];warnings:string[]}>('available_models');modelChoices=result.models;modelWarnings=result.warnings;[threadModels,threadReasoning]=await Promise.all([invoke<Record<string,string>>('thread_models'),invoke<Record<string,string>>('thread_reasoning')]);updateModelOptions();if(modelWarnings.length)notice(modelWarnings.join('\n'));}
+  try{const result=await invoke<{models:ModelChoice[];warnings:string[]}>('available_models');const browser=await invoke<{models:{id:string;label:string;efforts:string[]}[]}>('chatgpt_status');modelChoices=[...result.models,...browser.models.map(m=>({key:'chatgpt:'+m.id,label:m.label+' (ChatGPT)',model:m.id,local:false,chatgpt:true,reasoning:m.efforts,default_reasoning:null,is_default:false}))];modelWarnings=result.warnings;[threadModels,threadReasoning]=await Promise.all([invoke<Record<string,string>>('thread_models'),invoke<Record<string,string>>('thread_reasoning')]);updateModelOptions();if(modelWarnings.length)notice(modelWarnings.join('\n'));}
   catch(e){error(String(e));}finally{loadingModels=false;render();}
 }
 type UiState = {project?:string|null;thread?:string|null;tab?:string;sidebarHidden?:boolean;pins?:string[];drafts?:Record<string,Draft>;plans?:Record<string,string>};
@@ -100,11 +147,18 @@ type ContextInspection = {initial_tokens:number;retrieved_tokens:number;current_
 let graph:GraphTask[]=[];
 let planText=JSON.stringify({title:'実装計画',steps:[{key:'implementation',title:'実装と検証',goal:'ここに具体的な実装内容を記入',dependencies:[],brief:{acceptance_criteria:['ここに合格条件を記入'],constraints:['公開 API を変更しない'],context_items:[],budget:{initial_tokens:6000,max_total_tokens:24000,max_single_retrieval_tokens:2000}}}]},null,2);
 const defaultPlanText=planText;
-let activeTab = 'Chat', busy = false;
+let activeTab = 'Chat', busy = false, stopping=false;
 let renderedContentKey='';
 const app = document.querySelector<HTMLDivElement>('#app')!;
-app.innerHTML = `<aside><div class="brand"><span class="mark">✳</span> Astra Hub <small>LOCAL WORKSPACE</small></div><button id="new" class="new" title="新しいタスク ⌘N">＋ 新しいタスク <kbd>⌘N</kbd></button><button id="command-menu" class="command-trigger">タスク・操作を検索 <kbd>⌘K</kbd></button><div class="section-title">PROJECTS <button id="add" aria-label="フォルダを開く" title="フォルダを開く ⌘O">＋</button></div><div id="projects"></div><div class="section-title">TASKS</div><input id="task-filter" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="タスクを絞り込む" placeholder="タスクを絞り込む"><div id="threads"></div><button id="settings" class="settings">接続設定</button><div class="sidebar-bottom"><span class="dot"></span> Local-first <small>Context stays intentional.</small></div></aside><main><header><div><span class="eyebrow">WORKSPACE</span><h1 id="project-title">プロジェクトを開く</h1><button id="project-path" class="project-path" title="フォルダのパスをコピー"></button></div><div class="header-actions"><button id="sidebar-toggle" title="サイドバーを切り替え ⌘B" aria-label="サイドバーを切り替え">☰</button><button id="rename-task" title="タスク名を変更" hidden>名前を変更</button><span id="status" class="badge">Codex app-server</span><button id="resume" hidden>再開・状態を確認</button></div></header><nav aria-label="ワークスペースの表示">${tabs.map(t => `<button data-tab="${t}">${t}</button>`).join('')}</nav><div id="error" role="alert" hidden></div><div id="notice" role="status" hidden></div><section id="content" aria-live="polite"></section><footer><div class="compose"><textarea id="task-input" aria-label="タスクの指示" placeholder="実装したいことを入力…"></textarea><div class="compose-controls"><div class="executor-controls"><label for="task-mode">操作</label><select id="task-mode"><option value="implement">実装する</option><option value="codex-plan">プランモード（Codex）</option><option value="goal">ゴールを設定して実行</option><option value="plan">実行計画を作る</option></select><label for="preference">モデル</label><select id="preference"><option value="auto">自動</option></select><label for="reasoning">Reasoning</label><select id="reasoning"><option value="">既定</option></select><button id="auto-settings-button" type="button">Auto 設定</button><button id="refresh-models" type="button" title="利用できるモデルを再取得" aria-label="モデル一覧を更新">↻</button><input spellcheck="false" autocorrect="off" autocapitalize="off" id="known-files" aria-label="対象ファイル" placeholder="対象ファイル（例: src/main.rs）"></div><div><button id="stop" hidden>停止</button><button id="send" class="primary">実行 ↑</button></div></div></div><p id="model-hint" class="model-hint"></p><div class="footnote"><span id="draft-status"></span><span>⌘Enter で送信 · Enter で改行</span></div></footer></main><dialog id="register"><form><h2>プロジェクトを登録</h2><p>作業する Git リポジトリのフォルダを選択してください。</p><button id="browse-project" type="button" class="primary">フォルダを選択…</button><label for="path">フォルダの絶対パス</label><input spellcheck="false" autocorrect="off" autocapitalize="off" id="path" required placeholder="/Users/you/projects/my-app"><p id="form-error" role="alert"></p><div class="dialog-actions"><button type="button" id="cancel">キャンセル</button><button class="primary" type="submit">登録する</button></div></form></dialog><dialog id="connection-settings"><form id="settings-form"><h2>接続設定</h2><p>デスクトップアプリから使う Codex 実行ファイルを指定します。</p><label for="codex-path">Codex 実行ファイルの絶対パス</label><button id="browse-codex" type="button">ファイルを選択…</button><input spellcheck="false" autocorrect="off" autocapitalize="off" id="codex-path" required placeholder="/opt/homebrew/bin/codex"><label for="astra-mode">レビュー・診断の利用経路</label><select id="astra-mode"><option value="disabled">無効（手動計画）</option><option value="codex_integrated">Codex 認証を利用</option></select><label for="astra-model">既定のレビュー・診断モデル ID</label><input id="astra-model" value="gpt-6-astra"><label for="astra-reasoning">レビュー・診断の Reasoning</label><select id="astra-reasoning"><option value="">既定</option></select><p>直接 API の課金設定とは別です。最終レビュー・診断で使用します。計画のモデルは入力欄で選択します。</p><fieldset><legend>ローカルモデル</legend><p>対応サービスを起動し、その接続情報を指定します。保存時にモデルを照合し、再起動後に反映します。</p><label for="local-name">表示名</label><input id="local-name" required><label for="local-id">モデル ID（サービスの返す値）</label><input id="local-id" required spellcheck="false" autocorrect="off" autocapitalize="off"><label for="local-endpoint">接続先（ポートを含むURL）</label><input id="local-endpoint" required spellcheck="false" autocorrect="off" autocapitalize="off"><p>現在は専用API（GET /health・POST /v1/generate）を提供するローカル実行環境に対応しています。OpenAI Responses API対応だけでは接続できません。</p><p>量子化ビット数は接続先から自動取得します。この画面でモデルの量子化は変更しません。</p></fieldset><p id="settings-error" role="alert"></p><div class="dialog-actions"><button type="button" id="settings-cancel">閉じる</button><button type="submit" class="primary">保存する</button></div></form></dialog>`;
+app.innerHTML = `<aside><div class="brand"><span class="mark">✳</span> Localoud AI <small>LOCAL WORKSPACE</small></div><button id="new" class="new" title="新しいタスク ⌘N">＋ 新しいタスク <kbd>⌘N</kbd></button><button id="command-menu" class="command-trigger">タスク・操作を検索 <kbd>⌘K</kbd></button><div class="section-title">PROJECTS <button id="add" aria-label="フォルダを開く" title="フォルダを開く ⌘O">＋</button></div><div id="projects"></div><div class="section-title">SESSIONS <button id="show-archived" title="アーカイブを表示" aria-label="アーカイブを表示">▣</button></div><input id="task-filter" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="タスクを絞り込む" placeholder="タスクを絞り込む"><div id="threads"></div><button id="settings" class="settings">接続設定</button><div class="sidebar-bottom"><span class="dot"></span> Local-first <small>Context stays intentional.</small></div></aside><main><header><div><span class="eyebrow">WORKSPACE</span><h1 id="project-title">プロジェクトを開く</h1><button id="project-path" class="project-path" title="フォルダのパスをコピー"></button></div><div class="header-actions"><button id="sidebar-toggle" title="サイドバーを切り替え ⌘B" aria-label="サイドバーを切り替え">☰</button><button id="session-actions" title="セッションの操作" aria-label="セッションの操作" hidden>⋯</button><button id="rename-task" hidden>名前を変更</button><span id="status" class="badge">Codex app-server</span><button id="resume" hidden>再開・状態を確認</button></div></header><nav aria-label="ワークスペースの表示">${tabs.map(t => `<button data-tab="${t}">${t}</button>`).join('')}</nav><div id="error" role="alert" hidden></div><div id="notice" role="status" hidden></div><section id="content" aria-live="polite"></section><footer><div class="compose"><textarea id="task-input" aria-label="タスクの指示" placeholder="実装したいことを入力…"></textarea><div class="compose-controls"><div class="executor-controls"><label for="operation">操作</label><select id="operation"><option value="advanced" hidden disabled>追加の操作</option><option value="plan">プラン</option><option value="implement">実装</option><option value="review">レビュー</option></select><span id="execution-source" class="execution-source"></span><select id="task-mode" hidden aria-hidden="true"><option value="workflow-plan">プラン</option><option value="workflow-implement">実装（Codex・引き継ぎ）</option><option value="workflow-review">レビュー</option><option value="implement" selected>実装する</option><option value="codex-plan">プランモード（Codex）</option><option value="goal">ゴールを設定して実行</option><option value="plan">実行計画を作る</option></select><label for="preference">モデル</label><select id="preference"><option value="auto">自動</option></select><label for="reasoning">Reasoning</label><select id="reasoning"><option value="">既定</option></select><button id="auto-settings-button" type="button">Auto 設定</button><button id="refresh-models" type="button" title="利用できるモデルを再取得" aria-label="モデル一覧を更新">↻</button><input spellcheck="false" autocorrect="off" autocapitalize="off" id="known-files" aria-label="対象ファイル" placeholder="対象ファイル（例: src/main.rs）"></div><div><button id="stop" class="round-send" title="停止" aria-label="停止" hidden>■</button><button id="send" class="primary round-send" title="送信" aria-label="送信">↑</button></div></div></div><p id="model-hint" class="model-hint"></p><div class="footnote"><span id="draft-status"></span><span>⌘Enter で送信 · Enter で改行</span></div></footer></main><dialog id="register"><form><h2>プロジェクトを登録</h2><p>作業する Git リポジトリのフォルダを選択してください。</p><button id="browse-project" type="button" class="primary">フォルダを選択…</button><label for="path">フォルダの絶対パス</label><input spellcheck="false" autocorrect="off" autocapitalize="off" id="path" required placeholder="/Users/you/projects/my-app"><p id="form-error" role="alert"></p><div class="dialog-actions"><button type="button" id="cancel">キャンセル</button><button class="primary" type="submit">登録する</button></div></form></dialog><dialog id="connection-settings"><form id="settings-form"><h2>接続設定</h2><button id="chatgpt-settings" type="button">ChatGPTを接続する</button><p>デスクトップアプリから使う Codex 実行ファイルを指定します。</p><label for="codex-path">Codex 実行ファイルの絶対パス</label><button id="browse-codex" type="button">ファイルを選択…</button><input spellcheck="false" autocorrect="off" autocapitalize="off" id="codex-path" required placeholder="/opt/homebrew/bin/codex"><label for="astra-mode">レビュー・診断の利用経路</label><select id="astra-mode"><option value="disabled">無効（手動計画）</option><option value="codex_integrated">Codex 認証を利用</option></select><label for="astra-model">既定のレビュー・診断モデル ID</label><input id="astra-model" value="gpt-6-astra"><label for="astra-reasoning">レビュー・診断の Reasoning</label><select id="astra-reasoning"><option value="">既定</option></select><p>直接 API の課金設定とは別です。最終レビュー・診断で使用します。計画のモデルは入力欄で選択します。</p><fieldset><legend>ローカルモデル</legend><p>対応サービスを起動し、その接続情報を指定します。保存時にモデルを照合し、再起動後に反映します。</p><label for="local-name">表示名</label><input id="local-name" required><label for="local-id">モデル ID（サービスの返す値）</label><input id="local-id" required spellcheck="false" autocorrect="off" autocapitalize="off"><label for="local-endpoint">接続先（ポートを含むURL）</label><input id="local-endpoint" required spellcheck="false" autocorrect="off" autocapitalize="off"><p>現在は専用API（GET /health・POST /v1/generate）を提供するローカル実行環境に対応しています。OpenAI Responses API対応だけでは接続できません。</p><p>量子化ビット数は接続先から自動取得します。この画面でモデルの量子化は変更しません。</p></fieldset><p id="settings-error" role="alert"></p><div class="dialog-actions"><button type="button" id="settings-cancel">閉じる</button><button type="submit" class="primary">保存する</button></div></form></dialog>`;
 document.body.insertAdjacentHTML('beforeend', `<dialog id="commands" aria-label="タスク・操作を検索"><label for="command-query">タスク・操作を検索</label><input id="command-query" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="タスク名、プロジェクト名、操作…" autocomplete="off"><div id="command-results"></div><small>↑↓ で選択 · Enter で開く · Esc で閉じる</small></dialog><dialog id="rename-dialog"><form id="rename-form"><h2>タスク名を変更</h2><label for="task-name">タスク名</label><input id="task-name" required maxlength="120"><p id="rename-error" role="alert"></p><div class="dialog-actions"><button type="button" id="rename-cancel">キャンセル</button><button type="submit" class="primary">保存</button></div></form></dialog>`);
+const more=document.createElement('details');more.id='compose-more';more.innerHTML='<summary aria-label="入力オプション" title="入力オプション">＋</summary><div class="compose-more-panel"></div>';
+document.querySelector('.executor-controls')!.prepend(more);
+more.querySelector('div')!.insertAdjacentHTML('beforeend','<label for="advanced-operation">追加の操作</label><select id="advanced-operation"><option value="">選択…</option><option value="implement">通常実行（選択モデル）</option><option value="codex-plan">Codexで相談</option><option value="goal">Codexでゴールを実行</option><option value="plan">Codexで分割実行計画を作成</option></select>');
+document.querySelector('#operation')!.addEventListener('change',e=>choosePhase((e.target as HTMLSelectElement).value));
+document.querySelector('#advanced-operation')!.addEventListener('change',e=>{const mode=(e.target as HTMLSelectElement).value;if(!mode||busy||selectedView()?.running)return;(document.querySelector('#task-mode') as HTMLSelectElement).value=mode;pendingPreference=undefined;composerReasoning=null;updateModelOptions('');saveDraft();render();more.open=false;});
+for(const id of ['auto-settings-button','refresh-models','known-files'])more.querySelector('div')!.append(document.getElementById(id)!);
+app.insertAdjacentHTML('beforeend','<dialog id="lifecycle-dialog" aria-label="プロジェクト・セッションの操作"><h2 id="lifecycle-title"></h2><p id="lifecycle-description"></p><div id="lifecycle-actions" class="dialog-actions"></div><p id="lifecycle-error" role="alert"></p><button id="lifecycle-close">閉じる</button></dialog>');
 const escape = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 function view(id: string): View { if (!views.has(id)) views.set(id, { messages: [], events: [], diff: '', running: false, needsResume: true, sequence: 0 }); return views.get(id)!; }
 function selectedView() { return activeThread ? view(activeThread) : null; }
@@ -112,11 +166,12 @@ function error(message: string) { if(message)notice(''); const el = document.que
 function render() {
   composer?.syncContext();
   document.querySelector('#app')!.classList.toggle('sidebar-hidden',!!ui.sidebarHidden);
-  document.querySelector('#projects')!.innerHTML = projects.map(p => `<button class="project ${p.id === activeProject ? 'selected' : ''}" data-project="${p.id}" title="${escape(p.root)}">◈ <span>${escape(p.name)}</span></button>`).join('') || '<p class="muted side-empty">リポジトリを登録して<br>作業を始めましょう。</p>';
+  document.querySelector('#projects')!.innerHTML = projects.map(p => `<div class="project-row"><button class="project ${p.id === activeProject ? 'selected' : ''}" data-project="${p.id}" title="${escape(p.root)}">◈ <span>${escape(p.name)}</span></button><button class="project-more" data-project-menu="${p.id}" aria-label="${escape(p.name)}の操作">⋯</button></div>`).join('') || '<p class="muted side-empty">リポジトリを登録して<br>作業を始めましょう。</p>';
   renderThreads();
+  document.querySelectorAll<HTMLButtonElement>('[data-project-menu]').forEach(b=>b.onclick=()=>openLifecycle('project',b.dataset.projectMenu!));
   const project = projects.find(p=>p.id===activeProject);
   const path = document.querySelector<HTMLButtonElement>('#project-path')!; path.textContent=project?.root || ''; path.hidden=!project; path.title=`${project?.root || ''} — クリックでコピー`;
-  document.querySelector<HTMLButtonElement>('#rename-task')!.hidden=!activeThread;
+  document.querySelector<HTMLButtonElement>('#session-actions')!.hidden=!activeThread;
   document.querySelector('#project-title')!.textContent = projects.find(p => p.id === activeProject)?.name || 'プロジェクトを開く';
   document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b => { b.classList.toggle('active', b.dataset.tab === activeTab); b.onclick = () => { activeTab = b.dataset.tab!; rememberSelection(); render(); if(activeTab === 'Diff' && activeThread) void refreshDiff(activeThread); if(activeTab === 'Usage') void refreshUsage(); if(activeTab === 'Context' && activeThread) void refreshContext(activeThread); if(activeTab === 'Plan') void refreshGraph(); }; });
   document.querySelectorAll<HTMLButtonElement>('[data-project]').forEach(b => b.onclick = () => { switchProject(b.dataset.project!); });
@@ -125,24 +180,37 @@ function render() {
   const current = threads.find(t=>t.id===activeThread);
   const providerLabel = threadModelLabel(current);
   const modelSelect=document.querySelector<HTMLSelectElement>('#preference')!;
-  modelSelect.disabled = !!activeThread || busy;
-  if(current){const key=`thread:${current.id}`;let option=Array.from(modelSelect.options).find(o=>o.value===key);if(!option){option=new Option(threadModelLabel(current),key);modelSelect.add(option);}option.text=threadModelLabel(current);modelSelect.value=key;}
+  modelSelect.disabled = (!!activeThread&&!workflowPhase()) || busy;
+  if(current&&!workflowPhase()){const key=`thread:${current.id}`;let option=Array.from(modelSelect.options).find(o=>o.value===key);if(!option){option=new Option(threadModelLabel(current),key);modelSelect.add(option);}option.text=threadModelLabel(current);modelSelect.value=key;}
   const status = document.querySelector('#status')!;
   status.textContent = busy ? '処理中…' : v?.needsResume ? '状態確認が必要' : v?.running ? `${providerLabel} · 実行中` : current ? providerLabel : 'Local workspace';
   const resume = document.querySelector<HTMLButtonElement>('#resume')!; resume.hidden = !activeThread; resume.disabled = busy;
-  const send = document.querySelector<HTMLButtonElement>('#send')!; send.disabled = busy || !activeProject || !!v?.needsResume || !isTauri(); send.textContent = busy ? '処理中…' : v?.running ? '追記を送る ↑' : '実行 ↑';
-  const stop = document.querySelector<HTMLButtonElement>('#stop')!; stop.hidden = !v?.running || current?.provider === 'spark'; stop.disabled = busy || !!v?.needsResume;
+  const send = document.querySelector<HTMLButtonElement>('#send')!; send.disabled = busy || !activeProject || !!v?.needsResume || !isTauri(); send.textContent='↑';send.hidden=!!v?.running;send.title=send.getAttribute('aria-label')||'送信';
+  const stop = document.querySelector<HTMLButtonElement>('#stop')!; stop.hidden = !v?.running; stop.disabled = stopping || !!v?.needsResume;
   const input = document.querySelector<HTMLTextAreaElement>('#task-input')!; input.disabled = busy || !activeProject || !isTauri(); input.placeholder = v?.running ? '実行中のタスクに追加の指示…' : '実装したいことを入力…';
   (document.querySelector('#known-files') as HTMLInputElement).hidden=planningMode()&&!activeThread;
   (document.querySelector('#task-mode') as HTMLSelectElement).disabled=busy||!!v?.running||current?.provider==='spark';
   (document.querySelector('#task-mode option[value=plan]') as HTMLOptionElement).disabled=!!activeThread;
   (document.querySelector('#refresh-models') as HTMLButtonElement).disabled=busy||loadingModels;
-  if(!busy&&!v?.running)send.textContent=planningMode()&&!activeThread?'計画を作成 ↑':composerMode()==='codex-plan'?'プランを相談 ↑':composerMode()==='goal'?'ゴールを開始 ↑':'実行 ↑';
+  send.setAttribute('aria-label',planningMode()&&!activeThread?'計画を作成':composerMode()==='codex-plan'?'プランを相談':composerMode()==='goal'?'ゴールを開始':'送信');
   refreshComposerReasoning();
   (document.querySelector('#auto-settings-button') as HTMLButtonElement).disabled=busy;
   if(!activeThread && (planningMode() || (document.querySelector('#preference') as HTMLSelectElement).value!=='auto'))send.disabled ||= !readTarget(document.querySelector<HTMLSelectElement>('#preference')!,document.querySelector<HTMLSelectElement>('#reasoning')!,modelChoices);
+  const phase=workflowPhase(),mode=composerMode();
+  const operation=document.querySelector<HTMLSelectElement>('#operation')!;
+  operation.value=phase||'advanced';operation.disabled=busy||!!v?.running||current?.provider==='spark';
+  const advanced=document.querySelector<HTMLSelectElement>('#advanced-operation')!;advanced.value=phase?'':mode;advanced.disabled=busy||!!v?.running||workflowThread()||current?.provider==='spark';
+  const source=phase?(selectedModel()?(selectedModel()?.chatgpt?'ChatGPT':'Codex'):'モデルを選択'):mode==='plan'?'Codex · 分割実行計画':mode==='codex-plan'?'Codex · 相談':mode==='goal'?'Codex · ゴール':current?.provider==='chatgpt'||selectedModel()?.chatgpt?'ChatGPT':current?.provider==='spark'||selectedModel()?.local?'ローカル':!activeThread&&(document.querySelector('#preference') as HTMLSelectElement).value==='auto'?'自動選択':'Codex';
+  document.querySelector('#execution-source')!.textContent=source;
   renderModelHint();
   renderContent();
+  document.querySelector('#workflow-steps')?.remove();
+  if(activeProject&&current?.provider!=='spark'){
+    const bar=document.createElement('div');bar.id='workflow-steps';bar.className='workflow-steps';
+
+    if(workflowPhase()&&workflowPhase()!=='implement'&&!modelChoices.some(m=>m.chatgpt)){const connect=document.createElement('button');connect.textContent='ChatGPTを接続';connect.className='primary';connect.onclick=()=>document.querySelector<HTMLButtonElement>('#chatgpt-settings')!.click();bar.append(connect);}
+    document.querySelector('#model-hint')!.before(bar);
+  }
 }
 function renderContent() {
   const content = document.querySelector('#content')!, v = selectedView();
@@ -155,10 +223,10 @@ function renderContent() {
   const current=threads.find(t=>t.id===activeThread), label=threadModelLabel(current);
   if (activeTab === 'Chat') {
     if (!v?.messages.length) content.innerHTML = `<div class="welcome"><span class="big-mark">✳</span><h2>次の一歩を、ここから。</h2><p>${activeProject ? '下の入力欄でモデルと操作を選び、作業を依頼できます。<br>変更と実行ログは、隣のタブで確認できます。' : 'プロジェクト、エージェント、必要なコンテキスト。<br>ひとつのワークスペースで見通せます。'}</p>${!activeProject ? '<button class="primary" id="welcome-add">プロジェクトを登録</button>' : ''}</div>`;
-    else content.innerHTML = `<div class="conversation">${v.route?`<details class="route-note"><summary>${escape(v.route.split('\n')[0])}</summary><p>${escape(v.route)}</p></details>`:''}${v.messages.map((m,index) => `<article class="message ${m.role === 'user' ? 'user' : ''}"><div class="message-role">${m.role === 'user' ? 'あなた' : label}<button class="copy-message" data-copy-message="${index}" title="本文をコピー">コピー</button></div><div class="message-text ${m.role === 'user' ? '' : 'markdown'}">${m.role === 'user' ? escape(m.text) : markdown(m.text)}</div></article>`).join('')}${v.running ? `<div class="working">● ${escape(label)} が作業中</div>` : ''}</div>`;
+    else content.innerHTML = `<div class="conversation">${v.route?`<details class="route-note"><summary>${escape(v.route.split('\n')[0])}</summary><p>${escape(v.route)}</p></details>`:''}${v.messages.map((m,index) => `<article class="message ${m.role === 'user' ? 'user' : ''}"><div class="message-role">${m.role === 'user' ? 'あなた' : escape(m.label||label)}<button class="copy-message" data-copy-message="${index}" title="本文をコピー">コピー</button></div><div class="message-text ${m.role === 'user' ? '' : 'markdown'}">${m.role === 'user' ? escape(m.text) : markdown(m.text)}</div></article>`).join('')}${v.running ? `<div class="working">● ${escape(label)} が作業中</div>` : ''}</div>`;
   } else if (activeTab === 'Diff') content.innerHTML = v?.diff ? `<div class="diff-toolbar"><button id="refresh-diff">更新</button><button id="copy-diff">差分をコピー</button></div>${diffMarkup(v.diff)}` : '<div class="empty"><h2>変更を確認する</h2><p>変更がないか、まだ取得されていません。</p><button id="refresh-diff">差分を更新</button><p></p></div>';
   else if (activeTab === 'Terminal') content.innerHTML = v?.events.length ? `<div class="event-list">${v.events.filter(e => !['message_delta', 'message_completed'].includes(e.event.kind)).map(e => `<div class="event-row"><span>${escape(e.event.kind)}</span><pre>${escape(e.event.text)}</pre></div>`).join('')}</div>` : '<div class="empty"><h2>実行ログ</h2><p>ツールの実行と結果をここに表示します。</p></div>';
-  else if (activeTab === 'Agents') content.innerHTML = `<div class="inspector"><span class="eyebrow">EXECUTION</span><h2>実行エージェント</h2>${activeThread ? `<div class="agent-card"><strong>${escape(label)}</strong><span>${v?.running ? '実行中' : v?.needsResume ? '状態確認待ち' : '待機中'}</span><p>${escape(threads.find(t => t.id === activeThread)?.title || '')}</p><small>${escape(v?.route || current?.provider || '')}</small><div class="agent-actions"><button id="summarize">進捗を要約</button><button id="first-review">一次レビュー</button><button id="final-review">Astra 最終レビュー</button><button id="diagnose">Astra 診断・設計相談</button></div>${v?.summary ? `<pre class="summary">${escape(v.summary)}</pre>` : ''}${v?.review ? `<pre class="summary">${escape(v.review)}</pre>` : ''}${v?.finalReview?`<h3>最終レビュー: ${escape(v.finalReview.verdict)}</h3><pre class="summary">${escape(v.finalReview.findings.join('\n'))}</pre>${v.finalReview.verdict==='rework'?'<button id="apply-rework">既存 worker に修正を戻す</button>':''}`:''}${v?.recovery?`<h3>診断: ${escape(v.recovery.action)}</h3><pre class="summary">${escape(v.recovery.reason+'\n'+v.recovery.instruction)}</pre>${v.recovery.action==='retry_worker'?'<button id="apply-recovery">診断の修正を既存 worker へ</button>':''}${v.recovery.replacement?'<button id="use-replan">再計画を Plan で確認</button>':''}`:''}</div>` : '<p>まだエージェントは起動していません。</p>'}</div>`;
+  else if (activeTab === 'Agents') content.innerHTML = `<div class="inspector"><span class="eyebrow">EXECUTION</span><h2>実行エージェント</h2>${activeThread ? `<div class="agent-card"><strong>${escape(label)}</strong><span>${v?.running ? '実行中' : v?.needsResume ? '状態確認待ち' : '待機中'}</span><p>${escape(threads.find(t => t.id === activeThread)?.title || '')}</p><small>${escape(workflowThread()?'ChatGPT / Codex':v?.route || current?.provider || '')}</small><div class="agent-actions">${workflowThread()?'':'<button id="summarize">進捗を要約</button><button id="first-review">一次レビュー</button>'}<button id="final-review">ChatGPTでレビュー</button>${workflowThread()?'':'<button id="diagnose">Astra 診断・設計相談</button>'}</div>${v?.summary ? `<pre class="summary">${escape(v.summary)}</pre>` : ''}${v?.review ? `<pre class="summary">${escape(v.review)}</pre>` : ''}${v?.finalReview?`<h3>最終レビュー: ${escape(v.finalReview.verdict)}</h3><pre class="summary">${escape(v.finalReview.findings.join('\n'))}</pre>${v.finalReview.verdict==='rework'?'<button id="apply-rework">既存 worker に修正を戻す</button>':''}`:''}${v?.recovery?`<h3>診断: ${escape(v.recovery.action)}</h3><pre class="summary">${escape(v.recovery.reason+'\n'+v.recovery.instruction)}</pre>${v.recovery.action==='retry_worker'?'<button id="apply-recovery">診断の修正を既存 worker へ</button>':''}${v.recovery.replacement?'<button id="use-replan">再計画を Plan で確認</button>':''}`:''}</div>` : '<p>まだエージェントは起動していません。</p>'}</div>`;
   else if (activeTab === 'Context') {
     const c=v?.context;
     content.innerHTML = `<div class="inspector"><span class="eyebrow">CONTEXT INSPECTOR</span><h2>渡した情報が、見える。</h2>${c?`<p>${escape(c.capsule.goal)}</p><div class="context-row"><span>初期 Capsule（推定 tokens）</span><strong>${c.initial_tokens}</strong></div><div class="context-row"><span>追加取得（推定 tokens）</span><strong>${c.retrieved_tokens}</strong></div><div class="context-row"><span>現在 / 上限</span><strong>${c.current_estimate} / ${c.capsule.budget.max_total_tokens}</strong></div><div class="context-row"><span>親の会話の自動コピー</span><strong class="safe">${c.parent_conversation_inherited?'有効':'無効'}</strong></div><h3>参照元</h3>${c.capsule.items.map(i=>`<details><summary>${escape(i.source)} · ${escape(i.reference)}</summary><pre>${escape(i.text)}</pre></details>`).join('')||'<p>タスク目標・合格条件・制約のみ</p>'}<h3>追加取得の履歴</h3>${c.retrievals.map(r=>`<div class="context-row"><span>${escape(r.source)}: ${escape(r.query)}<small>${escape(r.result_ref)}</small></span><strong>${r.token_estimate}</strong></div>`).join('')||'<p>追加取得はありません。</p>'}<p class="muted">bytes / 3 の推定値です。Codex の共通指示・ツール定義・推論中の会話は含みません。プロバイダーの実測使用量は Usage に表示します。</p>`:'<p>Plan から起動した worker を選ぶと、Capsule と取得履歴を確認できます。この会話に記録済みの Capsule はありません。</p>'}</div>`;
@@ -179,7 +247,7 @@ function renderContent() {
   bindMemory();
   document.querySelector('#capture-memory')?.addEventListener('click',async()=>{if(!activeThread||busy)return;const id=activeThread;busy=true;render();try{await invoke('extract_memory',{threadId:id});await refreshContext(id);}catch(e){error(String(e));}finally{busy=false;}});
   document.querySelector('#astra-plan')?.addEventListener('click',()=>{newTask();(document.querySelector('#task-mode') as HTMLSelectElement).value='plan';updateModelOptions('');saveDraft();render();focusComposer();});
-  document.querySelector('#final-review')?.addEventListener('click',()=>void astraInsight('final_review'));
+  document.querySelector('#final-review')?.addEventListener('click',()=>choosePhase('review'));
   document.querySelector('#diagnose')?.addEventListener('click',()=>void astraInsight('diagnose_task'));
   document.querySelector('#apply-recovery')?.addEventListener('click',async()=>{if(!activeThread||busy)return;busy=true;render();try{await invoke('apply_recovery',{threadId:activeThread});}catch(e){error(String(e));}finally{busy=false;render();}});
   document.querySelector('#apply-rework')?.addEventListener('click',()=>void applyRework());
@@ -215,16 +283,16 @@ function applyEvent(record: JournalEvent, replay = false) {
     if (message) message.text = e.text; else v.messages.push({ key, role: 'assistant', text: e.text });
   }
   if (e.kind === 'turn_started' && (!e.turn_id || !v.completedTurns?.has(e.turn_id))) { v.running = true; v.activeTurn=e.turn_id||undefined; thread.status = 'running'; }
-  if (e.kind === 'turn_completed') { v.completedTurns??=new Set(); if(e.turn_id)v.completedTurns.add(e.turn_id); if(!v.activeTurn||v.activeTurn===e.turn_id){v.running=false;thread.status=e.text;} }
+  if (e.kind === 'turn_completed') { v.completedTurns??=new Set(); if(e.turn_id)v.completedTurns.add(e.turn_id); if(!e.turn_id||!v.activeTurn||v.activeTurn===e.turn_id){v.running=false;thread.status=e.text;} }
   if (['error', 'approval_required'].includes(e.kind)) error(e.text);
   if(thread.id===activeThread&&['input_required','goal_updated','turn_completed'].includes(e.kind))void composer?.refreshThread();
   if (thread.id === activeThread) render();
 }
 function knownFiles():string[] { return [...new Set([...(document.querySelector('#known-files') as HTMLInputElement).value.split(',').map(s=>s.trim()).filter(Boolean),...(composer?.getMentions()||[]).filter(m=>m.kind==='file').map(m=>m.kind==='file'?m.path:'')])]; }
 async function astraPlan(){if(!activeProject||busy)return;const model=selectedModel();if(!model||model.local){error('計画するモデルを選択してください。');return;}const goal=(document.querySelector('#task-input') as HTMLTextAreaElement).value.trim();if(!goal){error('下の指示欄に、計画したい内容を入力してください。');return;}busy=true;error('');render();try{const p=await invoke('create_astra_plan',{projectId:activeProject,goal,model:model.model,reasoning:selectedReasoning()});planText=JSON.stringify(p,null,2);if(activeProject)ui.plans![activeProject]=planText;saveUi();activeTab='Plan';rememberSelection();}catch(e){error(String(e));}finally{busy=false;render();}}
-async function astraInsight(command:'final_review'|'diagnose_task'){if(!activeThread||busy)return;const id=activeThread;busy=true;error('');render();try{if(command==='final_review')view(id).finalReview=await invoke(command,{threadId:id});else view(id).recovery=await invoke(command,{threadId:id,question:(document.querySelector('#task-input') as HTMLTextAreaElement).value.trim()||null});}catch(e){error(String(e));}finally{busy=false;render();}}
+async function astraInsight(command:'final_review'|'diagnose_task'){if(!activeThread||busy)return;if(chatgptSelected()){error('ChatGPTの会話欄でレビュー・診断を依頼してください。Codexには送りません。');return;}const id=activeThread;busy=true;error('');render();try{if(command==='final_review')view(id).finalReview=await invoke(command,{threadId:id});else view(id).recovery=await invoke(command,{threadId:id,question:(document.querySelector('#task-input') as HTMLTextAreaElement).value.trim()||null});}catch(e){error(String(e));}finally{busy=false;render();}}
 async function applyRework(){if(!activeThread||busy)return;busy=true;render();try{await invoke('apply_rework',{threadId:activeThread});}catch(e){error(String(e));}finally{busy=false;render();}}
-async function refreshThreads() {try {threads=await invoke<Thread[]>('threads');render();}catch(e){error(String(e));}}
+async function refreshThreads() {try {[threads,archivedThreads]=await Promise.all([invoke<Thread[]>('threads'),invoke<string[]>('archived_threads')]);render();}catch(e){error(String(e));}}
 async function refreshGraph() {if(!activeProject)return;try {const id=activeProject;const tasks=await invoke<GraphTask[]>('task_graph',{projectId:id});if(activeProject!==id)return;graph=tasks;if(activeTab==='Plan')renderContent();}catch(e){error(String(e));}}
 async function refreshContext(id:string) {try {view(id).context=await invoke<ContextInspection|null>('inspect_context',{threadId:id});view(id).capture=await invoke<Capture>('memory_candidates',{threadId:id});if(activeThread===id&&activeTab==='Context')renderContent();}catch(e){error(String(e));}}
 async function runPlan() {if(!activeProject||busy)return;busy=true;error('');render();try {graph=await invoke<GraphTask[]>('run_plan',{projectId:activeProject,plan:JSON.parse(planText),concurrency:2});await refreshThreads();}catch(e){error(String(e));}finally{busy=false;render();}}
@@ -241,8 +309,12 @@ async function refreshDiff(id: string) {
 async function selectThread(id: string) {
   if (busy) return; notice(''); saveDraft(); const t=threads.find(t=>t.id===id); if(t)activeProject=t.project_id; activeThread = id; restoreDraft(); rememberSelection(); busy = true; error(''); render();
   try {
+    if(t?.provider==='workflow'){
+      if(!workflowPhase())(document.querySelector('#task-mode') as HTMLSelectElement).value='workflow-review';
+      await refreshWorkflow(id,true);const target=workflowTargets[id]?.[workflowPhase()||'review'];composerReasoning=target?.reasoning||null;updateModelOptions(target?.key||'');return;
+    }
     const snapshot = threads.find(t=>t.id===id)?.provider === 'spark' ? {active_turn:null,messages:[]} : await invoke<Snapshot>('resume_task', { threadId: id });
-    const v = view(id); if(threads.find(t=>t.id===id)?.provider === 'spark') {v.sequence=0;v.events=[];} v.messages = snapshot.messages.map((m, i) => ({ ...m, key: `restored-${i}` }));
+    const v = view(id); if(threads.find(t=>t.id===id)?.provider === 'spark') {v.sequence=0;v.events=[];} v.messages = snapshot.messages.map((m, i) => ({ ...m, key: threads.find(t=>t.id===id)?.provider==='chatgpt'?`chatgpt-${i}`:`restored-${i}` }));
     let after = v.sequence;
     for (;;) { const history = await invoke<JournalEvent[]>('event_history', { threadId: id, after }); for (const e of history) applyEvent(e, true); if (history.length < 2000) break; after = history[history.length - 1].sequence; }
     const insights=await invoke<{review:View['finalReview'];recovery:View['recovery']}>('worker_insights',{threadId:id});v.finalReview=insights.review||undefined;v.recovery=insights.recovery||undefined;
@@ -253,11 +325,14 @@ async function selectThread(id: string) {
   if(activeProject)void composer?.seedHistory(view(id).messages.filter(m=>m.role==='user').map(m=>m.text).slice(-10),activeProject);
 }
 async function send(approvedRoute?:AutoPreview) {
+  if(workflowPhase()){await sendWorkflow();return;}
+  if(workflowThread()){error('プラン・実装・レビューから操作を選択してください。');return;}
   if(busy||preparingComposer)return;preparingComposer=true;
-  try{if(!approvedRoute&&composer&&!await composer.beforeSend())return;}catch(e){error(String(e));return;}finally{preparingComposer=false;}
+  try{if(!approvedRoute&&!chatgptSelected()&&composer&&!await composer.beforeSend())return;}catch(e){error(String(e));return;}finally{preparingComposer=false;}
   const input = document.querySelector<HTMLTextAreaElement>('#task-input')!, text = input.value.trim();
   if (!text || busy || !activeProject || selectedView()?.needsResume) return;
   const mentions=composer?.getMentions()||[],files=knownFiles();
+  if(chatgptSelected()&&(cloudMode()||mentions.length||files.length)){error('ChatGPTでは通常の実装モードを使い、ファイル参照はCodexで行ってください。');return;}
   if(planningMode()&&mentions.length){error('参照・スキル等を使う計画は「プランモード（Codex）」で作成してください。');return;}
   if(!activeThread&&planningMode()){await astraPlan();void composer?.remember(text);return;}
   const requiresCodex=cloudMode()||mentions.some(m=>m.kind!=='file');
@@ -275,13 +350,14 @@ async function send(approvedRoute?:AutoPreview) {
         if(preview.confirm_before_run||preview.blocked||!preview.target){showAutoPreview(preview);return;}
         approvedRoute=preview;
       }
-      const result = await invoke<{thread:Thread;target:ModelTarget;route:{decision:{reason:string;executor:string}}}>('create_routed_task', { request:{projectId: activeProject, text, knownFiles:files, preference:key==='auto'?'auto':choice!.local?'spark':'codex',model:choice?.model??null,reasoning:key==='auto'?null:selectedReasoning(),autoRouteId:approvedRoute?.id??null,autoRouteRevision:approvedRoute?.revision??null} });
+      const result = choice?.chatgpt ? {thread:await invoke<Thread>('chatgpt_create',{projectId:activeProject,model:choice.model,reasoning:selectedReasoning(),text}),target:{provider:'chatgpt' as const,model:choice.model,reasoning:selectedReasoning()},route:{decision:{executor:'ChatGPT',reason:'ブラウザーのChatGPT会話を使用'}}} : await invoke<{thread:Thread;target:ModelTarget;route:{decision:{reason:string;executor:string}}}>('create_routed_task', { request:{projectId: activeProject, text, knownFiles:files, preference:key==='auto'?'auto':choice!.local?'spark':'codex',model:choice?.model??null,reasoning:key==='auto'?null:selectedReasoning(),autoRouteId:approvedRoute?.id??null,autoRouteRevision:approvedRoute?.revision??null} });
       const thread=result.thread; delete ui.drafts![draftKey()]; threads.unshift(thread); activeThread = thread.id; saveDraft(); rememberSelection(); view(thread.id).needsResume = false; view(thread.id).route=`${result.route.decision.executor}: ${result.route.decision.reason}`;
       threadModels[thread.id]=result.target.model;if(result.target.reasoning)threadReasoning[thread.id]=result.target.reasoning;
       void invoke<Record<string,string>>('thread_models').then(models=>{threadModels=models;render();}).catch(e=>notice(String(e)));
     }
     const v = view(activeThread);
-    if(threads.find(t=>t.id===activeThread)?.provider === 'spark') { await invoke('run_local',{threadId:activeThread,text,knownFiles:files}); }
+    if(threads.find(t=>t.id===activeThread)?.provider === 'chatgpt'){v.messages.push({role:'user',text,key:`user-${Date.now()}`});await invoke('chatgpt_send',{threadId:activeThread,text});}
+    else if(threads.find(t=>t.id===activeThread)?.provider === 'spark') { await invoke('run_local',{threadId:activeThread,text,knownFiles:files}); }
     else { v.messages.push({ role: 'user', text, key: `user-${Date.now()}` });
     if (v.running) await invoke('steer_turn', { threadId: activeThread, text });
     else { await invoke(threadModels[activeThread]||mentions.length||cloudMode()?'send_composed_turn':'send_turn', { threadId: activeThread, text,options:{mode:composerMode()==='codex-plan'?'plan':'default',mentions,goal:composerMode()==='goal'?text:null} }); }
@@ -289,7 +365,7 @@ async function send(approvedRoute?:AutoPreview) {
     void composer?.remember(text);input.value = '';composer?.clear();
     if(composerMode()==='goal')(document.querySelector('#task-mode') as HTMLSelectElement).value='implement';
     saveDraft();void composer?.refreshThread();
-  } catch (e) { if (activeThread) view(activeThread).needsResume = true; error(String(e)); }
+  } catch (e) { if(String(e).includes('ローカル処理を停止しました'))notice('ローカル処理を停止しました。');else{if (activeThread) view(activeThread).needsResume = true; error(String(e));} }
   finally { busy = false; render(); }
 }
 function openDialog() { void pickProject(); }
@@ -337,7 +413,7 @@ document.querySelector('#new')!.addEventListener('click', newTask);
 document.querySelector('#resume')!.addEventListener('click', () => { if (activeThread) void selectThread(activeThread); });
 document.querySelector('#send')!.addEventListener('click', () => void send());
 document.querySelector<HTMLTextAreaElement>('#task-input')!.addEventListener('keydown', e => { if (!e.isComposing && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(); } });
-document.querySelector('#stop')!.addEventListener('click', async () => { if (!activeThread || busy) return; busy = true; render(); try { await invoke('interrupt_turn', { threadId: activeThread }); } catch (e) { view(activeThread).needsResume = true; error(String(e)); } finally { busy = false; render(); } });
+document.querySelector('#stop')!.addEventListener('click', async () => { if (!activeThread || stopping) return; const id=activeThread;stopping=true;render();try{await invoke(workflowThread()?'workflow_stop':'interrupt_turn',{threadId:id});if(workflowThread())await refreshWorkflow(id);}catch(e){view(id).needsResume=true;error(String(e));}finally{stopping=false;render();}});
 document.querySelector('#cancel')!.addEventListener('click', () => (document.querySelector('#register') as HTMLDialogElement).close());
 document.querySelector('#register form')!.addEventListener('submit', async e => {
   e.preventDefault(); if(busy)return; busy=true;render();try{await registerProject((document.querySelector('#path') as HTMLInputElement).value);}finally{busy=false;render();focusComposer();}
@@ -345,19 +421,27 @@ document.querySelector('#register form')!.addEventListener('submit', async e => 
 document.querySelector('#browse-project')!.addEventListener('click',()=>{(document.querySelector('#register') as HTMLDialogElement).close();void pickProject();});
 document.querySelector('#browse-codex')!.addEventListener('click',async()=>{if(picking)return;picking=true;try{const path=await nativeInvoke<string|null>('choose_path',{kind:'codex_binary'});if(path)(document.querySelector('#codex-path') as HTMLInputElement).value=path;}catch(e){document.querySelector('#settings-error')!.textContent=String(e);}finally{picking=false;}});
 setupMemory(()=>activeProject,error);
-composer=setupComposer({call:invoke,project:()=>activeProject,thread:()=>activeThread,busy:()=>busy,running:()=>!!selectedView()?.running,codex:()=>threads.find(t=>t.id===activeThread)?.provider==='codex',mode:composerMode,setMode:setComposerMode,models:()=>modelChoices,changed:()=>{saveDraft();render();},notice,error});
-setupAutoRouting({call:invoke,models:()=>modelChoices,refresh:refreshModels,busy:()=>busy,run:preview=>void send(preview),plan:()=>setComposerMode('plan'),notice});
+composer=setupComposer({call:invoke,localOnly:chatgptSelected,project:()=>activeProject,thread:()=>activeThread,busy:()=>busy,running:()=>!!selectedView()?.running,codex:()=>threads.find(t=>t.id===activeThread)?.provider==='codex',mode:composerMode,setMode:setComposerMode,models:()=>modelChoices,changed:()=>{saveDraft();render();},notice,error});
+setupAutoRouting({call:invoke,models:()=>modelChoices.filter(m=>!m.chatgpt),refresh:refreshModels,busy:()=>busy,run:preview=>void send(preview),plan:()=>setComposerMode('plan'),notice});
 document.querySelector('#auto-settings-button')!.addEventListener('click',()=>void openAutoSettings());
 document.querySelector('#astra-model')!.addEventListener('input',()=>fillReasoningSelect(document.querySelector<HTMLSelectElement>('#astra-reasoning')!,modelChoices.find(m=>!m.local&&m.model===(document.querySelector('#astra-model') as HTMLInputElement).value)));
 document.querySelector('#reasoning')!.addEventListener('change',()=>{composerReasoning=selectedReasoning();saveDraft();render();});
 window.addEventListener('unhandledrejection', e => error(String(e.reason)));
 window.addEventListener('error', e => error(e.message));
+app.insertAdjacentHTML('beforeend',`<dialog id="chatgpt-dialog" aria-label="ChatGPTと接続"><form method="dialog"><h2>ChatGPTと接続</h2><p>Chromeの通常のChatGPT会話を使用します。Codexの実行枠へ切り替えません。</p><ol><li>Chromeの拡張機能ページでデベロッパーモードを有効にし、「パッケージ化されていない拡張機能を読み込む」で下のフォルダを選びます。</li><li>拡張を開き、接続キーを貼り付けてChatGPTにログインします。</li><li>拡張の「モデルを確認」を押してから、この画面で接続を更新します。</li></ol><label>拡張フォルダ<input id="chatgpt-extension" readonly></label><label>接続キー<input id="chatgpt-token" type="hidden" readonly></label><button type="button" id="chatgpt-copy-token">接続キーをコピー</button><p id="chatgpt-connection-state"></p><p id="chatgpt-error" role="alert"></p><div class="dialog-actions"><button type="button" id="chatgpt-refresh">接続を更新</button><button type="button" id="chatgpt-close">閉じる</button></div></form></dialog>`);
+async function refreshChatgpt(){const status=await invoke<{connected:boolean;token:string;extension_path:string;error:string|null;models:unknown[]}>('chatgpt_status');for(const [id,value] of Object.entries({'chatgpt-token':status.token,'chatgpt-extension':status.extension_path}))(document.getElementById(id) as HTMLInputElement).value=value;document.querySelector('#chatgpt-connection-state')!.textContent=status.connected?`Chrome拡張: 接続済み · 確認済みモデル ${status.models.length}件`:'Chrome拡張: 未接続';document.querySelector('#chatgpt-error')!.textContent=status.error||'';}
+document.querySelector('#chatgpt-settings')!.addEventListener('click',()=>{document.querySelector<HTMLDialogElement>('#connection-settings')!.close();document.querySelector<HTMLDialogElement>('#chatgpt-dialog')!.showModal();void refreshChatgpt().catch(e=>error(String(e)));});
+document.querySelector('#chatgpt-copy-token')!.addEventListener('click',()=>void copyText(document.querySelector<HTMLInputElement>('#chatgpt-token')!.value));
+document.querySelector('#chatgpt-close')!.addEventListener('click',()=>document.querySelector<HTMLDialogElement>('#chatgpt-dialog')!.close());
+document.querySelector('#chatgpt-refresh')!.addEventListener('click',()=>void refreshChatgpt().then(refreshModels).catch(e=>error(String(e))));
+
+
 render();
 if (isTauri()) {
   void refreshModels();
   await listen<JournalEvent>('hub-event', e => applyEvent(e.payload));
   await listen<number>('hub-stream-gap', () => { if (activeThread) { view(activeThread).needsResume = true; error('イベント配信が遅れました。「再開・状態を確認」で保存済み履歴を読み直してください。'); render(); } });
-  try { [projects, threads] = await Promise.all([invoke<Project[]>('projects'), invoke<Thread[]>('threads')]); activeProject = projects.find(p=>p.id===ui.project)?.id || projects[0]?.id || null; activeTab=tabs.includes(ui.tab||'')?ui.tab!:'Chat';planText=activeProject?ui.plans![activeProject]||planText:planText;restoreDraft();render();if(ui.thread && threads.some(t=>t.id===ui.thread&&t.project_id===activeProject))await selectThread(ui.thread);if(activeTab==='Plan')void refreshGraph();if(activeTab==='Diff'&&activeThread)void refreshDiff(activeThread);if(activeTab==='Context'&&activeThread)void refreshContext(activeThread);if(activeTab==='Usage')void refreshUsage(); } catch (e) { error(String(e)); }
+  try { [projects, threads, archivedThreads] = await Promise.all([invoke<Project[]>('projects'), invoke<Thread[]>('threads'),invoke<string[]>('archived_threads')]); activeProject = projects.find(p=>p.id===ui.project)?.id || projects[0]?.id || null; activeTab=tabs.includes(ui.tab||'')?ui.tab!:'Chat';planText=activeProject?ui.plans![activeProject]||planText:planText;restoreDraft();render();if(ui.thread && threads.some(t=>t.id===ui.thread&&t.project_id===activeProject))await selectThread(ui.thread);if(activeTab==='Plan')void refreshGraph();if(activeTab==='Diff'&&activeThread)void refreshDiff(activeThread);if(activeTab==='Context'&&activeThread)void refreshContext(activeThread);if(activeTab==='Usage')void refreshUsage(); } catch (e) { error(String(e)); }
 }
 
 async function resumePlan() {if(!activeProject||busy)return;busy=true;error('');render();try{graph=await invoke<GraphTask[]>('resume_plan',{projectId:activeProject});await refreshThreads();}catch(e){error(String(e));}finally{busy=false;render();}}
@@ -379,7 +463,7 @@ function restoreDraft() {
   (document.querySelector('#known-files') as HTMLInputElement).value=typeof draft?.files==='string'?draft.files:'';
   composerReasoning=draft?.reasoning||null;
   composer?.setMentions(Array.isArray(draft?.mentions)?draft.mentions:[]);
-  (document.querySelector('#task-mode') as HTMLSelectElement).value=['plan','codex-plan','goal'].includes(draft?.mode||'')?draft!.mode!:'implement';updateModelOptions(draft?.preference||'auto');
+  (document.querySelector('#task-mode') as HTMLSelectElement).value=['implement','plan','codex-plan','goal','workflow-plan','workflow-implement','workflow-review'].includes(draft?.mode||'')?draft!.mode!:'workflow-plan';updateModelOptions(draft?.preference||'auto');
   document.querySelector('#draft-status')!.textContent=draft?.text?'保存した下書き':'';
 }
 function focusComposer() { document.querySelector<HTMLTextAreaElement>('#task-input')!.focus(); }
@@ -398,7 +482,8 @@ async function copyText(text:string, button?:HTMLButtonElement) {
   catch { error('コピーできませんでした。テキストを選択して ⌘C を押してください。'); }
 }
 function renderThreads() {
-  const matches=threads.filter(t=>t.project_id===activeProject&&`${t.title} ${statusLabel(t.status)}`.toLowerCase().includes(taskFilter.toLowerCase()));
+  document.querySelector('#show-archived')!.classList.toggle('active',showArchived);
+  const matches=threads.filter(t=>archivedThreads.includes(t.id)===showArchived&&t.project_id===activeProject&&`${t.title} ${statusLabel(t.status)}`.toLowerCase().includes(taskFilter.toLowerCase()));
   matches.sort((a,b)=>Number(ui.pins!.includes(b.id))-Number(ui.pins!.includes(a.id)));
   document.querySelector('#threads')!.innerHTML=matches.map(t=>`<div class="thread-row"><button class="thread ${t.id===activeThread?'selected':''}" data-thread="${t.id}" title="${escape(t.title)}"><span>${escape(t.title)}</span><small class="state-${escape(t.status)}">${escape(statusLabel(t.status))}</small></button><button class="pin-thread ${ui.pins!.includes(t.id)?'pinned':''}" data-pin="${t.id}" aria-label="${escape(t.title)}を${ui.pins!.includes(t.id)?'固定解除':'固定'}" aria-pressed="${ui.pins!.includes(t.id)}">${ui.pins!.includes(t.id)?'★':'☆'}</button></div>`).join('')||`<p class="side-empty muted">${taskFilter?'一致するタスクがありません。':'新しいタスクから始めましょう。'}</p>`;
   document.querySelectorAll<HTMLButtonElement>('[data-thread]').forEach(b=>b.onclick=()=>void selectThread(b.dataset.thread!));
@@ -413,7 +498,7 @@ function menuActions():MenuAction[] {
     {title:'Auto の振り分け設定',detail:'5段階のモデルと reasoning',run:()=>void openAutoSettings()},
     ...tabs.map(tab=>({title:`${tab} を表示`,detail:'表示を切り替え',run:()=>{activeTab=tab;rememberSelection();render();if(tab==='Diff'&&activeThread)void refreshDiff(activeThread);if(tab==='Plan')void refreshGraph();if(tab==='Context'&&activeThread)void refreshContext(activeThread);if(tab==='Usage')void refreshUsage();}})),
     ...projects.map(p=>({title:p.name,detail:p.root,run:()=>switchProject(p.id)})),
-    ...threads.map(t=>({title:t.title,detail:`${projects.find(p=>p.id===t.project_id)?.name||''} · ${statusLabel(t.status)}`,run:()=>{activeTab='Chat';void selectThread(t.id);}})),
+    ...threads.filter(t=>!archivedThreads.includes(t.id)&&projects.some(p=>p.id===t.project_id)).map(t=>({title:t.title,detail:`${projects.find(p=>p.id===t.project_id)?.name||''} · ${statusLabel(t.status)}`,run:()=>{activeTab='Chat';void selectThread(t.id);}})),
   ];
 }
 function renderCommands() {
@@ -448,3 +533,31 @@ document.addEventListener('keydown',e=>{
 document.querySelector('#task-mode')!.addEventListener('change',()=>{pendingPreference=undefined;composerReasoning=null;updateModelOptions('');saveDraft();render();});
 document.querySelector('#preference')!.addEventListener('change',()=>{composerReasoning=null;refreshComposerReasoning();pendingPreference=(document.querySelector('#preference') as HTMLSelectElement).value;saveDraft();render();});
 document.querySelector('#refresh-models')!.addEventListener('click',()=>void refreshModels());
+
+document.querySelector('#show-archived')!.addEventListener('click',()=>{showArchived=!showArchived;renderThreads();});
+document.querySelector('#session-actions')!.addEventListener('click',()=>{if(activeThread)openLifecycle('session',activeThread);});
+document.querySelector('#lifecycle-close')!.addEventListener('click',()=>document.querySelector<HTMLDialogElement>('#lifecycle-dialog')!.close());
+function openLifecycle(kind:'project'|'session',id:string){
+  if(busy)return;const dialog=document.querySelector<HTMLDialogElement>('#lifecycle-dialog')!;
+  document.querySelector('#lifecycle-title')!.textContent=kind==='project'?projects.find(p=>p.id===id)?.name||'プロジェクト':threads.find(t=>t.id===id)?.title||'セッション';
+  document.querySelector('#lifecycle-description')!.textContent=kind==='project'?'アプリから登録を解除します。フォルダとファイルは残り、同じフォルダを登録するとセッションも戻ります。':'アーカイブは後から復元できます。削除すると、このアプリの会話履歴が削除されます。プロバイダー側の会話と作業ファイルは残ります。';
+  const actions=document.querySelector('#lifecycle-actions')!;actions.replaceChildren();document.querySelector('#lifecycle-error')!.textContent='';
+  const items=kind==='project'?[['unregister','登録を解除']]:[['rename','名前を変更'],[archivedThreads.includes(id)?'restore':'archive',archivedThreads.includes(id)?'アーカイブから復元':'アーカイブ'],['delete','履歴を削除']];
+  for(const [action,label] of items){const button=document.createElement('button');button.textContent=label;button.onclick=async()=>{
+    if(action==='rename'){dialog.close();document.querySelector<HTMLButtonElement>('#rename-task')!.click();return;}
+    button.disabled=true;
+    try{
+      if(action==='unregister'){await invoke('unregister_project',{projectId:id});projects=await invoke<Project[]>('projects');if(activeProject===id){saveDraft();activeProject=projects[0]?.id||null;activeThread=null;restoreDraft();rememberSelection();}}
+      else {await invoke('manage_session',{threadId:id,action});if(action==='delete'){views.delete(id);ui.pins=ui.pins!.filter(p=>p!==id);if(activeThread===id){activeThread=null;restoreDraft();rememberSelection();}}else if(action==='archive'&&activeThread===id){activeThread=null;restoreDraft();rememberSelection();}await refreshThreads();}
+      dialog.close();render();
+    }catch(e){document.querySelector('#lifecycle-error')!.textContent=String(e);}finally{button.disabled=false;}
+  };actions.append(button);}
+  dialog.showModal();
+}
+
+let workflowPolling=false;
+if(isTauri())setInterval(()=>{
+  if(workflowPolling||busy||!activeThread||!workflowThread()||!selectedView()?.running)return;
+  const id=activeThread;workflowPolling=true;
+  void refreshWorkflow(id).catch(e=>{view(id).needsResume=true;view(id).running=false;error(String(e));render();}).finally(()=>workflowPolling=false);
+},1500);

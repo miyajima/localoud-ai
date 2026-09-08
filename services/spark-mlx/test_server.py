@@ -65,3 +65,47 @@ def test_replacement_config_checks_real_checkpoint_bits_and_shards(tmp_path, mon
     assert config.verify()['model']=='fixture/next'
     (checkpoint / 'config.json').write_text(json.dumps({'quantization': {'bits': 8}}))
     with pytest.raises(ValueError): config.verify()
+
+def test_completion_preserves_leading_newlines_and_whitespace():
+    import json
+    prefix = '\n  READMEの誤字を修正して'
+    assert json.loads(completion_output(prefix + 'ください。', prefix)) == {'suffix': 'ください。'}
+
+def test_backend_prefills_exact_prefix_and_validates_only_generated_tail(monkeypatch):
+    import sys
+    import json
+    from types import SimpleNamespace
+    from server import MLXBackend, GenerationRequest
+    captured = {}
+    class Tokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            captured.update(messages=messages, kwargs=kwargs)
+            return 'fixture prompt'
+        def encode(self, prompt): return [1]
+    monkeypatch.setitem(sys.modules, 'mlx_lm', SimpleNamespace(stream_generate=lambda *a, **k: iter([SimpleNamespace(text='ください。', prompt_tokens=12, generation_tokens=3)])))
+    monkeypatch.setitem(sys.modules, 'mlx_lm.sample_utils', SimpleNamespace(make_sampler=lambda **k: None))
+    backend = object.__new__(MLXBackend)
+    backend.model, backend.tokenizer = None, Tokenizer()
+    prefix = '\nREADMEの誤字を修正して'
+    req = GenerationRequest(task='input_completion', messages=[{'role':'user','content':json.dumps({'prefix':prefix,'past_inputs':[]})}], schema={'type':'object'})
+    text, usage = backend.generate(req)
+    assert captured['messages'][-1] == {'role':'assistant','content':prefix}
+    assert captured['kwargs']['continue_final_message'] is True
+    assert captured['kwargs']['add_generation_prompt'] is False
+    assert json.loads(text) == {'suffix':'ください。'}
+    assert usage == {'prompt_tokens':12,'completion_tokens':3}
+
+def test_finished_instruction_does_not_run_inference(monkeypatch):
+    import sys
+    import json
+    from types import SimpleNamespace
+    from server import MLXBackend, GenerationRequest
+    def unexpected(*a, **k): raise AssertionError('complete sentence must not invoke the model')
+    monkeypatch.setitem(sys.modules, 'mlx_lm', SimpleNamespace(stream_generate=unexpected))
+    monkeypatch.setitem(sys.modules, 'mlx_lm.sample_utils', SimpleNamespace(make_sampler=unexpected))
+    backend = object.__new__(MLXBackend)
+    for prefix in ['READMEの誤字を修正して、内容を確認してください。', 'Fix the typo.']:
+        req = GenerationRequest(task='input_completion', messages=[{'role':'user','content':json.dumps({'prefix':prefix})}], schema={'type':'object'})
+        text, usage = backend.generate(req)
+        assert json.loads(text) == {'suffix':''}
+        assert usage == {'prompt_tokens':0,'completion_tokens':0}
