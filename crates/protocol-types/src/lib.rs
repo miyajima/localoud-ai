@@ -51,8 +51,23 @@ pub trait CodingAgentProvider: Send + Sync {
         handler: std::sync::Arc<dyn AgentTool>,
     ) -> Result<()>;
     async fn start_thread(&self, root: PathBuf) -> Result<ProviderThread>;
+    async fn start_thread_with_model(
+        &self,
+        _root: PathBuf,
+        _model: &str,
+    ) -> Result<ProviderThread> {
+        anyhow::bail!("Explicit model selection is unavailable for this provider")
+    }
     async fn resume_thread(&self, thread: &ProviderThread, root: PathBuf)
         -> Result<ThreadSnapshot>;
+    async fn resume_thread_with_model(
+        &self,
+        _thread: &ProviderThread,
+        _root: PathBuf,
+        _model: &str,
+    ) -> Result<ThreadSnapshot> {
+        anyhow::bail!("Pinned model resume is unavailable for this provider")
+    }
     async fn read_thread(&self, thread: &ProviderThread) -> Result<ThreadSnapshot>;
     async fn start_turn(&self, thread: &ProviderThread, text: String) -> Result<ProviderTurn>;
     async fn steer_turn(&self, turn: &ProviderTurn, text: String) -> Result<()>;

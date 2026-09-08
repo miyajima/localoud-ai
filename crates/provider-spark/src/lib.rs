@@ -1,19 +1,39 @@
 use anyhow::{bail, Result};
 use async_trait::async_trait;
 use protocol_types::local::*;
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LocalServiceConfig {
+    pub endpoint: String,
+    pub model_id: String,
+    pub display_name: String,
+    pub quantization_bits: u8,
+}
+impl Default for LocalServiceConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: "http://127.0.0.1:8765".into(),
+            model_id: "abenzerps/Spark-X2.5-4B-MLX-8bit".into(),
+            display_name: "Spark X-2.5 8bit".into(),
+            quantization_bits: 8,
+        }
+    }
+}
 #[derive(Clone)]
 pub struct SparkProvider {
     client: reqwest::Client,
+    config: LocalServiceConfig,
     endpoint: reqwest::Url,
     gate: std::sync::Arc<tokio::sync::Mutex<()>>,
 }
 #[derive(Deserialize)]
 struct WireResponse {
     output: Value,
+    model: String,
     usage: WireUsage,
     latency_ms: u64,
     quantization_bits: u8,
@@ -25,7 +45,19 @@ struct WireUsage {
 }
 impl SparkProvider {
     pub fn new(endpoint: &str) -> Result<Self> {
-        let endpoint = reqwest::Url::parse(endpoint)?;
+        Self::configured(LocalServiceConfig {
+            endpoint: endpoint.into(),
+            ..Default::default()
+        })
+    }
+    pub fn configured(config: LocalServiceConfig) -> Result<Self> {
+        if config.model_id.trim().is_empty()
+            || config.display_name.trim().is_empty()
+            || !(1..=32).contains(&config.quantization_bits)
+        {
+            bail!("Local model ID, display name and quantization bits (1–32) are required");
+        }
+        let endpoint = reqwest::Url::parse(&config.endpoint)?;
         if endpoint.scheme() != "http"
             || !matches!(endpoint.host_str(), Some("127.0.0.1" | "localhost"))
             || !endpoint.username().is_empty()
@@ -37,6 +69,7 @@ impl SparkProvider {
         }
         Ok(Self {
             endpoint,
+            config,
             gate: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(120))
@@ -54,10 +87,26 @@ impl SparkProvider {
             .error_for_status()?
             .json()
             .await?;
-        if v["status"] != "ready" || v["quantization_bits"] != 8 {
-            bail!("Spark is not ready with 8-bit weights");
+        if v["status"] != "ready" {
+            bail!("Local model service is not ready");
         }
+        self.validate_identity(
+            v["model"].as_str().unwrap_or(""),
+            v["quantization_bits"].as_u64().unwrap_or(0),
+        )?;
         Ok(v)
+    }
+    fn validate_identity(&self, model: &str, bits: u64) -> Result<()> {
+        if model != self.config.model_id || bits != u64::from(self.config.quantization_bits) {
+            bail!(
+                "Local model mismatch: expected {} ({}bit), received {} ({}bit)",
+                self.config.model_id,
+                self.config.quantization_bits,
+                model,
+                bits
+            );
+        }
+        Ok(())
     }
     async fn generate<T: DeserializeOwned>(
         &self,
@@ -67,7 +116,7 @@ impl SparkProvider {
         max_tokens: u32,
     ) -> Result<Generation<T>> {
         let _guard = self.gate.lock().await;
-        let mut response=self.client.post(self.endpoint.join("/v1/generate")?).json(&json!({"task":task,"messages":[{"role":"user","content":prompt}],"schema":schema,"max_tokens":max_tokens,"temperature":0.0})).send().await?;
+        let mut response=self.client.post(self.endpoint.join("/v1/generate")?).json(&json!({"model":self.config.model_id,"task":task,"messages":[{"role":"user","content":prompt}],"schema":schema,"max_tokens":max_tokens,"temperature":0.0})).send().await?;
         let status = response.status();
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await? {
@@ -89,9 +138,7 @@ impl SparkProvider {
             );
         }
         let result: WireResponse = serde_json::from_slice(&bytes)?;
-        if result.quantization_bits != 8 {
-            bail!("Spark response is not from an 8-bit service");
-        }
+        self.validate_identity(&result.model, u64::from(result.quantization_bits))?;
         Ok(Generation {
             output: serde_json::from_value(result.output)?,
             usage: LocalUsage {
@@ -110,6 +157,9 @@ fn strings() -> Value {
 }
 #[async_trait]
 impl LocalModelProvider for SparkProvider {
+    fn model_id(&self) -> &str {
+        &self.config.model_id
+    }
     async fn extract_memory(
         &self,
         summary: &str,
@@ -207,6 +257,22 @@ impl LocalModelProvider for SparkProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn replacement_identity_is_configured_and_mismatches_fail() {
+        let p = SparkProvider::configured(LocalServiceConfig {
+            model_id: "fixture/other".into(),
+            display_name: "Other 4bit".into(),
+            quantization_bits: 4,
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(p.validate_identity("fixture/other", 4).is_ok());
+        assert!(p
+            .validate_identity("abenzerps/Spark-X2.5-4B-MLX-8bit", 8)
+            .is_err());
+        assert!(p.validate_identity("fixture/other", 8).is_err());
+        assert_eq!(p.model_id(), "fixture/other");
+    }
     #[test]
     fn rejects_remote_endpoints() {
         assert!(SparkProvider::new("https://example.com").is_err());

@@ -96,6 +96,9 @@ pub struct RetrievalQuery {
 }
 #[async_trait]
 pub trait LocalModelProvider: Send + Sync {
+    fn model_id(&self) -> &str {
+        "unknown"
+    }
     async fn extract_memory(
         &self,
         _summary: &str,

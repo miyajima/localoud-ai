@@ -8,8 +8,11 @@ for line in sys.stdin:
         continue
     p = v.get("params", {})
     if method == "initialize": result = {"userAgent": "fixture"}
-    elif method == "thread/start": result = {"thread": thread}
-    elif method in ("thread/read", "thread/resume"): result = {"thread": thread}
+    elif method == "model/list": result = {"data":[{"id":"fixture-a","model":"fixture-a","isDefault":True},{"id":"fixture-b","model":"fixture-b"}],"nextCursor":None}
+    elif method == "thread/start":
+        thread["model"] = p.get("model", "fixture-a")
+        result = {"thread": thread,"model":thread["model"]}
+    elif method in ("thread/read", "thread/resume"): result = {"thread": thread,"model":p.get("model",thread.get("model","fixture-a"))}
     elif method == "turn/start":
         turn = {"id": "fixture-turn", "status": "inProgress", "items": []}
         thread["turns"] = [turn]

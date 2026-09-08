@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod astra;
 mod memory;
+mod models;
 mod plans;
 mod workspace_ui;
 use hub_core::{ExecutorKind, ExecutorPreference, ModelUsageRecord};
@@ -32,6 +33,7 @@ struct AppState {
     connection: AsyncMutex<Option<Connection>>,
     data_dir: PathBuf,
     local: LocalExecutor,
+    local_config: provider_spark::LocalServiceConfig,
     running_plans: Arc<AsyncMutex<std::collections::HashSet<ProjectId>>>,
 }
 impl AppState {
@@ -111,9 +113,22 @@ async fn set_codex_binary(path: String, state: tauri::State<'_, AppState>) -> Re
         return Err("Codex 実行ファイルの絶対パスを指定してください。".into());
     }
     let mut connection = state.connection.lock().await;
-    if connection.is_some() {
-        return Err("接続設定の変更はアプリを再起動した直後に行ってください。".into());
+    if state
+        .store
+        .lock()
+        .map_err(|e| e.to_string())?
+        .threads()
+        .map_err(|e| e.to_string())?
+        .iter()
+        .any(|t| matches!(t.status.as_str(), "running" | "inProgress"))
+        || !state.running_plans.lock().await.is_empty()
+    {
+        return Err("実行中のタスクが終了してから接続設定を変更してください。".into());
     }
+    if let Some(c) = connection.as_ref() {
+        c.provider.shutdown().await.map_err(|e| e.to_string())?;
+    }
+    *connection = None;
     state
         .store
         .lock()
@@ -161,8 +176,13 @@ async fn create_routed_task(
     text: String,
     known_files: Vec<String>,
     preference: ExecutorPreference,
+    model: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<RoutedTask, String> {
+    if preference == ExecutorPreference::Codex && model.as_ref().is_none_or(|m| m.trim().is_empty())
+    {
+        return Err("モデルを選択してください。".into());
+    }
     let project = ProjectId(project_id.parse().map_err(|_| "invalid project ID")?);
     let input = RoutingInput {
         request: text.clone(),
@@ -185,15 +205,18 @@ async fn create_routed_task(
             .local
             .create(project, title)
             .map_err(|e| e.to_string())?,
-        ExecutorKind::Codex => state
-            .sessions()
-            .await?
-            .create(project, title)
-            .await
-            .map_err(|e| format!("{e:#}"))?,
+        ExecutorKind::Codex => {
+            let sessions = state.sessions().await?;
+            let selected = if let Some(model) = model { model } else {
+                let provider = state.connection.lock().await.as_ref().ok_or("接続がありません")?.provider.clone();
+                let catalog = provider.model_catalog().await.map_err(|e|e.to_string())?;
+                catalog.iter().find(|m|m["isDefault"].as_bool()==Some(true)).and_then(|m|m["model"].as_str().or(m["id"].as_str())).ok_or("既定のモデルを取得できません。モデルを明示的に選択してください。")?.to_string()
+            };
+            sessions.create_with_model(project, title, Some(&selected)).await.map_err(|e|format!("{e:#}"))?
+        },
         ExecutorKind::Astra => {
             return Err(
-                "この依頼は計画が必要です。Plan の「Astra で計画」を選択してください。Astra が無効の場合は計画 JSON を編集できます。".into(),
+                "この依頼は計画が必要です。入力欄の操作を「計画する」に切り替え、モデルを選択してください。".into(),
             )
         }
     };
@@ -425,10 +448,16 @@ fn main() {
                     }
                 }
             });
+            let local_config = models::read_local(
+                &*store
+                    .lock()
+                    .map_err(|e| std::io::Error::other(e.to_string()))?,
+            )
+            .map_err(std::io::Error::other)?;
             let local = LocalExecutor {
                 store: store.clone(),
                 bus: bus.clone(),
-                provider: Arc::new(SparkProvider::new("http://127.0.0.1:8765")?),
+                provider: Arc::new(SparkProvider::configured(local_config.clone())?),
                 lock: AsyncMutex::new(()),
             };
             app.manage(AppState {
@@ -437,11 +466,16 @@ fn main() {
                 connection: AsyncMutex::new(None),
                 data_dir: dir,
                 local,
+                local_config,
                 running_plans: Arc::new(AsyncMutex::new(std::collections::HashSet::new())),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            models::available_models,
+            models::local_model_settings,
+            models::set_local_model_settings,
+            models::thread_models,
             workspace_ui::choose_path,
             workspace_ui::open_web_link,
             workspace_ui::rename_thread,

@@ -1,22 +1,18 @@
-"""Loopback-only structured Spark 8-bit inference. No file-write or shell tools."""
+"""Loopback-only structured local inference. No file-write or shell tools."""
 from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 import json
 import os
-from pathlib import Path
 import time
 from typing import Literal
+from model_config import ModelConfig
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from jsonschema import Draft202012Validator, ValidationError
 from pydantic import BaseModel, ConfigDict, Field
-
-HERE = Path(__file__).resolve().parent
-DEFAULT_MODEL = HERE.parent.parent / "models" / "Spark-X2.5-4B-MLX-8bit"
-MODEL_ID = "abenzerps/Spark-X2.5-4B-MLX-8bit"
 
 class Message(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -25,6 +21,7 @@ class Message(BaseModel):
 
 class GenerationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model: str | None = None
     task: Literal["route", "draft_context", "implement", "summarize", "review", "retrieval_query", "memory_extract"]
     messages: list[Message] = Field(min_length=1, max_length=20)
     output_schema: dict = Field(alias="schema")
@@ -58,17 +55,19 @@ def parse_output(text, schema):
 
 
 class MLXBackend:
-    def __init__(self, path):
-        # Imported only in the inference executor: tests do not require Metal.
-        from download_model import verify
+    def __init__(self, config):
+        # Imports and model loading stay on the inference executor.
         import mlx.core as mx
-        from spark_mlx_llm import load
         if not mx.metal.is_available():
             raise RuntimeError("Metal GPU unavailable; run the service in a host-visible session")
-        verify(path)
+        info = config.verify()
+        if config.loader == 'spark':
+            from spark_mlx_llm import load
+        else:
+            from mlx_lm import load
         mx.set_default_device(mx.gpu)
-        self.model, self.tokenizer = load(path, tokenizer_config={"trust_remote_code": False}, strict=True)
-        self.info = {"model": MODEL_ID, "quantization_bits": 8, "device": str(mx.default_device()), "revision": (HERE / "model-revision.txt").read_text().strip()}
+        self.model, self.tokenizer = load(config.path, tokenizer_config={"trust_remote_code": False}, strict=True)
+        self.info = {**info, "device": str(mx.default_device())}
 
     def generate(self, request: GenerationRequest):
         from mlx_lm import stream_generate
@@ -95,7 +94,7 @@ def create_app(backend_factory=None):
     @asynccontextmanager
     async def lifespan(app):
         loop = asyncio.get_running_loop()
-        factory = backend_factory or (lambda: MLXBackend(Path(os.environ.get("SPARK_MODEL_PATH", str(DEFAULT_MODEL)))))
+        factory = backend_factory or (lambda: MLXBackend(ModelConfig.from_environment()))
         state["backend"] = await loop.run_in_executor(pool, factory)
         yield
         pool.shutdown(wait=True, cancel_futures=True)
@@ -121,6 +120,8 @@ def create_app(backend_factory=None):
 
     @app.post("/v1/generate")
     async def generate(request: GenerationRequest):
+        if request.model is not None and request.model != state["backend"].info["model"]:
+            raise HTTPException(409, "requested model does not match loaded model")
         try:
             check_schema(request.output_schema)
         except Exception as exc:
@@ -137,7 +138,7 @@ def create_app(backend_factory=None):
                 # Diagnostic metadata only: never echo generated text or evidence.
                 reason = ("schema_" + str(exc.validator)) if isinstance(exc, ValidationError) else type(exc).__name__
                 return JSONResponse({"detail": "model output did not satisfy the requested schema or context limit", "reason": reason, "output_chars": len(text) if text is not None else None, "usage": usage, "max_tokens": request.max_tokens}, status_code=422)
-            return {"output": output, "usage": usage, "latency_ms": round((time.perf_counter() - started) * 1000), "model": MODEL_ID, "quantization_bits": 8}
+            return {"output": output, "usage": usage, "latency_ms": round((time.perf_counter() - started) * 1000), "model": state["backend"].info["model"], "quantization_bits": state["backend"].info["quantization_bits"]}
 
     return app
 

@@ -57,6 +57,13 @@ async fn adapter(project: ProjectId, state: &AppState) -> Result<Astra, String> 
                 .into(),
         );
     }
+    adapter_with_config(project, config, state).await
+}
+async fn adapter_with_config(
+    project: ProjectId,
+    config: Settings,
+    state: &AppState,
+) -> Result<Astra, String> {
     state.sessions().await?;
     let provider = state
         .connection
@@ -87,11 +94,20 @@ async fn adapter(project: ProjectId, state: &AppState) -> Result<Astra, String> 
 pub async fn create_astra_plan(
     project_id: String,
     goal: String,
+    model: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<ExecutionPlan, String> {
     let id = ProjectId(project_id.parse().map_err(|_| "invalid project ID")?);
-    let result = adapter(id, &state)
-        .await?
+    let planner = adapter_with_config(
+        id,
+        Settings {
+            mode: AstraAccessMode::CodexIntegrated,
+            model,
+        },
+        &state,
+    )
+    .await?;
+    let result = planner
         .create_plan(PlanningRequest {
             goal,
             constraints: vec!["Never merge into the parent branch".into()],

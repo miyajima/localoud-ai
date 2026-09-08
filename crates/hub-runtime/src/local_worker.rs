@@ -212,7 +212,7 @@ impl LocalExecutor {
             .record_usage(&ModelUsageRecord {
                 id: uuid::Uuid::new_v4().to_string(),
                 provider: "spark".into(),
-                model: "Spark-X2.5-4B-MLX-8bit".into(),
+                model: self.provider.model_id().into(),
                 task_id: None,
                 turn_id: turn,
                 prompt_tokens: Some(usage.prompt_tokens),
@@ -235,6 +235,10 @@ impl LocalExecutor {
             .lock()
             .map_err(|_| anyhow!("database lock poisoned"))?
             .save_thread(&m)?;
+        self.store
+            .lock()
+            .map_err(|_| anyhow!("database lock poisoned"))?
+            .set_setting(&format!("thread_model:{}", m.id), self.provider.model_id())?;
         Ok(m)
     }
     pub async fn run(
@@ -254,6 +258,12 @@ impl LocalExecutor {
                 .into_iter()
                 .find(|m| m.id == id && m.provider == "spark")
                 .context("unknown Spark thread")?;
+            let pinned = s
+                .setting(&format!("thread_model:{id}"))?
+                .unwrap_or_else(|| "abenzerps/Spark-X2.5-4B-MLX-8bit".into());
+            if pinned != self.provider.model_id() {
+                bail!("このタスクのローカルモデルは {} です。接続設定を戻すか、新しいタスクを作成してください。", pinned);
+            }
             let root = s
                 .projects()?
                 .into_iter()
@@ -315,6 +325,40 @@ impl LocalExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn replacement_cannot_continue_a_task_pinned_to_another_local_model() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg(dir.path())
+            .output()?
+            .status
+            .success());
+        std::fs::write(dir.path().join("a.txt"), "unchanged")?;
+        let store = Arc::new(Mutex::new(Store::open(&dir.path().join("hub.db"))?));
+        let project = store.lock().unwrap().register_project(dir.path())?;
+        let executor = LocalExecutor {
+            store: store.clone(),
+            bus: EventBus::new(store.clone()),
+            provider: Arc::new(provider_spark::SparkProvider::new("http://127.0.0.1:1")?),
+            lock: tokio::sync::Mutex::new(()),
+        };
+        let thread = executor.create(project.id, "test".into())?;
+        store
+            .lock()
+            .unwrap()
+            .set_setting(&format!("thread_model:{}", thread.id), "other/model")?;
+        let error = executor
+            .run(thread.id, "edit".into(), vec!["a.txt".into()])
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("other/model"));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt"))?,
+            "unchanged"
+        );
+        Ok(())
+    }
     #[test]
     fn preimage_and_scope_protected() -> Result<()> {
         let d = tempfile::tempdir()?;

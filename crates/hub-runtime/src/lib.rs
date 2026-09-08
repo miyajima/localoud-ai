@@ -73,8 +73,19 @@ impl Sessions {
         repository_diff(&self.store, id).await
     }
     pub async fn create(&self, project: ProjectId, title: String) -> Result<ThreadMapping> {
+        self.create_with_model(project, title, None).await
+    }
+    pub async fn create_with_model(
+        &self,
+        project: ProjectId,
+        title: String,
+        model: Option<&str>,
+    ) -> Result<ThreadMapping> {
         let root = self.project_root(project)?;
-        let thread = self.provider.start_thread(root).await?;
+        let thread = match model {
+            Some(model) => self.provider.start_thread_with_model(root, model).await?,
+            None => self.provider.start_thread(root).await?,
+        };
         let mapping = ThreadMapping {
             id: HubThreadId::default(),
             project_id: project,
@@ -87,6 +98,12 @@ impl Sessions {
             .lock()
             .map_err(|_| anyhow!("database lock poisoned"))?
             .save_thread(&mapping)?;
+        if let Some(model) = model {
+            self.store
+                .lock()
+                .map_err(|_| anyhow!("database lock poisoned"))?
+                .set_setting(&format!("thread_model:{}", mapping.id), model)?;
+        }
         self.actor(mapping.id).await.lock().await.reconciled = true;
         Ok(mapping)
     }
@@ -165,15 +182,22 @@ impl Sessions {
                     .await?;
             }
         }
-        let result = self
-            .provider
-            .resume_thread(
-                &ProviderThread {
-                    id: m.provider_thread_id.clone(),
-                },
-                root,
-            )
-            .await?;
+        let pinned = self
+            .store
+            .lock()
+            .map_err(|_| anyhow!("database lock poisoned"))?
+            .setting(&format!("thread_model:{id}"))?;
+        let thread = ProviderThread {
+            id: m.provider_thread_id.clone(),
+        };
+        let result = match pinned {
+            Some(model) => {
+                self.provider
+                    .resume_thread_with_model(&thread, root, &model)
+                    .await?
+            }
+            None => self.provider.resume_thread(&thread, root).await?,
+        };
         state.active = result.active_turn.clone();
         state.reconciled = true;
         m.status = if state.active.is_some() {

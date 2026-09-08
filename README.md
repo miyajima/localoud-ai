@@ -35,3 +35,5 @@ The [measured context benchmark](docs/CONTEXT_BENCHMARK.md) contains one real pa
 Open a project folder with **⌘O** or the sidebar ＋. **⌘N** starts a new task, **⌘K** searches tasks/projects/actions, **⌘,** opens settings, and **⌘B** toggles the sidebar. Send with **⌘Enter**; Enter inserts a newline. Drafts, the last workspace and pinned tasks are restored locally.
 
 [The UX comparison](docs/UX_COMPARISON.md) lists 24 differences and the 19 adopted or partially adopted improvements, including native folder/file selection, rename/search/pin, safe Markdown, readable diffs and plan previews. Project registration still requires an existing Git repository.
+
+モデル名での選択・ローカルモデルの差し替え手順は [MODEL_CONFIGURATION.md](docs/MODEL_CONFIGURATION.md) を参照してください。

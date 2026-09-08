@@ -80,6 +80,13 @@ impl RoutingPolicy {
         if input.request.trim().is_empty() {
             bail!("empty request");
         }
+        if preference == ExecutorPreference::Codex {
+            return Ok(Some(decision(
+                ExecutorKind::Codex,
+                "user selected model",
+                input,
+            )));
+        }
         let text = input.request.to_lowercase();
         if [
             "architecture",
@@ -96,6 +103,9 @@ impl RoutingPolicy {
         .iter()
         .any(|w| text.contains(w))
         {
+            if preference == ExecutorPreference::Spark {
+                bail!("この依頼には計画が必要です。モデルは切り替えていません。「計画する」で確認してください。");
+            }
             let mut d = decision(
                 ExecutorKind::Astra,
                 "architecture / security / migration requires planning",
@@ -212,11 +222,17 @@ mod tests {
     }
     #[test]
     fn security_cannot_be_forced_to_spark() {
-        let d = RoutingPolicy::default()
+        assert!(RoutingPolicy::default()
             .pre_route(&input("change authentication"), ExecutorPreference::Spark)
-            .unwrap()
-            .unwrap();
-        assert_eq!(d.executor, ExecutorKind::Astra);
+            .is_err());
+        assert_eq!(
+            RoutingPolicy::default()
+                .pre_route(&input("change authentication"), ExecutorPreference::Codex)
+                .unwrap()
+                .unwrap()
+                .executor,
+            ExecutorKind::Codex
+        );
     }
     #[test]
     fn trivial_known_file_routes_local() {

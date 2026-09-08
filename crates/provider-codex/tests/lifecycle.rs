@@ -19,3 +19,25 @@ async fn lifecycle_stream_steer_interrupt_resume() -> anyhow::Result<()> {
     p.shutdown().await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn selected_model_is_sent_and_resumed_without_default_substitution() -> anyhow::Result<()> {
+    let p = CodexProvider::spawn_command(
+        "python3",
+        &[concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/codex-events/fake_server.py"
+        )],
+    )
+    .await?;
+    let root = std::env::current_dir()?;
+    assert!(p
+        .start_thread_with_model(root.clone(), "unavailable")
+        .await
+        .is_err());
+    let thread = p.start_thread_with_model(root.clone(), "fixture-b").await?;
+    p.resume_thread_with_model(&thread, root, "fixture-b")
+        .await?;
+    p.shutdown().await?;
+    Ok(())
+}
