@@ -5,7 +5,7 @@ import { invoke as nativeInvoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import './style.css';
 import './auto-routing.css';
-import {fillReasoningSelect,readTarget} from './model-controls';
+import {appendModelOptions,fillReasoningSelect,readTarget} from './model-controls';
 import type {ModelChoice,ModelTarget} from './model-controls';
 import {setupAutoRouting,showAutoPreview,openAutoSettings} from './auto-routing';
 import type {AutoPreview} from './auto-routing';
@@ -52,7 +52,7 @@ function updateModelOptions(preferred?:string){
   const choices=modelChoices.filter(m=>!planningMode()||!m.local);
   select.replaceChildren();
   if(!planningMode())select.add(new Option('自動','auto'));
-  for(const m of choices)select.add(new Option(m.label+(m.local?' · ローカル':''),m.key));
+  appendModelOptions(select,choices);
   if(Array.from(select.options).some(o=>o.value===previous))select.value=previous;
   else if(previous && previous!=='auto'){const missing=new Option('選択したモデルは利用できません',previous);missing.disabled=true;select.add(missing);select.value=previous;}
   else select.value=planningMode()?(choices[0]?.key||''):'auto';

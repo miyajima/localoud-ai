@@ -1,10 +1,25 @@
 export type ModelChoice = {key:string;label:string;model:string;local:boolean;reasoning:string[];default_reasoning:string|null;is_default:boolean};
 export type ModelTarget = {provider:'local'|'codex';model:string;reasoning:string|null};
 function option(select:HTMLSelectElement,label:string,value:string,disabled=false){const o=select.ownerDocument.createElement('option');o.textContent=label;o.value=value;o.disabled=disabled;select.add(o);return o;}
+export function appendModelOptions(select:HTMLSelectElement,models:ModelChoice[]){
+  for(const [label,local] of [['ローカル',true],['Codex',false]] as const){
+    const choices=models.filter(m=>m.local===local);if(!choices.length)continue;
+    const group=select.ownerDocument.createElement('optgroup');group.label=label;
+    for(const model of choices){
+      const item=select.ownerDocument.createElement('option');
+      item.value=model.key;item.textContent=model.model==='gpt-6-astra'&&!model.local?'GPT-6-Astra':model.label;
+      group.append(item);
+    }
+    select.append(group);
+  }
+  const group=select.ownerDocument.createElement('optgroup');group.label='ChatGPT（未接続）';
+  const item=select.ownerDocument.createElement('option');item.textContent='GPT-6-Astra(ChatGPT)';item.value='unavailable:chatgpt:gpt-6-astra';item.disabled=true;
+  group.append(item);select.append(group);
+}
 export function modelForTarget(models:ModelChoice[],target:ModelTarget|null|undefined){return target?models.find(m=>m.model===target.model&&m.local===(target.provider==='local')):undefined;}
 export function fillModelSelect(select:HTMLSelectElement,models:ModelChoice[],target:ModelTarget|null){
   select.replaceChildren();option(select,'モデルを選択','');
-  for(const model of models)option(select,model.label+(model.local?' · ローカル':''),model.key);
+  appendModelOptions(select,models);
   const match=modelForTarget(models,target);
   if(match)select.value=match.key;
   else if(target){const unavailable=`unavailable:${target.provider}:${target.model}`;option(select,`${target.model}（利用不可）`,unavailable,true);select.value=unavailable;}
