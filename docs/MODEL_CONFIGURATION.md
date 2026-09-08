@@ -69,7 +69,7 @@ LOCAL_MODEL_CONFIG=/absolute/path/to/model.json \
 - `GET /health` → `status: "ready"`, `model`, `quantization_bits`
 - `POST /v1/generate` ← `model`, `task`, `messages`, `schema`, `max_tokens`, `temperature`
 - 成功応答 → `output`（要求 schema を満たす JSON）, `usage.prompt_tokens`, `usage.completion_tokens`, `latency_ms`, `model`, `quantization_bits`
-- `task` は `difficulty`, `route`, `draft_context`, `implement`, `summarize`, `review`, `retrieval_query`, `memory_extract`
+- `task` は `difficulty`, `route`, `draft_context`, `implement`, `summarize`, `review`, `retrieval_query`, `memory_extract`, `input_completion`
 
 OpenAI Responses API（`/v1/responses`）や通常の OpenAI 互換 `/v1/chat/completions` をそのまま指定することはできません。この契約への変換アダプターが必要です。互換性のため内部 crate 名・永続 provider key は `spark` を保持しますが、表示・照合・使用量のモデル名は固定していません。
 

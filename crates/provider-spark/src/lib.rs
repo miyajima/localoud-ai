@@ -188,6 +188,24 @@ fn strings() -> Value {
 }
 #[async_trait]
 impl LocalModelProvider for SparkProvider {
+    async fn completion_available(&self) -> Result<bool> {
+        let health = self.health().await?;
+        Ok(health["capabilities"]["input_completion"] == true)
+    }
+    async fn complete_input(&self, prompt: String) -> Result<String> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Completion {
+            suffix: String,
+        }
+        let result: Generation<Completion> = self.generate("input_completion", prompt,
+            json!({"type":"object","properties":{"suffix":{"type":"string","maxLength":320}},"required":["suffix"],"additionalProperties":false}), 400).await?;
+        anyhow::ensure!(
+            result.output.suffix.chars().count() <= 320,
+            "Input completion exceeds limit"
+        );
+        Ok(result.output.suffix)
+    }
     fn model_id(&self) -> &str {
         &self.config.model_id
     }

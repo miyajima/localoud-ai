@@ -786,6 +786,7 @@ fn normalize(v: &Value) -> Option<AgentEvent> {
             let item = &p["item"];
             let typ = item["type"].as_str().unwrap_or("unknown");
             let detail = match typ {
+                "agentMessage" if method == "item/started" => typ,
                 "commandExecution" => item["aggregatedOutput"]
                     .as_str()
                     .or_else(|| item["command"].as_str())
@@ -825,6 +826,14 @@ fn normalize(v: &Value) -> Option<AgentEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn started_message_keeps_its_type_until_text_is_complete() {
+        let event = normalize(&json!({"method":"item/started","params":{"threadId":"t","turnId":"u","item":{"type":"agentMessage","text":""}}})).unwrap();
+        assert_eq!(event.kind, "item_started");
+        assert_eq!(event.text, "agentMessage");
+        let event = normalize(&json!({"method":"item/completed","params":{"threadId":"t","turnId":"u","item":{"type":"agentMessage","text":"answer"}}})).unwrap();
+        assert_eq!(event.text, "answer");
+    }
     #[test]
     fn completion_status_is_not_assumed_success() {
         let e=normalize(&json!({"method":"turn/completed","params":{"threadId":"t","turn":{"id":"u","status":"failed"}}})).unwrap();

@@ -145,6 +145,12 @@ pub trait LocalModelProvider: Send + Sync {
     ) -> Result<Generation<DifficultyAssessment>> {
         anyhow::bail!("このローカルサービスは5段階判定に対応していません。")
     }
+    async fn completion_available(&self) -> Result<bool> {
+        Ok(false)
+    }
+    async fn complete_input(&self, _prompt: String) -> Result<String> {
+        anyhow::bail!("Local input completion is unavailable")
+    }
     async fn available(&self) -> Result<()>;
     async fn classify_task(&self, input: &RoutingInput) -> Result<Generation<RoutingDecision>>;
     async fn implement(

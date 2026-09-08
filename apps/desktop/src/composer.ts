@@ -1,6 +1,5 @@
 import {triggerAt,historySuffix,mentionKey,filterEntries,canAcceptSuffix} from './composer-model';
 import type {Mention,Entry,Trigger} from './composer-model';
-import {fillReasoningSelect} from './model-controls';
 import type {ModelChoice} from './model-controls';
 type Call=<T=unknown>(command:string,args?:Record<string,unknown>)=>Promise<T>;
 type Catalog={entries:Entry[];modes:string[];warnings:string[]};
@@ -13,13 +12,13 @@ export function setupComposer(deps:Dependencies){
   const assist=document.createElement('div');assist.id='composer-assist';input.after(assist);
   assist.innerHTML='<div id="composer-chips"></div><div id="composer-suffix" hidden></div><div class="composer-tools"><button type="button" id="composer-slash">/ コマンド</button><button type="button" id="composer-at">@ 参照</button><button type="button" id="composer-history">入力履歴</button><button type="button" id="composer-ai">AI補完</button><button type="button" id="composer-settings">補完設定</button><span id="composer-hint">候補は Tab で採用 · Esc で閉じる</span></div><div id="composer-menu" role="listbox" aria-label="入力候補" hidden></div>';
   const interactions=document.createElement('div');interactions.id='composer-interactions';interactions.hidden=true;document.querySelector('#content')!.before(interactions);
-  const settings=document.createElement('dialog');settings.id='completion-settings-dialog';settings.innerHTML='<form><h2>入力補完</h2><p>このプロジェクトの入力履歴から、続きの候補を表示します。候補を採用するまで入力は変わりません。</p><label><input type="checkbox" id="completion-enabled"> 履歴で補えない場合はAI補完を使う</label><p>有効にすると、入力を止めたあとに現在の入力とこのプロジェクトの直近の履歴をLunaへ送ります。リポジトリの内容は補完用に送信しません。</p><label for="completion-effort">Luna の Reasoning</label><select id="completion-effort"></select><p id="completion-error" role="alert"></p><div class="dialog-actions"><button type="button" id="completion-close">閉じる</button><button type="submit" class="primary">保存</button></div></form>';document.body.append(settings);
+  const settings=document.createElement('dialog');settings.id='completion-settings-dialog';settings.innerHTML='<form><h2>入力補完</h2><p>このプロジェクトの入力履歴から、続きの候補を表示します。候補を採用するまで入力は変わりません。</p><label><input type="checkbox" id="completion-enabled"> 履歴で補えない場合はAI補完を使う</label><p>入力履歴を優先し、一致する候補がなければ設定済みのローカルLLMで補完します。ローカルが未接続・未対応・生成失敗の場合はLuna / lowを使います。</p><p>補完に使うのは現在の入力と、このプロジェクトの直近の入力履歴です。Lunaへ切り替える場合はそれらを送信します。リポジトリ本文は送信しません。</p><p id="completion-error" role="alert"></p><div class="dialog-actions"><button type="button" id="completion-close">閉じる</button><button type="submit" class="primary">保存</button></div></form>';document.body.append(settings);
   const menu=assist.querySelector<HTMLDivElement>('#composer-menu')!,suffixPanel=assist.querySelector<HTMLDivElement>('#composer-suffix')!;
   const chips=assist.querySelector<HTMLDivElement>('#composer-chips')!,hint=assist.querySelector<HTMLSpanElement>('#composer-hint')!;
   const byId=<T extends HTMLElement=HTMLElement>(id:string)=>document.getElementById(id) as T;
   let mentions:Mention[]=[],catalog:Catalog|null=null,catalogPromise:Promise<Catalog>|null=null,context='',history:string[]=[],generation=0,composing=false;
   let trigger:Trigger|null=null,category='',candidates:Candidate[]=[],selected=0,suffix='',suffixPrefix='',suffixContext='',dismissed='',aiBusy=false,lastAI=0;
-  let timer:ReturnType<typeof setTimeout>|undefined,config:CompletionConfig={enabled:false,model:'gpt-5.6-luna',reasoning:'none'},interactionVersion=0,lastInteraction='';
+  let timer:ReturnType<typeof setTimeout>|undefined,config:CompletionConfig={enabled:true,model:'local-first',reasoning:'low'},interactionVersion=0,lastInteraction='';
   function key(){return `${deps.project()||''}:${deps.thread()||''}`;}
   function args(){return {projectId:deps.project(),threadId:deps.thread()};}
   function hideMenu(){menu.hidden=true;input.removeAttribute('aria-activedescendant');input.setAttribute('aria-expanded','false');candidates=[];}
@@ -99,8 +98,8 @@ export function setupComposer(deps:Dependencies){
     if(!config.enabled){if(manual)void openSettings();return;}
     if(!manual&&Date.now()-lastAI<12000)return;
     const original=input.value,expected=key();if(original.trim().length<4||original.length>2000||input.selectionStart!==original.length)return;
-    aiBusy=true;lastAI=Date.now();hint.textContent=`Luna / ${config.reasoning} で補完中…`;
-    try{const value=await deps.call<string>('complete_prompt',{projectId:deps.project(),prefix:original});if(key()===expected)showSuffix(value,`Luna / ${config.reasoning}`,original,expected);}
+    aiBusy=true;lastAI=Date.now();hint.textContent='ローカル優先で補完中…';
+    try{const value=await deps.call<{suffix:string;source:string;fallback_reason:string|null}>('complete_prompt',{projectId:deps.project(),prefix:original});if(key()===expected){showSuffix(value.suffix,value.source,original,expected);hint.textContent=value.fallback_reason?`${value.source} · ${value.fallback_reason}`:`${value.source} で補完`; }}
     catch(e){if(key()===expected)hint.textContent=String(e);}
     finally{aiBusy=false;if(hint.textContent?.includes('補完中'))hint.textContent='候補は Tab で採用 · Esc で閉じる';}
   }
@@ -129,12 +128,12 @@ export function setupComposer(deps:Dependencies){
   byId('completion-close').onclick=()=>settings.close();
   async function openSettings(){
     settings.showModal();byId('completion-error').textContent='';
-    try{config=await deps.call<CompletionConfig>('completion_settings');byId<HTMLInputElement>('completion-enabled').checked=config.enabled;fillReasoningSelect(byId<HTMLSelectElement>('completion-effort'),deps.models().find(m=>m.model===config.model&&!m.local),config.reasoning);if(!deps.models().find(m=>m.model===config.model)?.reasoning.includes(config.reasoning))byId('completion-error').textContent=`${config.reasoning} は接続先のLunaでは利用できません。対応するReasoningを選択してください。`;}
+    try{config=await deps.call<CompletionConfig>('completion_settings');byId<HTMLInputElement>('completion-enabled').checked=config.enabled;}
     catch(e){byId('completion-error').textContent=String(e);}
   }
   settings.querySelector('form')!.onsubmit=async e=>{
-    e.preventDefault();const next={enabled:byId<HTMLInputElement>('completion-enabled').checked,model:'gpt-5.6-luna',reasoning:byId<HTMLSelectElement>('completion-effort').value};
-    try{await deps.call('set_completion_settings',{config:next});config=next;settings.close();hint.textContent=config.enabled?`履歴優先 · Luna / ${config.reasoning}`:'入力履歴から補完';}catch(err){byId('completion-error').textContent=String(err);}
+    e.preventDefault();const next={enabled:byId<HTMLInputElement>('completion-enabled').checked,model:'local-first',reasoning:'low'};
+    try{await deps.call('set_completion_settings',{config:next});config=next;settings.close();hint.textContent=config.enabled?'履歴 → ローカル → Luna / low':'入力履歴から補完';}catch(err){byId('completion-error').textContent=String(err);}
   };
   async function remember(text:string){const project=deps.project();if(!project||!text.trim())return;try{await deps.call('remember_prompt',{projectId:project,text});const loaded=await deps.call<string[]>('prompt_history',{projectId:project});if(deps.project()===project)history=loaded;}catch(e){deps.notice(`入力履歴を保存できませんでした: ${e}`);}}
   async function seedHistory(texts:string[],project:string){
@@ -173,6 +172,6 @@ export function setupComposer(deps:Dependencies){
     }
     hideMenu();return true;
   }
-  void deps.call<CompletionConfig>('completion_settings').then(value=>{config=value;hint.textContent=value.enabled?`履歴優先 · Luna / ${value.reasoning}`:'入力履歴から補完';}).catch(e=>deps.notice(String(e)));
+  void deps.call<CompletionConfig>('completion_settings').then(value=>{config=value;hint.textContent=value.enabled?'履歴 → ローカル → Luna / low':'入力履歴から補完';}).catch(e=>deps.notice(String(e)));
   return {getMentions:()=>mentions.map(m=>({...m})),setMentions:(items:Mention[])=>{mentions=items;renderChips();},clear:()=>{mentions=[];renderChips();hideMenu();hideSuffix();changed();},syncContext,refreshThread,remember,seedHistory,beforeSend,openSettings};
 }
