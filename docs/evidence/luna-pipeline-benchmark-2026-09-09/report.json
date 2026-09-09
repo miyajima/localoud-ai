@@ -1,0 +1,178 @@
+{
+  "date": "2026-09-09",
+  "scope": "Astra/low plan, Luna/max implementation, Astra/low review for each lane",
+  "setup": {
+    "root": "/private/var/folders/lm/s5hgvkpd7451pbw9pj889h780000gn/T/localoud-luna-pipeline-toaq_1zq",
+    "model": "gpt-5.6-luna",
+    "effort": "max",
+    "task": "Implement the following frozen Astra plan in the assigned fixture directory. The same plan is saved in PLAN.md. Only create scheduler.py and test_scheduler.py. Read policy.md and acceptance.py for the exact contract. No delegation, network access, or unrelated project access. Report changed files and test results concisely.\n\n# Astra implementation plan: dependency scheduler\n\nGoal: implement the exact scheduler contract in policy.md with Python standard library only. Deliver scheduler.py and test_scheduler.py; preserve every supplied file. No delegation or network access.\n\n1. Read policy.md, AGENTS.md and acceptance.py together. Keep topological choice, execution batches and critical path as separate operations because their readiness semantics differ.\n2. Build one private validation helper. Require a dict with nonempty string IDs and exact field keys deps/duration/group. Validate field types before membership checks so malformed or unhashable dependencies become ValueError. Duration and capacity must be positive integers excluding bool; group must be None or a nonempty string; deps must be a list of nonempty strings referring to known IDs. Copy dependencies into sets to deduplicate without mutating callers. Reject self-dependencies. Validate all nodes, including disconnected components, before returning any result.\n3. Derive a lexicographically minimal topological order with Kahn's algorithm and a min-heap of currently ready IDs. Decrement successors after each individual pop and push newly ready IDs immediately. If fewer nodes are emitted than exist, raise ValueError for the cycle. Reuse validated graph/order internally where useful; avoid global mutable state.\n4. For execution_batches, validate max_parallel even for an empty graph. Maintain completed and pending sets. At each batch boundary gather IDs whose dependencies are all completed, sort, then scan once: skip a conflicting non-None group, append compatible IDs until capacity is reached. Do not mark selected tasks completed until the batch is finalized. None groups do not conflict. Keep returned batches deterministic and return [] for no tasks.\n5. For critical_path_length, walk the validated topological order. The longest finish value for each node is its duration plus the maximum finish value of its dependencies, with zero for an empty predecessor set. Return the maximum finish value, or 0 for an empty graph. Group constraints do not enter this calculation.\n6. Add focused tests for newly ready lexicographic priority, delayed readiness between batches, skipping group conflicts to fill capacity, duplicate dependencies, disconnected cycles, malformed schemas, bool rejection, immutability, and weighted critical paths. Include small deterministic generated DAGs if useful. Run python3 -B -m unittest -v test_scheduler acceptance. Fix failures within the two-file scope and report final results concisely.\n\nAcceptance: all 12 supplied tests plus worker tests pass; only scheduler.py and test_scheduler.py change; results match the stated greedy and dependency semantics. Do not add extra APIs, dependencies, CLI features, or unrelated refactoring.\n",
+    "planner_model": "gpt-6-astra",
+    "planner_effort": "low",
+    "reviewer_model": "gpt-6-astra",
+    "reviewer_effort": "low",
+    "plan_reused_from": "planned-agent-benchmark-2026-09-09",
+    "frozen_hashes": {
+      "PLAN.md": "41d99c3f925a35168594314cfb34a87137082029bf233297255ab84e978a9329",
+      "policy.md": "7155b81127fd8b76c74a324c24b3f61c808233c8a1ba13f3b7ce8ac61daf36dc",
+      "acceptance.py": "6f5ce2676c6ec88027058784ee702cfcc8a85f0c1839889a7106449ca6d15709"
+    },
+    "native_context": "fork_turns=1; model and reasoning explicitly selected by user",
+    "localoud_context": "independent thread/start with identical frozen plan",
+    "review_method": "separate fresh read-only Codex app-server Astra/low reviewer for each lane, identical rubric, blinded lane names"
+  },
+  "shared_planning": {
+    "scope": "one parent inference authoring and saving the frozen plan; also includes fixture setup tool-call text, excludes surrounding preparation and orchestration",
+    "parent_thread_id": "01a0804c-d224-7012-8bf2-fb46e7a9732a",
+    "model": "gpt-6-astra",
+    "effort": "low",
+    "call_id": "call_TSWkjNbUY6QTcynbYsqfqsrG",
+    "authored_at": "2026-09-09T06:45:51.570Z",
+    "usage_at": "2026-09-09T06:45:51.898Z",
+    "usage": {
+      "input_tokens": 95650,
+      "cached_input_tokens": 93312,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 1499,
+      "reasoning_output_tokens": 374,
+      "total_tokens": 97149
+    },
+    "uncached_input_tokens": 2338,
+    "plan_sha256": "41d99c3f925a35168594314cfb34a87137082029bf233297255ab84e978a9329"
+  },
+  "results": {
+    "native": {
+      "implementation": {
+        "thread_id": "01a084f3-0f86-73c2-b9c6-62f1a6b760f8",
+        "model": "gpt-5.6-luna",
+        "effort": "max",
+        "first_input_tokens": 39620,
+        "input_tokens": 434784,
+        "cached_input_tokens": 392960,
+        "uncached_input_tokens": 41824,
+        "output_tokens": 9875,
+        "total_tokens": 444659,
+        "inference_count": 9,
+        "elapsed_seconds": 213.48
+      },
+      "review": {
+        "thread_id": "01a084f6-cf6b-7d90-8b76-0f09ae9df7b0",
+        "model": "gpt-6-astra",
+        "effort": "low",
+        "first_input_tokens": 32057,
+        "input_tokens": 32057,
+        "cached_input_tokens": 0,
+        "uncached_input_tokens": 32057,
+        "output_tokens": 240,
+        "total_tokens": 32297,
+        "inference_count": 1,
+        "elapsed_seconds": 15.586
+      },
+      "quality": {
+        "fixed_tests_passed": 12,
+        "own_tests_passed": 10,
+        "common_random_dags_passed": 1000,
+        "integrity_pass": true,
+        "review_verdict": "pass",
+        "review_findings": [],
+        "validation_pass": true
+      },
+      "implementation_plus_review": {
+        "input_tokens": 466841,
+        "cached_input_tokens": 392960,
+        "uncached_input_tokens": 73881,
+        "output_tokens": 10115,
+        "total_tokens": 476956
+      },
+      "shared_plan_plus_implementation_plus_review": {
+        "input_tokens": 562491,
+        "cached_input_tokens": 486272,
+        "uncached_input_tokens": 76219,
+        "output_tokens": 11614,
+        "total_tokens": 574105
+      },
+      "baseline_commit": "39e77ec8388eed3ae693e033b4e08eea17236190"
+    },
+    "localoud": {
+      "implementation": {
+        "thread_id": "01a084f3-49ce-7832-96fa-f712f0067c3a",
+        "model": "gpt-5.6-luna",
+        "effort": "max",
+        "first_input_tokens": 27204,
+        "input_tokens": 1582218,
+        "cached_input_tokens": 1487616,
+        "uncached_input_tokens": 94602,
+        "output_tokens": 21703,
+        "total_tokens": 1603921,
+        "inference_count": 26,
+        "elapsed_seconds": 453.549
+      },
+      "review": {
+        "thread_id": "01a084fb-3f3f-7180-970a-9d5b1d53559b",
+        "model": "gpt-6-astra",
+        "effort": "low",
+        "first_input_tokens": 32159,
+        "input_tokens": 32159,
+        "cached_input_tokens": 0,
+        "uncached_input_tokens": 32159,
+        "output_tokens": 209,
+        "total_tokens": 32368,
+        "inference_count": 1,
+        "elapsed_seconds": 14.481
+      },
+      "quality": {
+        "fixed_tests_passed": 12,
+        "own_tests_passed": 10,
+        "common_random_dags_passed": 1000,
+        "integrity_pass": true,
+        "review_verdict": "pass",
+        "review_findings": [],
+        "validation_pass": true
+      },
+      "implementation_plus_review": {
+        "input_tokens": 1614377,
+        "cached_input_tokens": 1487616,
+        "uncached_input_tokens": 126761,
+        "output_tokens": 21912,
+        "total_tokens": 1636289
+      },
+      "shared_plan_plus_implementation_plus_review": {
+        "input_tokens": 1710027,
+        "cached_input_tokens": 1580928,
+        "uncached_input_tokens": 129099,
+        "output_tokens": 23411,
+        "total_tokens": 1733438
+      },
+      "baseline_commit": "39e77ec8388eed3ae693e033b4e08eea17236190"
+    }
+  },
+  "localoud_change_percent": {
+    "implementation": {
+      "input_tokens": 263.909,
+      "uncached_input_tokens": 126.191,
+      "output_tokens": 119.777,
+      "total_tokens": 260.708
+    },
+    "implementation_plus_review": {
+      "input_tokens": 245.809,
+      "uncached_input_tokens": 71.575,
+      "output_tokens": 116.629,
+      "total_tokens": 243.069
+    },
+    "shared_plan_plus_implementation_plus_review": {
+      "input_tokens": 204.01,
+      "uncached_input_tokens": 69.379,
+      "output_tokens": 101.576,
+      "total_tokens": 201.937
+    }
+  },
+  "limitations": [
+    "One task, one implementation per lane, one separate read-only review per lane; no best-of selection.",
+    "The frozen Astra/low plan and its measured authoring inference are reused from the previous experiment, not regenerated. Totals include that common measured plan once per hypothetical lane.",
+    "Native uses fork_turns=1 to permit the user-selected Luna/max override, unlike previous full-history native comparisons. Localoud uses independent thread/start.",
+    "Both reviewers use identical structured read-only app-server routing, rubric and neutral candidate cwd; candidate source differs. This does not compare native reviewer spawning with Localoud reviewer spawning.",
+    "Controller validation is supplied to reviewers; reviewers do not run tests themselves.",
+    "Provider instructions, tools, context and cache warmth are not identical.",
+    "Pipeline totals omit experiment preparation, parent orchestration/validation/reporting, platform guardians and unrelated session history costs. No subscription or full-session cost claims.",
+    "Previous runs used a different implementation model and/or native history settings, so cross-run differences are not a model-only causal comparison."
+  ]
+}

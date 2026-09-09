@@ -1,0 +1,19 @@
+{
+  "scope": "one parent inference authoring and saving the frozen plan; also includes fixture setup tool-call text, excludes surrounding preparation and orchestration",
+  "parent_thread_id": "01a0804c-d224-7012-8bf2-fb46e7a9732a",
+  "model": "gpt-6-astra",
+  "effort": "low",
+  "call_id": "call_TSWkjNbUY6QTcynbYsqfqsrG",
+  "authored_at": "2026-09-09T06:45:51.570Z",
+  "usage_at": "2026-09-09T06:45:51.898Z",
+  "usage": {
+    "input_tokens": 95650,
+    "cached_input_tokens": 93312,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 1499,
+    "reasoning_output_tokens": 374,
+    "total_tokens": 97149
+  },
+  "uncached_input_tokens": 2338,
+  "plan_sha256": "41d99c3f925a35168594314cfb34a87137082029bf233297255ab84e978a9329"
+}

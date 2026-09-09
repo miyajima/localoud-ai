@@ -1,0 +1,16 @@
+{
+  "effort": "low",
+  "elapsed_ms": 15586,
+  "model": "gpt-6-astra",
+  "review": {
+    "evidence_limits": [
+      "Reviewed only supplied source text and controller reports; no independent execution or hash verification.",
+      "Generated checks cover 1,000 DAGs with at most six nodes; they are not exhaustive.",
+      "Controller results establish reported validation and scope integrity, but do not establish the worker's prior reading or test execution."
+    ],
+    "findings": [],
+    "summary": "The implementation satisfies the supplied functional contract and Astra design: shared schema validation, dependency deduplication, unknown/self/cycle rejection, immediate lexicographic topological choices, deterministic greedy batches with delayed readiness, weighted critical paths, and input preservation. Source inspection supports correctness beyond the reported 22 passing tests and independent enumeration checks. Controller integrity evidence supports the required two-file change scope. No concrete defects found.",
+    "verdict": "pass"
+  },
+  "status": "completed"
+}

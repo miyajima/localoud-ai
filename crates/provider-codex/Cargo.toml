@@ -10,3 +10,6 @@ tokio.workspace = true
 async-trait.workspace = true
 protocol-types = { path = "../protocol-types" }
 hub-policy = { path = "../hub-policy" }
+
+[dev-dependencies]
+tempfile = "3"

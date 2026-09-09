@@ -1,0 +1,29 @@
+{
+  "id": "localoud-codex-ui-df8o58_6",
+  "status": "awaiting_manual_codex_ui_start",
+  "root": "/private/tmp/localoud-codex-ui-df8o58_6",
+  "fixture": "/private/tmp/localoud-codex-ui-df8o58_6/fixture",
+  "models": {
+    "plan": [
+      "gpt-6-astra",
+      "low"
+    ],
+    "implementation": [
+      "gpt-5.6-luna",
+      "max"
+    ],
+    "review": [
+      "gpt-6-astra",
+      "low"
+    ]
+  },
+  "plan_reuse": "same frozen Astra/low plan as prior comparison",
+  "frozen_hashes": {
+    "PLAN.md": "41d99c3f925a35168594314cfb34a87137082029bf233297255ab84e978a9329",
+    "policy.md": "7155b81127fd8b76c74a324c24b3f61c808233c8a1ba13f3b7ce8ac61daf36dc",
+    "acceptance.py": "6f5ce2676c6ec88027058784ee702cfcc8a85f0c1839889a7106449ca6d15709",
+    "AGENTS.md": "40a67ed47c49aed57cf68f17faba29ad0f217a859086145099bb40b834ef58f5"
+  },
+  "launch_blocker": "Computer Use is not allowed to use the app 'com.openai.codex' for safety reasons.",
+  "launch_method_required": "user submits prepared prompt in a fresh Codex UI task; no create_thread or app-server substitute"
+}

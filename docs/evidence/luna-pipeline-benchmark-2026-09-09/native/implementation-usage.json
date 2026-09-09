@@ -1,0 +1,203 @@
+{
+  "session_id": "01a084f3-0f86-73c2-b9c6-62f1a6b760f8",
+  "source": {
+    "subagent": {
+      "thread_spawn": {
+        "parent_thread_id": "01a0804c-d224-7012-8bf2-fb46e7a9732a",
+        "depth": 1,
+        "agent_path": "/root/luna_native_pipeline",
+        "agent_nickname": "James",
+        "agent_role": null
+      }
+    }
+  },
+  "created_at": "2026-09-09T06:55:16.922Z",
+  "completed_at": "2026-09-09T06:58:50.402Z",
+  "model": {
+    "model": "gpt-5.6-luna",
+    "effort": "max"
+  },
+  "token_counts": [
+    {
+      "timestamp": "2026-09-09T06:55:36.589Z",
+      "total_token_usage": {
+        "input_tokens": 39620,
+        "cached_input_tokens": 18176,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 743,
+        "reasoning_output_tokens": 247,
+        "total_tokens": 40363
+      },
+      "last_token_usage": {
+        "input_tokens": 39620,
+        "cached_input_tokens": 18176,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 743,
+        "reasoning_output_tokens": 247,
+        "total_tokens": 40363
+      },
+      "model_context_window": 258400
+    },
+    {
+      "timestamp": "2026-09-09T06:55:47.192Z",
+      "total_token_usage": {
+        "input_tokens": 80018,
+        "cached_input_tokens": 56832,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1144,
+        "reasoning_output_tokens": 385,
+        "total_tokens": 81162
+      },
+      "last_token_usage": {
+        "input_tokens": 40398,
+        "cached_input_tokens": 38656,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 401,
+        "reasoning_output_tokens": 138,
+        "total_tokens": 40799
+      },
+      "model_context_window": 258400
+    },
+    {
+      "timestamp": "2026-09-09T06:57:47.755Z",
+      "total_token_usage": {
+        "input_tokens": 122768,
+        "cached_input_tokens": 96512,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 7251,
+        "reasoning_output_tokens": 3579,
+        "total_tokens": 130019
+      },
+      "last_token_usage": {
+        "input_tokens": 42750,
+        "cached_input_tokens": 39680,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 6107,
+        "reasoning_output_tokens": 3194,
+        "total_tokens": 48857
+      },
+      "model_context_window": 258400
+    },
+    {
+      "timestamp": "2026-09-09T06:57:54.917Z",
+      "total_token_usage": {
+        "input_tokens": 171649,
+        "cached_input_tokens": 138240,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 7507,
+        "reasoning_output_tokens": 3605,
+        "total_tokens": 179156
+      },
+      "last_token_usage": {
+        "input_tokens": 48881,
+        "cached_input_tokens": 41728,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 256,
+        "reasoning_output_tokens": 26,
+        "total_tokens": 49137
+      },
+      "model_context_window": 258400
+    },
+    {
+      "timestamp": "2026-09-09T06:57:59.122Z",
+      "total_token_usage": {
+        "input_tokens": 222801,
+        "cached_input_tokens": 186112,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 7654,
+        "reasoning_output_tokens": 3653,
+        "total_tokens": 230455
+      },
+      "last_token_usage": {
+        "input_tokens": 51152,
+        "cached_input_tokens": 47872,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 147,
+        "reasoning_output_tokens": 48,
+        "total_tokens": 51299
+      },
+      "model_context_window": 258400
+    },
+    {
+      "timestamp": "2026-09-09T06:58:26.318Z",
+      "total_token_usage": {
+        "input_tokens": 274470,
+        "cached_input_tokens": 237056,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 8806,
+        "reasoning_output_tokens": 4687,
+        "total_tokens": 283276
+      },
+      "last_token_usage": {
+        "input_tokens": 51669,
+        "cached_input_tokens": 50944,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1152,
+        "reasoning_output_tokens": 1034,
+        "total_tokens": 52821
+      },
+      "model_context_window": 258400
+    },
+    {
+      "timestamp": "2026-09-09T06:58:29.991Z",
+      "total_token_usage": {
+        "input_tokens": 327315,
+        "cached_input_tokens": 288000,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 8915,
+        "reasoning_output_tokens": 4697,
+        "total_tokens": 336230
+      },
+      "last_token_usage": {
+        "input_tokens": 52845,
+        "cached_input_tokens": 50944,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 109,
+        "reasoning_output_tokens": 10,
+        "total_tokens": 52954
+      },
+      "model_context_window": 258400
+    },
+    {
+      "timestamp": "2026-09-09T06:58:45.167Z",
+      "total_token_usage": {
+        "input_tokens": 380639,
+        "cached_input_tokens": 339968,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 9679,
+        "reasoning_output_tokens": 5210,
+        "total_tokens": 390318
+      },
+      "last_token_usage": {
+        "input_tokens": 53324,
+        "cached_input_tokens": 51968,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 764,
+        "reasoning_output_tokens": 513,
+        "total_tokens": 54088
+      },
+      "model_context_window": 258400
+    },
+    {
+      "timestamp": "2026-09-09T06:58:50.397Z",
+      "total_token_usage": {
+        "input_tokens": 434784,
+        "cached_input_tokens": 392960,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 9875,
+        "reasoning_output_tokens": 5237,
+        "total_tokens": 444659
+      },
+      "last_token_usage": {
+        "input_tokens": 54145,
+        "cached_input_tokens": 52992,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 196,
+        "reasoning_output_tokens": 27,
+        "total_tokens": 54341
+      },
+      "model_context_window": 258400
+    }
+  ],
+  "source_log_sha256": "44e5d49adba355a801ad4fc5fae79999a53aed151e0fe25dcd96bce7c88c6031"
+}

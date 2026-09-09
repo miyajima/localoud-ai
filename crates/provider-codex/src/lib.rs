@@ -34,6 +34,39 @@ pub struct CodexProvider {
 }
 pub mod composer;
 impl CodexProvider {
+    /// Reconcile the exact saved turn before interrupting. A restarted server
+    /// has no loaded runtime for turns already persisted as terminal.
+    pub async fn reconcile_stopped_turn(&self, turn: &ProviderTurn) -> Result<()> {
+        let value = self.request("thread/read", json!({"threadId":turn.thread_id,"includeTurns":true})).await?;
+        if persisted_turn_is_terminal(&value, turn)? {
+            return Ok(());
+        }
+        self.interrupt_turn(turn).await
+    }
+    /// A loaded thread may retain its previous cwd after thread/resume.
+    /// Bind every isolated worker turn to its current worktree explicitly.
+    pub async fn start_turn_in_worktree(
+        &self,
+        thread: &ProviderThread,
+        root: PathBuf,
+        text: String,
+        model: &str,
+        effort: Option<&str>,
+    ) -> Result<ProviderTurn> {
+        let root = root.canonicalize()?;
+        self.validate_model_reasoning(model, effort).await?;
+        let v = self.request("turn/start", json!({
+            "threadId":thread.id,"cwd":root,"model":model,"effort":effort,
+            "approvalPolicy":"on-request",
+            "sandboxPolicy":{"type":"workspaceWrite","writableRoots":[root],"networkAccess":false,"excludeSlashTmp":true,"excludeTmpdirEnvVar":true},
+            "input":[{"type":"text","text":text}]
+        })).await?;
+        Ok(ProviderTurn {
+            thread_id: thread.id.clone(),
+            id: v["turn"]["id"].as_str().context("missing turn ID")?.into(),
+            status: v["turn"]["status"].as_str().unwrap_or("unknown").into(),
+        })
+    }
     pub async fn spawn(binary: &str) -> Result<Self> {
         Self::spawn_command(binary, &["app-server", "--listen", "stdio://"]).await
     }
@@ -710,6 +743,19 @@ fn dispatch(
 fn string(v: &Value, k: &str) -> Option<String> {
     v[k].as_str().map(str::to_owned)
 }
+fn persisted_turn_is_terminal(value: &Value, expected: &ProviderTurn) -> Result<bool> {
+    let thread = &value["thread"];
+    if thread["id"].as_str() != Some(expected.thread_id.as_str()) {
+        bail!("reconciliation returned a different thread");
+    }
+    let turn = thread["turns"].as_array().and_then(|turns| turns.iter().find(|turn| turn["id"].as_str() == Some(expected.id.as_str())))
+        .context("saved turn is missing; stop cannot be confirmed")?;
+    match turn["status"].as_str() {
+        Some("completed" | "interrupted" | "failed") => Ok(true),
+        Some("inProgress") => Ok(false),
+        _ => bail!("saved turn status is unknown; stop cannot be confirmed"),
+    }
+}
 fn snapshot(v: Value) -> Result<ThreadSnapshot> {
     let t = &v["thread"];
     let thread = ProviderThread {
@@ -855,6 +901,18 @@ fn normalize(v: &Value) -> Option<AgentEvent> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reconciliation_requires_the_exact_saved_turn_and_known_status() {
+        let turn = crate::ProviderTurn { thread_id: "t".into(), id: "u".into(), status: "inProgress".into() };
+        for status in ["completed", "interrupted", "failed"] {
+            assert!(super::persisted_turn_is_terminal(&serde_json::json!({"thread":{"id":"t","turns":[{"id":"u","status":status}]}}), &turn).unwrap());
+        }
+        assert!(!super::persisted_turn_is_terminal(&serde_json::json!({"thread":{"id":"t","turns":[{"id":"u","status":"inProgress"}]}}), &turn).unwrap());
+        for value in [serde_json::json!({"thread":{"id":"other","turns":[]}}), serde_json::json!({"thread":{"id":"t","turns":[]}}), serde_json::json!({"thread":{"id":"t","turns":[{"id":"u","status":"unknown"}]}})] {
+            assert!(super::persisted_turn_is_terminal(&value, &turn).is_err());
+        }
+    }
+
     use super::*;
     #[test]
     fn started_message_keeps_its_type_until_text_is_complete() {

@@ -1,0 +1,80 @@
+[
+  {
+    "chapter": "01  全体の見方",
+    "title": "工程を左から右へ",
+    "duration": 7,
+    "source": "01-overview.png"
+  },
+  {
+    "chapter": "02  依頼と計画",
+    "title": "プロジェクトを選ぶ",
+    "duration": 6,
+    "source": "02-new.png"
+  },
+  {
+    "chapter": "02  依頼と計画",
+    "title": "依頼文をコピーする",
+    "duration": 7,
+    "source": "04-planning.png"
+  },
+  {
+    "chapter": "02  依頼と計画",
+    "title": "右のチャットで相談",
+    "duration": 7,
+    "source": "04-planning.png"
+  },
+  {
+    "chapter": "02  依頼と計画",
+    "title": "計画を取り込んで実行",
+    "duration": 7,
+    "source": "04-planning.png"
+  },
+  {
+    "chapter": "03  作業記録を読む",
+    "title": "取り込んだ計画を見る",
+    "duration": 6,
+    "source": "05-plan.png"
+  },
+  {
+    "chapter": "03  作業記録を読む",
+    "title": "担当ごとの進捗を見る",
+    "duration": 7,
+    "source": "06-workers.png"
+  },
+  {
+    "chapter": "03  作業記録を読む",
+    "title": "実際の差分を確認",
+    "duration": 6,
+    "source": "07-diff.png"
+  },
+  {
+    "chapter": "03  作業記録を読む",
+    "title": "検証ログを読む",
+    "duration": 6,
+    "source": "08-log.png"
+  },
+  {
+    "chapter": "03  作業記録を読む",
+    "title": "渡した指示と使用量",
+    "duration": 6,
+    "source": "09-context.png"
+  },
+  {
+    "chapter": "03  作業記録を読む",
+    "title": "使用量の範囲を確認",
+    "duration": 7,
+    "source": "10-usage.png"
+  },
+  {
+    "chapter": "04  レビューと完了",
+    "title": "レビューはチャットへ",
+    "duration": 7,
+    "source": "11-complete.png"
+  },
+  {
+    "chapter": "04  レビューと完了",
+    "title": "合格と保存先を確認",
+    "duration": 7,
+    "source": "11-complete.png"
+  }
+]

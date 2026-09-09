@@ -1,0 +1,83 @@
+{
+  "session_id": "01a084ea-d858-7f12-86fa-c2fc3aeb078b",
+  "source": {
+    "subagent": {
+      "thread_spawn": {
+        "parent_thread_id": "01a0804c-d224-7012-8bf2-fb46e7a9732a",
+        "depth": 1,
+        "agent_path": "/root/planned_native_benchmark",
+        "agent_nickname": "Tesla",
+        "agent_role": null
+      }
+    }
+  },
+  "created_at": "2026-09-09T06:46:18.536Z",
+  "completed_at": "2026-09-09T06:47:53.079Z",
+  "model": {
+    "model": "gpt-6-astra",
+    "effort": "low"
+  },
+  "token_counts": [
+    {
+      "timestamp": "2026-09-09T06:46:26.633Z",
+      "total_token_usage": {
+        "input_tokens": 36933,
+        "cached_input_tokens": 34560,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 76,
+        "reasoning_output_tokens": 0,
+        "total_tokens": 37009
+      },
+      "last_token_usage": {
+        "input_tokens": 36933,
+        "cached_input_tokens": 34560,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 76,
+        "reasoning_output_tokens": 0,
+        "total_tokens": 37009
+      },
+      "model_context_window": 258400
+    },
+    {
+      "timestamp": "2026-09-09T06:47:48.438Z",
+      "total_token_usage": {
+        "input_tokens": 75286,
+        "cached_input_tokens": 71296,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2461,
+        "reasoning_output_tokens": 21,
+        "total_tokens": 77747
+      },
+      "last_token_usage": {
+        "input_tokens": 38353,
+        "cached_input_tokens": 36736,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2385,
+        "reasoning_output_tokens": 21,
+        "total_tokens": 40738
+      },
+      "model_context_window": 258400
+    },
+    {
+      "timestamp": "2026-09-09T06:47:53.074Z",
+      "total_token_usage": {
+        "input_tokens": 116929,
+        "cached_input_tokens": 109440,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2555,
+        "reasoning_output_tokens": 21,
+        "total_tokens": 119484
+      },
+      "last_token_usage": {
+        "input_tokens": 41643,
+        "cached_input_tokens": 38144,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 94,
+        "reasoning_output_tokens": 0,
+        "total_tokens": 41737
+      },
+      "model_context_window": 258400
+    }
+  ],
+  "source_log_sha256": "18c5653b4e9c425e0946ced9a0a72b09668ec36995ed512de06ac244f6dcb07d"
+}

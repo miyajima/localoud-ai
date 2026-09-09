@@ -143,3 +143,33 @@ pub async fn unregister_project(
         .unregister_project(id)
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn manage_project(
+    app: tauri::AppHandle,
+    project_id: String,
+    action: String,
+    name: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_opener::OpenerExt;
+    let id=hub_core::ProjectId(project_id.parse().map_err(|_| "invalid project ID")?);
+    let _workflow=state.workflow_lock.lock().await;
+    let project=state.store.lock().map_err(|e|e.to_string())?.projects().map_err(|e|e.to_string())?.into_iter().find(|p|p.id==id).ok_or("プロジェクトが見つかりません。")?;
+    match action.as_str() {
+        "rename" => state.store.lock().map_err(|e|e.to_string())?.rename_project(id,name.as_deref().ok_or("名前が必要です。")?).map_err(|e|e.to_string())?,
+        "reveal" => app.opener().open_path(project.root.to_string_lossy(),None::<&str>).map_err(|e|e.to_string())?,
+        "archive" => {
+            if state.running_plans.lock().await.contains(&id) { return Err("計画の実行完了後に操作してください。".into()); }
+            state.store.lock().map_err(|e|e.to_string())?.archive_project_threads(id).map_err(|e|e.to_string())?;
+        },
+        "worktree" => {
+            let tree=hub_worktree::GitWorktrees::new(&project.root).map_err(|e|e.to_string())?.create(hub_core::TaskId::default(),"HEAD").await.map_err(|e|e.to_string())?;
+            let path=tree.path.to_string_lossy().to_string();
+            state.store.lock().map_err(|e|e.to_string())?.register_project(&tree.path).map_err(|e|e.to_string())?;
+            return Ok(Some(path));
+        },
+        _ => return Err("不明な操作です。".into()),
+    }
+    Ok(None)
+}

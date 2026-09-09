@@ -1,0 +1,12 @@
+{
+  "tests": {
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "test_cut_spans_multiple_sources (test_intervals.IntervalTests.test_cut_spans_multiple_sources) ... ok\ntest_disjoint_and_empty_cuts (test_intervals.IntervalTests.test_disjoint_and_empty_cuts) ... ok\ntest_empty_and_degenerate (test_intervals.IntervalTests.test_empty_and_degenerate) ... ok\ntest_exhaustive_small_set_difference (test_intervals.IntervalTests.test_exhaustive_small_set_difference) ... ok\ntest_fractional_bounds_and_membership (test_intervals.IntervalTests.test_fractional_bounds_and_membership) ... ok\ntest_invalid_bounds_all_functions (test_intervals.IntervalTests.test_invalid_bounds_all_functions) ... ok\ntest_iterators (test_intervals.IntervalTests.test_iterators) ... ok\ntest_nested_duplicate_and_touching (test_intervals.IntervalTests.test_nested_duplicate_and_touching) ... ok\ntest_no_mutation_or_aliasing (test_intervals.IntervalTests.test_no_mutation_or_aliasing) ... ok\ntest_touching_cuts (test_intervals.IntervalTests.test_touching_cuts) ... ok\ntest_edges (acceptance.Acceptance.test_edges) ... ok\ntest_empty (acceptance.Acceptance.test_empty) ... ok\ntest_full (acceptance.Acceptance.test_full) ... ok\ntest_invalid (acceptance.Acceptance.test_invalid) ... ok\ntest_merge (acceptance.Acceptance.test_merge) ... ok\ntest_negative (acceptance.Acceptance.test_negative) ... ok\ntest_no_mutation (acceptance.Acceptance.test_no_mutation) ... ok\ntest_overlap (acceptance.Acceptance.test_overlap) ... ok\ntest_subtract (acceptance.Acceptance.test_subtract) ... ok\n\n----------------------------------------------------------------------\nRan 19 tests in 0.019s\n\nOK\n"
+  },
+  "oracle": {
+    "exit_code": 0,
+    "stdout": "{\"pass\": true, \"random_cases\": 2000, \"points_per_case\": 49, \"seed\": 20260909, \"reversed_checks\": 4}\n",
+    "stderr": ""
+  }
+}

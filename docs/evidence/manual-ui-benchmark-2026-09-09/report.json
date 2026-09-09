@@ -1,0 +1,155 @@
+{
+  "date": "2026-09-09",
+  "status": "inconclusive_shared_workspace",
+  "results": {
+    "codex_parent": {
+      "thread_id": "01a0850d-8b73-7380-bc34-d9f4fdf52b84",
+      "model": {
+        "model": "gpt-6-astra",
+        "effort": "low"
+      },
+      "originator": "Codex Desktop",
+      "cli_version": "0.153.4",
+      "source": "vscode",
+      "usage": {
+        "input_tokens": 808597,
+        "cached_input_tokens": 767232,
+        "output_tokens": 2659,
+        "total_tokens": 811256,
+        "uncached_input_tokens": 41365,
+        "inferences": 16,
+        "first_input_tokens": 35080
+      }
+    },
+    "localoud_parent": {
+      "thread_id": "01a0850e-9002-7333-b362-717434d37430",
+      "model": {
+        "model": "gpt-6-astra",
+        "effort": "low"
+      },
+      "originator": "astra_hub",
+      "cli_version": "0.153.4",
+      "source": "vscode",
+      "usage": {
+        "input_tokens": 558068,
+        "cached_input_tokens": 518784,
+        "output_tokens": 2493,
+        "total_tokens": 560561,
+        "uncached_input_tokens": 39284,
+        "inferences": 13,
+        "first_input_tokens": 27342
+      }
+    },
+    "codex_child": {
+      "thread_id": "01a0850e-5b09-7bd2-bbf2-de4228b15018",
+      "model": {
+        "model": "gpt-5.6-luna",
+        "effort": "max"
+      },
+      "originator": "Codex Desktop",
+      "cli_version": "0.153.4",
+      "source": {
+        "subagent": {
+          "thread_spawn": {
+            "parent_thread_id": "01a0850d-8b73-7380-bc34-d9f4fdf52b84",
+            "depth": 1,
+            "agent_path": "/root/scheduler_implementation",
+            "agent_nickname": "Cicero",
+            "agent_role": null
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 512514,
+        "cached_input_tokens": 465408,
+        "output_tokens": 9181,
+        "total_tokens": 521695,
+        "uncached_input_tokens": 47106,
+        "inferences": 10,
+        "first_input_tokens": 39781
+      }
+    },
+    "localoud_child": {
+      "thread_id": "01a0850f-52bf-7143-8c57-660d37f9f260",
+      "model": {
+        "model": "gpt-5.6-luna",
+        "effort": "max"
+      },
+      "originator": "astra_hub",
+      "cli_version": "0.153.4",
+      "source": {
+        "subagent": {
+          "thread_spawn": {
+            "parent_thread_id": "01a0850e-9002-7333-b362-717434d37430",
+            "depth": 1,
+            "agent_path": "/root/ui_benchmark_implementation",
+            "agent_nickname": "Volta",
+            "agent_role": null
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 312014,
+        "cached_input_tokens": 254976,
+        "output_tokens": 5876,
+        "total_tokens": 317890,
+        "uncached_input_tokens": 57038,
+        "inferences": 8,
+        "first_input_tokens": 32095
+      }
+    }
+  },
+  "combined": {
+    "codex": {
+      "input_tokens": 1321111,
+      "cached_input_tokens": 1232640,
+      "uncached_input_tokens": 88471,
+      "output_tokens": 11840,
+      "total_tokens": 1332951,
+      "inferences": 26
+    },
+    "localoud": {
+      "input_tokens": 870082,
+      "cached_input_tokens": 773760,
+      "uncached_input_tokens": 96322,
+      "output_tokens": 8369,
+      "total_tokens": 878451,
+      "inferences": 21
+    }
+  },
+  "observed_total_change_percent": -34.1,
+  "writes": [
+    {
+      "source": "codex_child",
+      "at": "2026-09-09T07:27:17.670Z",
+      "call_id": "call_s0ZZSbf3iGFLtemx59Uq7oTf",
+      "files": [
+        "*** Add File: /private/tmp/localoud-codex-ui-df8o58_6/fixture/scheduler.py",
+        "*** Add File: /private/tmp/localoud-codex-ui-df8o58_6/fixture/test_scheduler.py"
+      ]
+    },
+    {
+      "source": "localoud_child",
+      "at": "2026-09-09T07:27:37.260Z",
+      "call_id": "call_5JFPwMH2IUEYZKcjmwKuFCkl",
+      "files": [
+        "*** Add File: /private/tmp/localoud-codex-ui-df8o58_6/fixture/scheduler.py"
+      ]
+    }
+  ],
+  "mapping_evidence": {
+    "localoud_provider_thread_row_id": "48e129af-4370-4301-aa15-790de06f9d68",
+    "localoud_provider": "codex",
+    "localoud_task_id": null,
+    "localoud_originator": "astra_hub",
+    "codex_originator": "Codex Desktop"
+  },
+  "limitations": [
+    "Both workers modified /private/tmp/localoud-codex-ui-df8o58_6/fixture concurrently.",
+    "Codex wrote scheduler.py and test_scheduler.py; Localoud subsequently wrote only scheduler.py, using the existing tests.",
+    "Both parent validations/reviews read the shared final artifact; review.json and validation.json were overwritten, so they are not independent quality evidence.",
+    "Localoud normal Codex chat spawned a native subagent, not the previously benchmarked independent Localoud worker.",
+    "Both parent and child binaries reported version 0.153.4. No UI-specific efficiency fix is established.",
+    "Counts cover each new parent and its child, include plan confirmation/dispatch/wait/validation/review, exclude prior plan generation and internal guardians. Parent/child usage is not double counted."
+  ]
+}

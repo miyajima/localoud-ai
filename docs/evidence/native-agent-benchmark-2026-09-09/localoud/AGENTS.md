@@ -1,0 +1,1 @@
+Only implement this fixture. Python standard library. No subagents, network access, or unrelated projects. Only edit intervals.py and test_intervals.py. Do not edit acceptance.py, policy.md or AGENTS.md.

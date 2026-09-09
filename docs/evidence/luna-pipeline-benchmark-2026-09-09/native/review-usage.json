@@ -1,0 +1,33 @@
+{
+  "session_id": "01a084f6-cf6b-7d90-8b76-0f09ae9df7b0",
+  "source": "vscode",
+  "created_at": "2026-09-09T06:59:22.606Z",
+  "completed_at": "2026-09-09T06:59:38.175Z",
+  "model": {
+    "model": "gpt-6-astra",
+    "effort": "low"
+  },
+  "token_counts": [
+    {
+      "timestamp": "2026-09-09T06:59:38.169Z",
+      "total_token_usage": {
+        "input_tokens": 32057,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 240,
+        "reasoning_output_tokens": 53,
+        "total_tokens": 32297
+      },
+      "last_token_usage": {
+        "input_tokens": 32057,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 240,
+        "reasoning_output_tokens": 53,
+        "total_tokens": 32297
+      },
+      "model_context_window": 258400
+    }
+  ],
+  "source_log_sha256": "28d673fbae5a6ed5192f1a206a83b849523feda8621118e0ca0e7b3ae33b3ac0"
+}

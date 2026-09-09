@@ -6,7 +6,6 @@ LocaloudはLocalとCloudを組み合わせた名前です。Localoud AIはオー
 
 ローカル優先のデスクトップ向けコーディングワークスペースです。Rustがライフサイクルと永続化を担当し、TauriがワークスペースUIを提供します。Codex app-serverは分離したGit worktreeでコーディングタスクを実行します。[Spark-X2.5-4B-MLX-8bit](https://huggingface.co/abenzerps/Spark-X2.5-4B-MLX-8bit)はローカルの振り分け、小規模な編集、要約、抽出を担当します。必要に応じてAstraが結果を計画・レビューします。workerは親の会話を暗黙にコピーせず、明示的なコンテキストカプセルから開始します。
 
-
 ## 開発を応援する ☕
 
 Localoud AIは無料のオープンソースソフトウェアです。気に入っていただけたら、[コーヒー1杯分の支援](https://buymeacoffee.com/miyajima)をいただけるとうれしいです。いただいた支援は、開発・モデルの検証・継続的な改善に充てます。支援は任意です。
@@ -89,8 +88,8 @@ Chatではタスク、PlanではDAGのディスパッチと再起動、Agentsで
 
 ## ローカル設定と認証情報
 
-`config.example.toml`と`services/spark-mlx/config.yaml`は公開用の例・デフォルトであり、個人の設定ではありません。プロバイダーはアプリから自分で設定してください。ランタイム設定、セッション、下書きはローカルのアプリケーションデータベースに保存されます。OrgBrainの認証情報はmacOS Keychainを使用します。ブラウザブリッジのペアリングtokenはローカルデータベースとChrome拡張のストレージに保存されます。データベース、ローカル設定、プロバイダー認証情報、ブラウザのペアリングtokenはコミットしないでください。
+`config.example.toml`と`services/spark-mlx/config.yaml`は公開用の例・デフォルトであり、個人の設定ではありません。プロバイダーはアプリから自分で設定してください。ランタイム設定、セッション、下書きはローカルのアプリケーションデータベースに保存されます。OrgBrainの認証情報はmacOS Keychainを使用します。読み取り専用MCPのBearer tokenはmacOS Keychainに保存されます。ChatGPTは専用の永続WKWebView領域を使用します。データベース、ローカル設定、プロバイダー認証情報、MCPのBearer tokenはコミットしないでください。
 
 ## ライセンス
 
-Localoud AIは[MIT License](LICENSE)でライセンスされています。内蔵しているChatGPT DOMヘルパーは[元のMIT著作権表示](extensions/chatgpt/LICENSE.chat-on-steroids)を保持しています。詳細は[NOTICE](extensions/chatgpt/NOTICE.md)を参照してください。サードパーティ依存関係と別途ダウンロードするモデル重みには、それぞれのライセンスが適用されます。
+Localoud AIは[MIT License](LICENSE)でライセンスされています。サードパーティ依存関係と別途ダウンロードするモデル重みには、それぞれのライセンスが適用されます。

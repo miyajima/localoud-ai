@@ -23,7 +23,7 @@ export function diffMarkup(diff: string): string {
   return `<div class="diff-stats"><span class="added">+${added}</span><span class="removed">−${removed}</span><span>行の変更</span></div><pre class="diff">${lines.map(l => `<span class="diff-line ${l.startsWith('+++') || l.startsWith('---') || l.startsWith('diff ') ? 'diff-file' : l.startsWith('+') ? 'diff-add' : l.startsWith('-') ? 'diff-remove' : l.startsWith('@@') ? 'diff-hunk' : ''}">${escapeHtml(l) || ' '}</span>`).join('')}</pre>`;
 }
 export function statusLabel(status: string): string {
-  return ({idle:'待機中',completed:'完了',running:'実行中',inProgress:'実行中',pending:'待機',ready:'準備完了',reviewing:'レビュー中',blocked:'依存待ち',failed:'失敗',cancelled:'中止',interrupted:'中断'})[status] || status;
+  return ({idle:'待機中',queued:'実行待ち',integrating:'統合中',awaiting_review:'レビュー待ち',review_rejected:'修正・再レビュー待ち',legacy_read_only:'旧方式・閲覧専用',reconciliation_required:'実行状態の確認が必要',completed:'完了',running:'実行中',inProgress:'実行中',pending:'待機',ready:'準備完了',reviewing:'レビュー中',blocked:'依存待ち',failed:'失敗',cancelled:'中止',interrupted:'中断'})[status] || status;
 }
 export function planPreview(raw: string): string {
   try {

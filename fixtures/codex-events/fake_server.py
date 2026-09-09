@@ -17,6 +17,15 @@ for line in sys.stdin:
         if p.get("input", [{}])[0].get("text") == "verify reasoning":
             assert p.get("model") == "fixture-b", "wrong model sent"
             assert p.get("effort") == "high", "reasoning was not sent"
+        text = p.get("input", [{}])[0].get("text", "")
+        if text.startswith("verify isolated cwd:"):
+            expected = text.removeprefix("verify isolated cwd:")
+            assert p.get("cwd") == expected, "turn reused a stale working directory"
+            policy = p.get("sandboxPolicy", {})
+            assert policy.get("type") == "workspaceWrite"
+            assert policy.get("writableRoots") == [expected]
+            assert policy.get("excludeSlashTmp") and policy.get("excludeTmpdirEnvVar")
+            assert p.get("approvalPolicy") == "on-request"
         turn = {"id": "fixture-turn", "status": "inProgress", "items": []}
         thread["turns"] = [turn]
         result = {"turn": turn}

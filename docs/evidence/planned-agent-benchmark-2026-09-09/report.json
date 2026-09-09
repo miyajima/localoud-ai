@@ -1,0 +1,110 @@
+{
+  "date": "2026-09-09",
+  "scope": "Same frozen Codex Astra parent plan, implemented by one real native spawn_agent and one independent Localoud worker",
+  "setup": {
+    "root": "/private/var/folders/lm/s5hgvkpd7451pbw9pj889h780000gn/T/localoud-planned-agent-qipz6f12",
+    "model": "gpt-6-astra",
+    "effort": "low",
+    "task": "Implement the following frozen Astra plan in the assigned fixture directory. The same plan is saved in PLAN.md. Only create scheduler.py and test_scheduler.py. Read policy.md and acceptance.py for the exact contract. No delegation, network access, or unrelated project access. Report changed files and test results concisely.\n\n# Astra implementation plan: dependency scheduler\n\nGoal: implement the exact scheduler contract in policy.md with Python standard library only. Deliver scheduler.py and test_scheduler.py; preserve every supplied file. No delegation or network access.\n\n1. Read policy.md, AGENTS.md and acceptance.py together. Keep topological choice, execution batches and critical path as separate operations because their readiness semantics differ.\n2. Build one private validation helper. Require a dict with nonempty string IDs and exact field keys deps/duration/group. Validate field types before membership checks so malformed or unhashable dependencies become ValueError. Duration and capacity must be positive integers excluding bool; group must be None or a nonempty string; deps must be a list of nonempty strings referring to known IDs. Copy dependencies into sets to deduplicate without mutating callers. Reject self-dependencies. Validate all nodes, including disconnected components, before returning any result.\n3. Derive a lexicographically minimal topological order with Kahn's algorithm and a min-heap of currently ready IDs. Decrement successors after each individual pop and push newly ready IDs immediately. If fewer nodes are emitted than exist, raise ValueError for the cycle. Reuse validated graph/order internally where useful; avoid global mutable state.\n4. For execution_batches, validate max_parallel even for an empty graph. Maintain completed and pending sets. At each batch boundary gather IDs whose dependencies are all completed, sort, then scan once: skip a conflicting non-None group, append compatible IDs until capacity is reached. Do not mark selected tasks completed until the batch is finalized. None groups do not conflict. Keep returned batches deterministic and return [] for no tasks.\n5. For critical_path_length, walk the validated topological order. The longest finish value for each node is its duration plus the maximum finish value of its dependencies, with zero for an empty predecessor set. Return the maximum finish value, or 0 for an empty graph. Group constraints do not enter this calculation.\n6. Add focused tests for newly ready lexicographic priority, delayed readiness between batches, skipping group conflicts to fill capacity, duplicate dependencies, disconnected cycles, malformed schemas, bool rejection, immutability, and weighted critical paths. Include small deterministic generated DAGs if useful. Run python3 -B -m unittest -v test_scheduler acceptance. Fix failures within the two-file scope and report final results concisely.\n\nAcceptance: all 12 supplied tests plus worker tests pass; only scheduler.py and test_scheduler.py change; results match the stated greedy and dependency semantics. Do not add extra APIs, dependencies, CLI features, or unrelated refactoring.\n",
+    "planner": "current Codex parent GPT-6 Astra / low",
+    "planning_marker": "PLANNING_INFERENCE_20260909_SCHEDULER",
+    "frozen_hashes": {
+      "PLAN.md": "41d99c3f925a35168594314cfb34a87137082029bf233297255ab84e978a9329",
+      "policy.md": "7155b81127fd8b76c74a324c24b3f61c808233c8a1ba13f3b7ce8ac61daf36dc",
+      "acceptance.py": "6f5ce2676c6ec88027058784ee702cfcc8a85f0c1839889a7106449ca6d15709"
+    },
+    "native_context": "fork_turns=all plus frozen plan",
+    "localoud_context": "independent thread/start plus identical frozen plan"
+  },
+  "planner": {
+    "scope": "one parent inference authoring and saving the frozen plan; also includes fixture setup tool-call text, excludes surrounding preparation and orchestration",
+    "parent_thread_id": "01a0804c-d224-7012-8bf2-fb46e7a9732a",
+    "model": "gpt-6-astra",
+    "effort": "low",
+    "call_id": "call_TSWkjNbUY6QTcynbYsqfqsrG",
+    "authored_at": "2026-09-09T06:45:51.570Z",
+    "usage_at": "2026-09-09T06:45:51.898Z",
+    "usage": {
+      "input_tokens": 95650,
+      "cached_input_tokens": 93312,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 1499,
+      "reasoning_output_tokens": 374,
+      "total_tokens": 97149
+    },
+    "uncached_input_tokens": 2338,
+    "plan_sha256": "41d99c3f925a35168594314cfb34a87137082029bf233297255ab84e978a9329"
+  },
+  "results": {
+    "native": {
+      "thread_id": "01a084ea-d858-7f12-86fa-c2fc3aeb078b",
+      "model": "gpt-6-astra",
+      "effort": "low",
+      "first_input_tokens": 36933,
+      "input_tokens": 116929,
+      "cached_input_tokens": 109440,
+      "uncached_input_tokens": 7489,
+      "output_tokens": 2555,
+      "total_tokens": 119484,
+      "inference_count": 3,
+      "elapsed_seconds": 94.543,
+      "fixed_tests_passed": 12,
+      "own_tests_passed": 6,
+      "common_random_dags_passed": 1000,
+      "fixture_integrity_pass": true,
+      "baseline_commit": "446254417e0bd8af66dd43b6dd3d0d2bb836ce43"
+    },
+    "localoud": {
+      "thread_id": "01a084eb-18a7-7fd1-9f89-fa4b43be2dc0",
+      "model": "gpt-6-astra",
+      "effort": "low",
+      "first_input_tokens": 26308,
+      "input_tokens": 199972,
+      "cached_input_tokens": 135168,
+      "uncached_input_tokens": 64804,
+      "output_tokens": 3255,
+      "total_tokens": 203227,
+      "inference_count": 6,
+      "elapsed_seconds": 121.985,
+      "fixed_tests_passed": 12,
+      "own_tests_passed": 8,
+      "common_random_dags_passed": 1000,
+      "fixture_integrity_pass": true,
+      "baseline_commit": "446254417e0bd8af66dd43b6dd3d0d2bb836ce43"
+    }
+  },
+  "localoud_change_percent": {
+    "first_input_tokens": -28.768,
+    "input_tokens": 71.02,
+    "uncached_input_tokens": 765.322,
+    "total_tokens": 70.087
+  },
+  "shared_plan_plus_worker": {
+    "native": {
+      "input_tokens": 212579,
+      "cached_input_tokens": 202752,
+      "output_tokens": 4054,
+      "total_tokens": 216633,
+      "uncached_input_tokens": 9827
+    },
+    "localoud": {
+      "input_tokens": 295622,
+      "cached_input_tokens": 228480,
+      "output_tokens": 4754,
+      "total_tokens": 300376,
+      "uncached_input_tokens": 67142
+    }
+  },
+  "shared_plan_accounting": "Plan generated once and reused. Each hypothetical lane sum includes that same measured planning inference once; it was not generated twice. Not full-session usage.",
+  "limitations": [
+    "One fresh scheduler task, one pair, no model-run retries or best-of selection.",
+    "Native inherits currently available parent context with fork_turns=all, including the plan. Localoud receives the identical frozen plan in an independent thread/start.",
+    "Both use gpt-6-astra/low; provider prompts, tool catalogs, available history and cache warmth differ.",
+    "Localoud uses production CodexProvider worker dispatch with hub_context exposed, but this test reads policy.md and does not test the entire UI Manifest planning/review pipeline.",
+    "Native receives an additional path and one-agent authorization wrapper. No solution implementation existed at dispatch.",
+    "Shared planning measurement is one plan-authoring inference including its fixture-save tool call, not all experimental preparation, test authoring or parent orchestration.",
+    "Internal guardian usage, ChatGPT usage, post-run parent validation and reporting are excluded. No subscription or full-session savings claim.",
+    "Changing the task and parent context means this pair does not isolate the causal effect of adding a plan versus the previous no-plan pair.",
+    "Localoud time is turn/start to completion, excluding app-server startup; native time is spawn to final."
+  ]
+}

@@ -5,7 +5,7 @@ edition.workspace = true
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["unstable"] }
 hub-core.workspace = true
 hub-db.workspace = true
 serde.workspace = true
@@ -27,6 +27,9 @@ keyring = { version = "3", features = ["apple-native"] }
 hub-policy = { path = "../../../crates/hub-policy" }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+cap-std = "3"
+sha2 = "0.10"
 
 axum = "0.8"
 

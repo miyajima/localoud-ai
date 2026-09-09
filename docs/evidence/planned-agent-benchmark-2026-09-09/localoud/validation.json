@@ -1,0 +1,12 @@
+{
+  "tests": {
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "test_capacity_validation_including_empty (test_scheduler.SchedulerTests.test_capacity_validation_including_empty) ... ok\ntest_conflicts_skip_and_none_is_unrestricted (test_scheduler.SchedulerTests.test_conflicts_skip_and_none_is_unrestricted) ... ok\ntest_cycles_and_unknown_dependencies (test_scheduler.SchedulerTests.test_cycles_and_unknown_dependencies) ... ok\ntest_duplicates_and_immutability (test_scheduler.SchedulerTests.test_duplicates_and_immutability) ... ok\ntest_generated_dags_against_exhaustive_orders_and_paths (test_scheduler.SchedulerTests.test_generated_dags_against_exhaustive_orders_and_paths) ... ok\ntest_malformed_schemas (test_scheduler.SchedulerTests.test_malformed_schemas) ... ok\ntest_newly_ready_priority_and_batch_boundary (test_scheduler.SchedulerTests.test_newly_ready_priority_and_batch_boundary) ... ok\ntest_weighted_paths_ignore_groups (test_scheduler.SchedulerTests.test_weighted_paths_ignore_groups) ... ok\ntest_batches_are_waves (acceptance.Acceptance.test_batches_are_waves) ... ok\ntest_capacity (acceptance.Acceptance.test_capacity) ... ok\ntest_cycles (acceptance.Acceptance.test_cycles) ... ok\ntest_duplicate_dependencies (acceptance.Acceptance.test_duplicate_dependencies) ... ok\ntest_empty (acceptance.Acceptance.test_empty) ... ok\ntest_groups_skip_and_fill (acceptance.Acceptance.test_groups_skip_and_fill) ... ok\ntest_input_immutable (acceptance.Acceptance.test_input_immutable) ... ok\ntest_invalid_capacity (acceptance.Acceptance.test_invalid_capacity) ... ok\ntest_longest_path (acceptance.Acceptance.test_longest_path) ... ok\ntest_new_ready_priority (acceptance.Acceptance.test_new_ready_priority) ... ok\ntest_schema (acceptance.Acceptance.test_schema) ... ok\ntest_unknown_dependency (acceptance.Acceptance.test_unknown_dependency) ... ok\n\n----------------------------------------------------------------------\nRan 20 tests in 0.003s\n\nOK\n"
+  },
+  "oracle": {
+    "exit_code": 0,
+    "stdout": "{\"pass\": true, \"random_dags\": 1000, \"max_nodes\": 6, \"batch_capacities\": [1, 2, 3, 7], \"seed\": 202609091, \"oracles\": [\"enumerate all valid topological permutations\", \"enumerate feasible ready subsets\", \"enumerate dependency paths\"]}\n",
+    "stderr": ""
+  }
+}

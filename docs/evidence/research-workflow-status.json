@@ -1,0 +1,92 @@
+{
+  "date": "2026-09-08",
+  "status": "superseded_by_webview_read_only_mcp",
+  "live_comparison_completed": false,
+  "chatgpt_usage": null,
+  "current_transport": "manual WKWebView plus read-only MCP and clipboard Manifest",
+  "prior_attempt_evidence": {
+    "date": "2026-09-08",
+    "status": "blocked_running_extension_uses_old_send_code",
+    "live_comparison_completed": false,
+    "required_plan_and_review": {
+      "provider": "chatgpt",
+      "settings": "independent saved role targets",
+      "user_approved_model": "GPT-6 Pro",
+      "transport": "Localoud bridge only"
+    },
+    "observations": {
+      "desktop": "verification Git project registered through Localoud; autonomous run launched from composer",
+      "saved_roles": {
+        "plan": {
+          "model": "gpt-6-pro",
+          "reasoning": "pro"
+        },
+        "review": {
+          "model": "gpt-6-pro",
+          "reasoning": "pro"
+        }
+      },
+      "live_send": "plan prompt appeared in ChatGPT composer with 6 Pro selected; no accepted conversation/answer observed",
+      "fixes": "include composer-submit-button ID; observe button readiness before exactly one click; regression tests passed",
+      "extension_reload": "requested after latest send fix, not yet confirmed",
+      "model_choice_display": "deferred by user",
+      "runtime_revision_check": "New attempt ef142700-fa15-4136-8919-9cb9fca36e71 still returned old acceptance error including 画面を確認してください and no revision/stage; current content.js emits revision submit-20260908-v2 plus diagnostic stage. Updated content script not active."
+    },
+    "prepared_input": "/private/tmp/localoud-research-comparison-20260908",
+    "local_checks": {
+      "context_boundary_tests_passed": 4,
+      "usage_accounting_tests_passed": 2,
+      "clippy": "passed",
+      "diff_check": "passed",
+      "prepare_command": "passed, no provider calls",
+      "missing_plan_gate": "expected exit 1 before provider startup",
+      "desktop_backend_tests_passed": 23,
+      "desktop_build": "passed",
+      "extension_tests_passed": 7
+    },
+    "live_stages": {
+      "plan": "attempted; no response obtained",
+      "research": "not_started",
+      "verify": "not_started",
+      "document": "not_started",
+      "document_review": "not_started"
+    },
+    "implemented_control": "app-server thread/fork with synthetic archive; not native spawn_agent",
+    "native_subagent_comparison": "not_run",
+    "measured_token_savings": null,
+    "subscription_quota_savings": null,
+    "attempts": [
+      {
+        "id": "10f5865f-4a92-41ca-a121-2a3201dc6abe",
+        "status": "reconciliation_required",
+        "error": "Error: ChatGPTが送信を受け付けたことを確認できません。画面を確認してください。自動再送はしません。\nChild stop not confirmed: 2aa69b2f-fd6d-4610-a8eb-620007d8c9f2: Error: 停止対象の生成を確認できません。",
+        "workers_started": 0
+      },
+      {
+        "id": "1481ccef-0514-4c27-9077-c1d8c0f9355b",
+        "status": "reconciliation_required",
+        "error": "Error: ChatGPT入力欄に下書きがあります。内容を確認してください。\nChild stop not confirmed: afe69da3-42d6-43a4-a295-ce7238649cf4: Error: 停止対象の生成を確認できません。",
+        "workers_started": 0
+      },
+      {
+        "id": "dbbaffec-4b8c-4893-8f88-75e7a484140e",
+        "status": "reconciliation_required",
+        "error": "Error: ChatGPTが送信を受け付けたことを確認できません。画面を確認してください。自動再送はしません。\nChild stop not confirmed: d1a58888-3c95-498d-9f09-51cacf9ad273: Error: 停止対象の生成を確認できません。",
+        "workers_started": 0
+      },
+      {
+        "id": "3428793d-d6f3-4ad4-9bc8-81dc7c84a191",
+        "status": "reconciliation_required",
+        "error": "Error: ChatGPTが送信を受け付けたことを確認できません。画面を確認してください。自動再送はしません。\nChild stop not confirmed: db4168ff-93fd-4f44-8b37-d99fe3415936: Error: 停止対象の生成を確認できません。",
+        "workers_started": 0
+      },
+      {
+        "id": "ef142700-fa15-4136-8919-9cb9fca36e71",
+        "status": "reconciliation_required",
+        "error": "Error: ChatGPTが送信を受け付けたことを確認できません。画面を確認してください。自動再送はしません。\nChild stop not confirmed: 340113a8-c30f-4e1c-b605-a4868837ab26: Error: 停止対象の生成を確認できません。",
+        "workers_started": 0
+      }
+    ],
+    "live_evidence_directory": "/private/tmp/localoud-e2e-evidence-20260908"
+  }
+}

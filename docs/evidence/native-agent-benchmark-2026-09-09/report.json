@@ -1,0 +1,82 @@
+{
+  "date": "2026-09-09",
+  "scope": "One real native spawn_agent versus one Localoud CodexProvider independent worker; worker inference usage only",
+  "setup": {
+    "root": "/private/var/folders/lm/s5hgvkpd7451pbw9pj889h780000gn/T/localoud-native-agent-asi0bcds",
+    "model": "gpt-6-astra",
+    "effort": "low",
+    "task": "Implement intervals.py: normalize(intervals), subtract(intervals,cuts), contains(intervals,point). Read policy.md for the exact interval policy before implementing. Implement a robust interval-set subtraction, normalization and membership utility using Python standard library. Add your own unit tests in test_intervals.py, run them and acceptance.py. All 9 fixed acceptance tests and your own edge-case tests must pass. Only edit intervals.py and test_intervals.py. Do not modify acceptance.py, policy.md or AGENTS.md. No delegation, network access, or unrelated project access. Work only in the assigned fixture directory. Report the changed files and validation results concisely.",
+    "acceptance_sha256": "1479744629819fedd9b8c4061898498ed3de89cb1e90903602a9ef5172a0f873",
+    "policy_sha256": "3132d230ae0e9a553a93c65481063e743b6de147eb412715c6b28de07301178d",
+    "native_context": "full parent history via spawn_agent fork_turns=all",
+    "localoud_context": "independent thread/start with task only"
+  },
+  "results": {
+    "native": {
+      "thread_id": "01a084d9-d460-75d0-9ec5-21fb6f551be9",
+      "model": "gpt-6-astra",
+      "effort": "low",
+      "first_input_tokens": 35648,
+      "input_tokens": 110348,
+      "cached_input_tokens": 91904,
+      "uncached_input_tokens": 18444,
+      "output_tokens": 1719,
+      "total_tokens": 112067,
+      "inference_count": 3,
+      "elapsed_seconds": 72.496,
+      "fixed_tests_passed": 9,
+      "own_tests_passed": 8,
+      "common_random_cases_passed": 2000,
+      "fixture_integrity_pass": true,
+      "baseline_commit": "63c84c33517204dc73f7400839a06afc6c9adf73"
+    },
+    "localoud": {
+      "thread_id": "01a084db-90a6-7de2-8391-fb3619fcaa8d",
+      "model": "gpt-6-astra",
+      "effort": "low",
+      "first_input_tokens": 25833,
+      "input_tokens": 119428,
+      "cached_input_tokens": 86144,
+      "uncached_input_tokens": 33284,
+      "output_tokens": 2105,
+      "total_tokens": 121533,
+      "inference_count": 4,
+      "elapsed_seconds": 86.943,
+      "fixed_tests_passed": 9,
+      "own_tests_passed": 10,
+      "common_random_cases_passed": 2000,
+      "fixture_integrity_pass": true,
+      "baseline_commit": "63c84c33517204dc73f7400839a06afc6c9adf73"
+    }
+  },
+  "localoud_change_percent": {
+    "first_input_tokens": -27.533,
+    "input_tokens": 8.229,
+    "uncached_input_tokens": 80.46,
+    "output_tokens": 22.455,
+    "total_tokens": 8.447
+  },
+  "startup_attempts": [
+    {
+      "mode": "localoud",
+      "outcome": "app-server initialization failed before worker creation",
+      "reason": "sandbox denied existing Codex sqlite state runtime writes",
+      "model_usage": null
+    },
+    {
+      "mode": "localoud",
+      "outcome": "completed after approved sandbox escalation",
+      "thread_id": "01a084db-90a6-7de2-8391-fb3619fcaa8d"
+    }
+  ],
+  "limitations": [
+    "One paired task, not a population estimate.",
+    "Native fork_turns=all inherits currently available parent context after compaction; this is not the entire historical transcript.",
+    "Task, policy and fixed tests match; system instructions, tool catalogs, history and warm caches differ between native Codex and the Localoud app-server.",
+    "Localoud exposes hub_context but both workers obtain this task policy from the same policy.md file. This tests independent worker dispatch, not a full planning/review workflow.",
+    "Native receives a path and authorization wrapper; Localoud receives the same task text with cwd set by the provider.",
+    "Parent orchestration, experiment preparation, ChatGPT planning/review and platform guardian usage are excluded. No full-session or subscription savings claim.",
+    "Localoud startup failure and the completed native result were retained; no model-run retry or best-of selection.",
+    "Wall time excludes Localoud compilation and startup; native wall time is spawn to final, so timing boundaries are approximate."
+  ]
+}

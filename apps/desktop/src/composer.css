@@ -23,3 +23,11 @@
 @keyframes completion-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){#composer-hint.pending::before{animation:none}}
 @media(max-width:650px){#composer-suffix{flex-wrap:wrap}#composer-suffix .completion-text{flex-basis:70%}}
+
+/* Keep routing controls secondary to the request itself. */
+.compose-more-panel #operation{display:flex;flex-direction:column;align-items:stretch;background:transparent;border:0;padding:0}
+.compose-more-panel #operation[hidden]{display:none}
+.compose-more-panel #operation button{text-align:left;white-space:normal}
+#implement-plan{font-size:12px;padding:6px 10px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--ink)}
+#implement-plan[hidden]{display:none}
+#implement-plan:focus-visible,#model-picker>summary:focus-visible,#compose-more>summary:focus-visible{outline:2px solid var(--blue);outline-offset:2px}

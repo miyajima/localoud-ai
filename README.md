@@ -6,7 +6,6 @@ Localoud combines Local + Cloud. Localoud AI is an open-source desktop coding wo
 
 Local-first desktop coding workspace. Rust owns lifecycle and persistence; Tauri provides the workspace UI. Codex app-server executes coding tasks in isolated Git worktrees. [Spark-X2.5-4B-MLX-8bit](https://huggingface.co/abenzerps/Spark-X2.5-4B-MLX-8bit) handles local routing, small edits, summaries and extraction; optional Astra plans and reviews the result. Workers start from explicit context capsules, never an implicit copy of the parent conversation.
 
-
 ## Support development ☕
 
 Localoud AI is free and open source. If it makes your workflow better, consider [buying me a coffee](https://buymeacoffee.com/miyajima). Your support helps cover development, model testing, and ongoing improvements. Support is entirely optional.
@@ -23,7 +22,7 @@ Localoud keeps routine, bounded coding work close to your machine while giving l
 
 ## Main features
 
-- Chat for direct tasks, Plan for dependency-aware DAG dispatch and restart, and Agents for review and rework.
+- A shared request → plan → execution → review → completion flow, with tasks grouped under their projects and read-only work records.
 - Context capsules with bounded pulls and provenance, plus Usage records for observed model tokens.
 - Explicit model and Reasoning selection, five-level Auto routing, and replaceable local model configuration.
 - Git worktree isolation for Codex tasks, exact-path and exact-replacement validation for local edits, and visible approval boundaries.
@@ -67,7 +66,7 @@ See [implementation status](docs/IMPLEMENTATION_STATUS.md) and [the amended plan
 
 The verified debug bundle is `target/debug/bundle/macos/Localoud AI.app`. Open it, register a Git repository, and set the absolute Codex binary path in Settings. Start the [Spark service](services/spark-mlx/README.md) separately for local execution. Astra is opt-in in Settings; OrgBrain credentials are optional and stored through the macOS Keychain. No real OrgBrain connection is preconfigured.
 
-Use Chat for a task, Plan for DAG dispatch/restart, Agents for review/rework, Context for capsule/pull budgets and memory provenance, and Usage for observed model tokens. `config.example.toml` is illustrative; active settings are saved through the UI in SQLite. Review-required provider operations currently stop with a visible error. Branch integration remains a user action.
+Discuss plans and reviews in the ChatGPT pane between the project list and Localoud, or choose direct requests and hide ChatGPT entirely. Import plans and reviews through the shared workflow bar. The record tabs show the plan, changes, workers, logs, supplied context, and observed usage for the selected task. See [the workflow guide](docs/WORKFLOW_UX.md). `config.example.toml` is illustrative; active settings are saved through the UI in SQLite. Review-required provider operations currently stop with a visible error. Branch integration remains a user action.
 
 The [measured context benchmark](docs/CONTEXT_BENCHMARK.md) contains one real paired comparison and its limits. Full acceptance and optional/unverified integrations are listed in [implementation status](docs/IMPLEMENTATION_STATUS.md).
 
@@ -89,8 +88,8 @@ See [ChatGPT connection and session management](docs/CHATGPT.md) for the separat
 
 ## Local settings and credentials
 
-`config.example.toml` and `services/spark-mlx/config.yaml` contain public examples/defaults, not personal settings. Configure your own providers through the app. Runtime settings, sessions and drafts stay in the local application database; OrgBrain credentials use the macOS Keychain. The browser bridge pairing token stays in the local database and Chrome extension storage. Do not commit database files, local configuration, provider credentials or browser pairing tokens.
+`config.example.toml` and `services/spark-mlx/config.yaml` contain public examples/defaults, not personal settings. Configure your own providers through the app. Runtime settings, sessions and drafts stay in the local application database; OrgBrain credentials use the macOS Keychain. The read-only MCP bearer token stays in the macOS Keychain. ChatGPT uses its own persistent WKWebView browser data store. Do not commit database files, local configuration, provider credentials or MCP bearer tokens.
 
 ## License
 
-Localoud AI is licensed under the [MIT License](LICENSE). The vendored ChatGPT DOM helpers retain their [original MIT copyright notice](extensions/chatgpt/LICENSE.chat-on-steroids); see [NOTICE](extensions/chatgpt/NOTICE.md). Third-party dependencies and separately downloaded model weights remain subject to their respective licenses.
+Localoud AI is licensed under the [MIT License](LICENSE). Third-party dependencies and separately downloaded model weights remain subject to their respective licenses.

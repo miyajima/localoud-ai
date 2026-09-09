@@ -1,7 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod astra;
 mod auto_routing;
-mod chatgpt;
+mod autonomous;
+mod legacy_browser;
+mod manifest;
+mod read_mcp;
+mod embedded_browser;
 mod composer;
 mod memory;
 mod models;
@@ -33,7 +37,7 @@ struct Connection {
 }
 struct AppState {
     workflow_lock: AsyncMutex<()>,
-    browser: Arc<chatgpt::Browser>,
+    read_mcp: Arc<read_mcp::ReadMcp>,
     local_stops: AsyncMutex<std::collections::HashMap<HubThreadId, Arc<tokio::sync::Notify>>>,
     store: Arc<Mutex<Store>>,
     bus: EventBus,
@@ -169,7 +173,13 @@ fn register_project(path: String, state: tauri::State<AppState>) -> Result<Proje
 }
 #[tauri::command]
 fn threads(state: tauri::State<AppState>) -> Result<Vec<ThreadMapping>, String> {
-    workflow::project_threads(&*state.store.lock().map_err(|e| e.to_string())?)
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    let threads = workflow::project_threads(&store)?;
+    let mut visible = Vec::new();
+    for thread in threads {
+        if store.setting(&format!("autonomous_parent:{}", thread.id)).map_err(|e| e.to_string())?.is_none() { visible.push(thread); }
+    }
+    Ok(visible)
 }
 #[derive(serde::Serialize)]
 struct RoutedTask {
@@ -357,7 +367,8 @@ async fn run_local(
     result
 }
 #[tauri::command]
-fn model_usage(state: tauri::State<AppState>) -> Result<Vec<ModelUsageRecord>, String> {
+fn model_usage(thread_id: Option<String>, state: tauri::State<AppState>) -> Result<Vec<ModelUsageRecord>, String> {
+    if let Some(id)=thread_id { return state.store.lock().map_err(|e|e.to_string())?.thread_usage(parse_thread(id)?).map_err(|e|e.to_string()); }
     state
         .store
         .lock()
@@ -456,8 +467,8 @@ async fn resume_task(
     state: tauri::State<'_, AppState>,
 ) -> Result<ThreadSnapshot, String> {
     let id = parse_thread(thread_id.clone())?;
-    if state.browser.is_thread(id)? {
-        return state.browser.resume(id).await;
+    if legacy_browser::is_thread(&state, id)? {
+        return legacy_browser::read(&state, id);
     }
     state
         .sessions()
@@ -503,8 +514,8 @@ async fn interrupt_turn(
         return Ok(());
     }
     let id = parse_thread(thread_id.clone())?;
-    if state.browser.is_thread(id)? {
-        return state.browser.stop(id).await;
+    if legacy_browser::is_thread(&state, id)? {
+        return Err("旧ブラウザ連携は廃止済みです".into());
     }
     state
         .sessions()
@@ -548,6 +559,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -580,12 +592,12 @@ fn main() {
                 provider: Arc::new(SparkProvider::configured(local_config.clone())?),
                 lock: AsyncMutex::new(()),
             };
-            let browser =
-                chatgpt::Browser::new(store.clone(), bus.clone()).map_err(std::io::Error::other)?;
-            browser.start();
+            legacy_browser::retire(&*store.lock().map_err(|e| std::io::Error::other(e.to_string()))?).map_err(std::io::Error::other)?;
+            let read_mcp = read_mcp::ReadMcp::new(store.clone());
+            read_mcp.start();
             app.manage(AppState {
+                read_mcp,
                 workflow_lock: AsyncMutex::new(()),
-                browser,
                 local_stops: AsyncMutex::new(std::collections::HashMap::new()),
                 store,
                 bus,
@@ -598,13 +610,24 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            workflow::workflow_run,
+        .invoke_handler(|invoke: tauri::ipc::Invoke<tauri::Wry>| {
+            if invoke.message.webview_ref().label() != "main" {
+                invoke.resolver.reject("Remote browser has no Localoud command access");
+                return true;
+            }
+            let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool> = Box::new(tauri::generate_handler![
+            read_mcp::mcp_settings,
+            read_mcp::set_mcp_settings,
+            read_mcp::mcp_copy_token,
+            read_mcp::manifest_format,
+            manifest::manifest_import_clipboard,
+            embedded_browser::browser_layout,
+            embedded_browser::browser_reload,
+            autonomous::autonomous_snapshot,
+            autonomous::autonomous_activity,
+            autonomous::autonomous_stop,
+            autonomous::autonomous_resume,
             workflow::workflow_snapshot,
-            workflow::workflow_stop,
-            chatgpt::chatgpt_status,
-            chatgpt::chatgpt_create,
-            chatgpt::chatgpt_send,
             auto_routing::auto_settings,
             auto_routing::set_auto_settings,
             auto_routing::preview_auto_route,
@@ -632,6 +655,7 @@ fn main() {
             workspace_ui::archived_threads,
             workspace_ui::manage_session,
             workspace_ui::unregister_project,
+            workspace_ui::manage_project,
             memory::extract_memory,
             memory::orgbrain_settings,
             memory::set_orgbrain_settings,
@@ -666,7 +690,9 @@ fn main() {
             interrupt_turn,
             event_history,
             repo_diff
-        ])
+        ]);
+            handler(invoke)
+        })
         .run(tauri::generate_context!())
         .expect("failed to run Localoud AI");
 }

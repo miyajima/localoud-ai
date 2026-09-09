@@ -1,0 +1,1 @@
+Only implement this fixture. Python standard library. No subagents, network access, or unrelated projects. Only create scheduler.py and test_scheduler.py. Do not edit policy.md, PLAN.md, acceptance.py or AGENTS.md.

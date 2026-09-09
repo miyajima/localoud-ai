@@ -1,1 +1,1 @@
-{"identifier":"default","description":"Main workspace events","windows":["main"],"permissions":["core:default"]}
+{"identifier":"default","description":"Local workspace only; remote browser webviews have no native capabilities","webviews":["main"],"permissions":["core:default"]}

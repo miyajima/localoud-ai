@@ -1,0 +1,107 @@
+{
+  "date": "2026-09-08",
+  "scope": "Local native regression fixture; NOT a ChatGPT MCP end-to-end acceptance",
+  "desktop_tests_passed": 23,
+  "related_rust_tests_passed": 49,
+  "frontend_tests_passed": 19,
+  "native": {
+    "task_id": "becab91f-3f3f-4ef7-af48-d4aa508aa9a1",
+    "status": "completed",
+    "iteration": 5,
+    "artifact_version": "a291e60eeb739e3291f24764013eadd4ff1a84120d1b05f862fabea0df3e6efc",
+    "parallel_workers_observed": 2,
+    "worker_model": "gpt-5.6-luna",
+    "worker_reasoning": "max",
+    "rework_session_preserved": true,
+    "repeated_rework_without_app_restart_verified": true,
+    "final_integrated_bytes": {
+      "reports/fixture_a.txt": "red\n",
+      "reports/fixture_b.txt": "blue\n"
+    },
+    "stale_review_rejected": true,
+    "pass_manifest_imported": true,
+    "restart_preserved_review_waiting_state": true,
+    "browser_right_side_verified": true,
+    "browser_authenticated_state_after_restart_observed": true,
+    "restart_preserved_completed_state": true,
+    "both_worker_progress_visible": true,
+    "mcp_dialog_accessibility_limitation": "Dialog rendered and keyboard controls/save verified; native accessibility tree did not expose dialog controls."
+  },
+  "mcp": {
+    "authenticated_initialize": "2025-06-18",
+    "unauthenticated_status": 401,
+    "task_and_diff_versions_equal": true,
+    "file_reads_search_and_saved_logs_verified": true,
+    "path_escape_denied": true,
+    "shell_tool_absent": true,
+    "task_snapshot_thread_count_and_git_index_unchanged_by_reads": true,
+    "external_connection_verified": true,
+    "disabled_after_local_validation": true,
+    "legacy_bridge_and_mcp_ports_closed_after_validation": [
+      8791,
+      8792
+    ],
+    "secure_tunnel": {
+      "tunnel_id": "tunnel_6aa00b3dab50819198663f6f3c0e85ff",
+      "workspace_id": "f019f443-7c71-45e4-9d99-0e54ae674765",
+      "runtime_key_permissions": [
+        "tunnels.read",
+        "tunnels.use"
+      ],
+      "key_storage": "macOS Keychain",
+      "runtime_ready_verified": true,
+      "chatgpt_plugin_created": true,
+      "chatgpt_tools_discovered": 11,
+      "chatgpt_plan_review_loop": "completed: user imported ChatGPT Task Manifest, workers executed after recovery, ChatGPT reviewed current artifact through MCP, user imported pass Review Manifest"
+    },
+    "reenabled_for_external_validation": true
+  },
+  "regression_found": {
+    "attempt": 3,
+    "failure": "Loaded provider session retained old cwd after thread/resume; worker reported success but the new integrated artifact lacked its file. Independent byte checks rejected the result.",
+    "fix": "Explicit cwd and workspaceWrite writableRoots on every turn/start; exclude broad temporary roots; explicit working_directory in capsule.",
+    "verified_attempts": [
+      4,
+      5
+    ],
+    "prior_attempts_preserved": true
+  },
+  "remaining_acceptance": [
+    "Real interrupted in-flight worker recovery after process termination; guarded reconciliation and persistence covered by tests"
+  ],
+  "chatgpt_usage": null,
+  "raw_local_evidence_directory": "/private/tmp/localoud-manifest-evidence-20260908",
+  "latest_debug_app_bundle_build": "passed",
+  "recovery_regression": {
+    "task_id": "dff00550-c1cc-4467-ac71-7aca68c7da29",
+    "cause": "Stopped workflow remained in snapshots and receipts after its list mapping was removed; duplicate paste could not reopen it. Resuming after restart also interrupted a stale unloaded turn instead of checking its persisted terminal state.",
+    "fix": "Duplicate paste reopens/restores the saved mapping without replay or replacement; explicit resume checks the exact saved provider turn before interrupting.",
+    "desktop_tests_passed": 24,
+    "frontend_tests_passed": 20,
+    "provider_reconciliation_regression_passed": true,
+    "native_resume_iteration": 2,
+    "same_child_sessions_preserved": true,
+    "both_workers_running_observed": true,
+    "result": "completed",
+    "artifact_version": "357739fd64e586546147e3481980279dc9b78b05d3bd3b3194531c73ba935760",
+    "integrated_byte_checks_passed": true,
+    "files": {
+      "reports/tunnel_a.txt": "orange\n",
+      "reports/tunnel_b.txt": "purple\n"
+    }
+  },
+  "external_review": {
+    "manifest_id": "review-dff00550-c1cc-4467-ac71-7aca68c7da29-v357739fd-20260908",
+    "verdict": "pass",
+    "saved_task_status": "completed",
+    "native_ui_verified": true
+  },
+  "paste_feedback": {
+    "loading_and_double_click_test": "passed",
+    "review_success_test": "passed",
+    "error_and_retry_test": "passed",
+    "typescript_check": "passed",
+    "debug_app_build": "passed",
+    "native_completed_badge": "verified"
+  }
+}

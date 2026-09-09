@@ -1,0 +1,53 @@
+{
+  "date": "2026-09-09",
+  "experiment": "Codex Desktop UI-originated task versus Localoud-originated task: archive lifecycle",
+  "status": "completed_with_route_difference",
+  "control": {
+    "thread_id": "01a0850d-8b73-7380-bc34-d9f4fdf52b84",
+    "route": "Codex Desktop UI",
+    "originator": "Codex Desktop",
+    "precondition": {
+      "thread_status": "notLoaded",
+      "latest_turn_status": "completed",
+      "latest_turn_completed_at_ms": 1788938960
+    },
+    "archive_attempt": {
+      "requested": true,
+      "result": "archived",
+      "verified_in": "list_archived_threads"
+    }
+  },
+  "target": {
+    "thread_id": "01a0850e-9002-7333-b362-717434d37430",
+    "route": "Localoud normal Codex chat",
+    "originator": "astra_hub",
+    "precondition": {
+      "thread_status": "notLoaded",
+      "latest_turn_status": "completed",
+      "latest_turn_completed_at_ms": 1788938954,
+      "wait_snapshot": "inactiveStatus"
+    },
+    "localoud_ui_archive": {
+      "requested": true,
+      "result": "archived_locally",
+      "verified_in": "Localoud UI archived view"
+    },
+    "provider_archive_attempt": {
+      "requested": true,
+      "result": "failed",
+      "error": "thread 01a0850e-9002-7333-b362-717434d37430 already has an active writer",
+      "retry_after_localoud_ui_archive": "same_error"
+    }
+  },
+  "interpretation": [
+    "The completed Codex Desktop UI route was archiveable.",
+    "The Localoud UI archived its local transcript successfully and showed the task in its archived view.",
+    "The same Localoud-originated provider thread remained blocked by an active-writer guard even after the Localoud UI archive, despite visible provider status notLoaded and a completed latest turn.",
+    "This is an archive-lifecycle comparison, not a performance or token-efficiency result.",
+    "No writer lock was forcibly cleared and no retry was made with a different backend or model."
+  ],
+  "limitations": [
+    "Direct CUA access to com.openai.codex is blocked by the host safety policy; the control is an existing task whose metadata identifies it as Codex Desktop UI-originated.",
+    "The current task is still active, so its own archive behavior was not used as a completed control."
+  ]
+}

@@ -1,5 +1,7 @@
 # Context inheritance benchmark — 2026-09-08 JST
 
+For the subsequent **real native `spawn_agent` comparison**, see [the 2026-09-09 results](NATIVE_AGENT_BENCHMARK.md). That single pair showed 8.2% higher total input for Localoud, despite lower first input. The synthetic fork result below must not be described as native-subagent savings.
+
 A real Codex app-server fork baseline and a new independent thread implemented the same Python interval utility (normalize/subtract/contains), from the same Git commit in separate worktrees. Both pulled the same interval policy through `hub_context`; both passed the same 9 fixed acceptance tests. The parent received a synthetic, irrelevant historical archive; its measured initial input was 167,886 tokens.
 
 | Observed quantity | Fork baseline | Capsule + pull |

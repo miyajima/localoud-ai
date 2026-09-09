@@ -1,6 +1,7 @@
 //! Serialized per-thread mutations with durable Hub/provider mapping.
 pub mod memory_capture;
 pub mod plan;
+pub mod research;
 use anyhow::{anyhow, bail, Result};
 use hub_core::{HubThreadId, ProjectId, ThreadMapping};
 use hub_db::Store;
@@ -56,8 +57,8 @@ impl Sessions {
             .map_err(|_| anyhow!("database lock poisoned"))?
             .threads()?
             .into_iter()
-            .find(|t| t.id == id)
-            .ok_or_else(|| anyhow!("unknown Hub thread"))
+            .find(|t| t.id == id && t.provider == "codex" && t.status != "legacy_read_only")
+            .ok_or_else(|| anyhow!("unknown or read-only non-Codex thread"))
     }
     fn project_root(&self, id: ProjectId) -> Result<std::path::PathBuf> {
         self.store

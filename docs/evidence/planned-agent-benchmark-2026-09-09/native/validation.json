@@ -1,0 +1,12 @@
+{
+  "tests": {
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "test_conflicts_and_unrestricted_groups (test_scheduler.SchedulerTests.test_conflicts_and_unrestricted_groups) ... ok\ntest_duplicates_weighted_path_and_immutability (test_scheduler.SchedulerTests.test_duplicates_weighted_path_and_immutability) ... ok\ntest_generated_dags (test_scheduler.SchedulerTests.test_generated_dags) ... ok\ntest_invalid_capacity_nonempty (test_scheduler.SchedulerTests.test_invalid_capacity_nonempty) ... ok\ntest_invalid_inputs_all_operations (test_scheduler.SchedulerTests.test_invalid_inputs_all_operations) ... ok\ntest_priority_and_batch_boundary (test_scheduler.SchedulerTests.test_priority_and_batch_boundary) ... ok\ntest_batches_are_waves (acceptance.Acceptance.test_batches_are_waves) ... ok\ntest_capacity (acceptance.Acceptance.test_capacity) ... ok\ntest_cycles (acceptance.Acceptance.test_cycles) ... ok\ntest_duplicate_dependencies (acceptance.Acceptance.test_duplicate_dependencies) ... ok\ntest_empty (acceptance.Acceptance.test_empty) ... ok\ntest_groups_skip_and_fill (acceptance.Acceptance.test_groups_skip_and_fill) ... ok\ntest_input_immutable (acceptance.Acceptance.test_input_immutable) ... ok\ntest_invalid_capacity (acceptance.Acceptance.test_invalid_capacity) ... ok\ntest_longest_path (acceptance.Acceptance.test_longest_path) ... ok\ntest_new_ready_priority (acceptance.Acceptance.test_new_ready_priority) ... ok\ntest_schema (acceptance.Acceptance.test_schema) ... ok\ntest_unknown_dependency (acceptance.Acceptance.test_unknown_dependency) ... ok\n\n----------------------------------------------------------------------\nRan 18 tests in 0.002s\n\nOK\n"
+  },
+  "oracle": {
+    "exit_code": 0,
+    "stdout": "{\"pass\": true, \"random_dags\": 1000, \"max_nodes\": 6, \"batch_capacities\": [1, 2, 3, 7], \"seed\": 202609091, \"oracles\": [\"enumerate all valid topological permutations\", \"enumerate feasible ready subsets\", \"enumerate dependency paths\"]}\n",
+    "stderr": ""
+  }
+}

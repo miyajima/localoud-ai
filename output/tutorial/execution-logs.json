@@ -1,0 +1,74 @@
+[
+  {
+    "chapter": "01  画面の役割",
+    "title": "右で相談、左で実行",
+    "duration": 7,
+    "source": "01-plan.png"
+  },
+  {
+    "chapter": "02  計画を作る",
+    "title": "プロジェクトを選ぶ",
+    "duration": 7,
+    "source": "01-plan.png"
+  },
+  {
+    "chapter": "02  計画を作る",
+    "title": "ChatGPTに依頼する",
+    "duration": 8,
+    "source": "01-plan.png"
+  },
+  {
+    "chapter": "03  計画を取り込む",
+    "title": "JSON全体をコピー",
+    "duration": 7,
+    "source": "02-copy.png"
+  },
+  {
+    "chapter": "03  計画を取り込む",
+    "title": "貼り付けて実行",
+    "duration": 7,
+    "source": "04-agents.png"
+  },
+  {
+    "chapter": "03  計画を取り込む",
+    "title": "取り込み済みの場合",
+    "duration": 8,
+    "source": "03-import.png"
+  },
+  {
+    "chapter": "04  実行結果を確認",
+    "title": "workerの担当を見る",
+    "duration": 7,
+    "source": "04-agents.png"
+  },
+  {
+    "chapter": "04  実行結果を確認",
+    "title": "検証の根拠を読む",
+    "duration": 7,
+    "source": "06-result.png"
+  },
+  {
+    "chapter": "05  ChatGPTでレビュー",
+    "title": "タスクIDを渡す",
+    "duration": 8,
+    "source": "07-review.png"
+  },
+  {
+    "chapter": "05  ChatGPTでレビュー",
+    "title": "レビュー結果をコピー",
+    "duration": 7,
+    "source": "07-review.png"
+  },
+  {
+    "chapter": "06  レビューを戻して完了",
+    "title": "同じボタンで戻す",
+    "duration": 7,
+    "source": "04-agents.png"
+  },
+  {
+    "chapter": "06  レビューを戻して完了",
+    "title": "完了を確かめる",
+    "duration": 8,
+    "source": "08-complete.png"
+  }
+]

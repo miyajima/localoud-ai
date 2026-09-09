@@ -99,10 +99,9 @@ async fn fixture() -> Fixture {
         provider: Arc::new(SparkProvider::configured(local_config.clone()).unwrap()),
         lock: tokio::sync::Mutex::new(()),
     };
-    let browser = crate::chatgpt::Browser::new(store.clone(), bus.clone()).unwrap();
     let state = AppState {
+        read_mcp: crate::read_mcp::ReadMcp::new(store.clone()),
         workflow_lock: tokio::sync::Mutex::new(()),
-        browser,
         local_stops: tokio::sync::Mutex::new(HashMap::new()),
         store,
         bus,
@@ -253,4 +252,35 @@ async fn consumed_changed_or_stale_previews_cannot_be_reused() {
         std::fs::read_to_string(f._directory.path().join("greeting.txt")).unwrap(),
         "unchanged"
     );
+}
+
+#[test]
+fn initial_routes_use_available_routine_and_planner_models() {
+    let choice = |name: &str, is_default| models::Choice {
+        key: format!("codex:{name}"),
+        label: name.into(),
+        model: name.into(),
+        local: false,
+        reasoning: vec![],
+        default_reasoning: None,
+        is_default,
+    };
+    let mut catalog = models::Catalog {
+        models: vec![choice("gpt-6-astra", true), choice("gpt-5.6-luna", false)],
+        warnings: vec![],
+    };
+    let config = initial_settings("local-model".into(), &catalog);
+    assert_eq!(config.classifier.model, "local-model");
+    assert_eq!(config.target(1).unwrap().provider, ModelProvider::Local);
+    assert_eq!(config.target(3).unwrap().model, "gpt-5.6-luna");
+    assert_eq!(config.target(5).unwrap().model, "gpt-6-astra");
+    assert_eq!(config.fallback.unwrap().model, "gpt-5.6-luna");
+    catalog.models = vec![choice("available-default", true)];
+    let config = initial_settings("local-model".into(), &catalog);
+    assert_eq!(config.target(3).unwrap().model, "available-default");
+    assert_eq!(config.target(5).unwrap().model, "available-default");
+    catalog.models.clear();
+    assert!(initial_settings("local-model".into(), &catalog)
+        .fallback
+        .is_none());
 }

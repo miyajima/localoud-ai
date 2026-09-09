@@ -1,21 +1,22 @@
-export type ModelChoice = {key:string;label:string;model:string;local:boolean;chatgpt?:boolean;reasoning:string[];default_reasoning:string|null;is_default:boolean};
-export type ModelTarget = {provider:'local'|'codex'|'chatgpt';model:string;reasoning:string|null};
+export type ModelChoice = {key:string;label:string;model:string;local:boolean;reasoning:string[];default_reasoning:string|null;is_default:boolean};
+export function resolvedModel(model:ModelChoice|undefined,_effort:string|null):ModelChoice|undefined{return model;}
+export type ModelTarget = {provider:'local'|'codex';model:string;reasoning:string|null};
 function option(select:HTMLSelectElement,label:string,value:string,disabled=false){const o=select.ownerDocument.createElement('option');o.textContent=label;o.value=value;o.disabled=disabled;select.add(o);return o;}
 export function appendModelOptions(select:HTMLSelectElement,models:ModelChoice[]){
-  for(const [label,local] of [['ローカル',true],['Codex',false],['ChatGPT',null]] as const){
-    const choices=models.filter(m=>local===null?m.chatgpt:!m.chatgpt&&m.local===local);if(!choices.length)continue;
+  for(const [label,local] of [['ローカル',true],['Codex',false]] as const){
+    const choices=models.filter(m=>m.local===local);if(!choices.length)continue;
     const group=select.ownerDocument.createElement('optgroup');group.label=label;
     for(const model of choices){
       const item=select.ownerDocument.createElement('option');
       const duplicate=choices.some(other=>other.model!==model.model&&other.label===model.label);
-      item.value=model.key;item.textContent=(model.model==='gpt-6-astra'&&!model.local&&!model.chatgpt?'GPT-6-Astra':model.label)+(duplicate?` · ${model.model}`:'');
+      item.value=model.key;item.textContent=(model.model==='gpt-6-astra'&&!model.local?'GPT-6-Astra':model.label)+(duplicate?` · ${model.model}`:'');
       group.append(item);
     }
     select.append(group);
   }
 
 }
-export function modelForTarget(models:ModelChoice[],target:ModelTarget|null|undefined){return target?models.find(m=>m.model===target.model&&m.local===(target.provider==='local')&&!!m.chatgpt===(target.provider==='chatgpt')):undefined;}
+export function modelForTarget(models:ModelChoice[],target:ModelTarget|null|undefined){return target&&['local','codex'].includes(target.provider)?models.find(m=>m.model===target.model&&m.local===(target.provider==='local')):undefined;}
 export function fillModelSelect(select:HTMLSelectElement,models:ModelChoice[],target:ModelTarget|null){
   select.replaceChildren();option(select,'モデルを選択','');
   appendModelOptions(select,models);
@@ -34,7 +35,8 @@ export function fillReasoningSelect(select:HTMLSelectElement,model:ModelChoice|u
   select.disabled=!model||model.local||!model.reasoning.length;
 }
 export function readTarget(modelSelect:HTMLSelectElement,reasoningSelect:HTMLSelectElement,models:ModelChoice[]):ModelTarget|null {
-  const model=models.find(m=>m.key===modelSelect.value), effort=reasoningSelect.value||null;
+  const choice=models.find(m=>m.key===modelSelect.value), effort=reasoningSelect.value||null;
+  const model=resolvedModel(choice,effort);
   if(!model || (effort&&(model.local||!model.reasoning.includes(effort))))return null;
-  return {provider:model.chatgpt?'chatgpt':model.local?'local':'codex',model:model.model,reasoning:effort};
+  return {provider:model.local?'local':'codex',model:model.model,reasoning:effort};
 }

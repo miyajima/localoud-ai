@@ -6,7 +6,6 @@ Localoud是Local与Cloud的组合名称。Localoud AI是开源的桌面编码工
 
 这是一个本地优先的桌面编码工作区。Rust负责生命周期和持久化，Tauri提供工作区界面。Codex app-server在隔离的Git worktree中执行编码任务。[Spark-X2.5-4B-MLX-8bit](https://huggingface.co/abenzerps/Spark-X2.5-4B-MLX-8bit)负责本地路由、小规模编辑、摘要和提取；Astra可按需规划和审查结果。worker从明确的上下文胶囊开始，不会隐式复制父会话。
 
-
 ## 支持开发 ☕
 
 Localoud AI 是免费开源软件。如果它让你的开发工作更轻松，欢迎[请我喝杯咖啡](https://buymeacoffee.com/miyajima)。你的支持将用于开发、模型测试和持续改进。支持完全自愿。
@@ -89,8 +88,8 @@ Chat用于处理任务，Plan用于DAG调度和重启，Agents用于审查和返
 
 ## 本地设置和凭据
 
-`config.example.toml`和`services/spark-mlx/config.yaml`是公开示例和默认值，不是个人设置。请在应用中配置自己的provider。运行时设置、会话和草稿保存在本地应用数据库中；OrgBrain凭据使用macOS Keychain。浏览器桥接配对token保存在本地数据库和Chrome扩展存储中。不要提交数据库文件、本地配置、provider凭据或浏览器配对token。
+`config.example.toml`和`services/spark-mlx/config.yaml`是公开示例和默认值，不是个人设置。请在应用中配置自己的provider。运行时设置、会话和草稿保存在本地应用数据库中；OrgBrain凭据使用macOS Keychain。只读MCP的Bearer token保存在macOS Keychain中。ChatGPT使用独立的持久化WKWebView数据存储。不要提交数据库文件、本地配置、provider凭据或MCP Bearer token。
 
 ## 许可证
 
-Localoud AI使用[MIT License](LICENSE)。内置的ChatGPT DOM helper保留[原始MIT版权声明](extensions/chatgpt/LICENSE.chat-on-steroids)；详情请参阅[NOTICE](extensions/chatgpt/NOTICE.md)。第三方依赖和单独下载的模型权重分别受其各自许可证约束。
+Localoud AI使用[MIT License](LICENSE)。第三方依赖和单独下载的模型权重分别受其各自许可证约束。

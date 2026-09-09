@@ -50,19 +50,46 @@ async fn read_settings(state: &AppState) -> Result<AutoSettings, String> {
         return Ok(config);
     }
     let catalog = models::catalog(state).await?;
-    let default = catalog
-        .models
-        .iter()
-        .find(|m| !m.local && m.is_default)
-        .map(|m| ModelTarget {
-            provider: ModelProvider::Codex,
-            model: m.model.clone(),
-            reasoning: None,
-        });
-    Ok(AutoSettings::initial(
+    Ok(initial_settings(
         state.local_config.model_id.clone(),
-        default,
+        &catalog,
     ))
+}
+fn initial_settings(local_model: String, catalog: &models::Catalog) -> AutoSettings {
+    let cloud = |name: &str| {
+        catalog
+            .models
+            .iter()
+            .find(|m| !m.local && m.model == name)
+            .map(|m| ModelTarget {
+                provider: ModelProvider::Codex,
+                model: m.model.clone(),
+                reasoning: None,
+            })
+    };
+    // Only use catalog-confirmed models. Saved assignments above remain authoritative.
+    let routine = cloud("gpt-5.6-luna").or_else(|| {
+        catalog
+            .models
+            .iter()
+            .find(|m| !m.local && m.is_default)
+            .map(|m| ModelTarget {
+                provider: ModelProvider::Codex,
+                model: m.model.clone(),
+                reasoning: None,
+            })
+    });
+    let mut config = AutoSettings::initial(local_model, routine.clone());
+    config.fallback = routine;
+    if let Some(planner) = cloud("gpt-6-astra") {
+        config
+            .levels
+            .iter_mut()
+            .find(|row| row.level == 5)
+            .unwrap()
+            .target = planner;
+    }
+    config
 }
 #[tauri::command]
 pub async fn auto_settings(state: tauri::State<'_, AppState>) -> Result<AutoSettings, String> {

@@ -1,0 +1,1 @@
+Intervals are half-open [start,end). Empty intervals are dropped, reversed bounds raise ValueError. Normalize sorts and merges overlapping OR touching intervals. Functions never mutate their input lists.

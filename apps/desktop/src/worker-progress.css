@@ -1,0 +1,32 @@
+.worker-progress,.worker-changes{padding:18px;max-width:1100px;margin:auto}.progress-heading,.worker-card>header{display:flex;justify-content:space-between;gap:12px;align-items:center}.progress-heading h2,.worker-changes h2{font-size:18px;margin:0 0 12px}.progress-heading small,.worker-model,.worker-paths{font-size:11px;color:var(--muted);overflow-wrap:anywhere}.worker-card{background:white;border:1px solid var(--line);border-radius:10px;padding:15px;margin:12px 0}.worker-card>header{padding:0;border:0;min-height:0;font-size:13px}.worker-card>header span{font-size:11px;white-space:nowrap;color:var(--blue)}.worker-card pre{white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.7 Menlo,monospace;margin:8px 0;max-height:280px;overflow:auto}.worker-event{border-left:2px solid #b9cbe7;padding:6px 10px;margin:10px 0;background:#f7f9fc}.worker-event small{display:block;color:var(--muted);font-size:10px}.worker-event code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;margin:6px 0}.worker-card details{margin:12px 0}.worker-card details[open]{max-height:480px;overflow:auto}.progress-error{font-size:12px;color:#a23b36;background:#fff0ec;padding:10px;overflow-wrap:anywhere}.worker-stream{border-left:2px solid var(--blue);padding-left:10px}.worker-changes section{margin:20px 0}.worker-changes details{border:1px solid var(--line);border-radius:8px;margin:10px 0;overflow:hidden}.worker-changes summary{padding:12px;background:#edf2fb;font-family:Menlo,monospace;overflow-wrap:anywhere}.worker-changes .diff{margin:0}.worker-changes .diff-stats{padding:10px}
+/* Disclosures expand in the main pane; only an individual output scrolls. */
+.worker-card details[open]{max-height:none;overflow:visible}
+.worker-event{border:0;background:transparent;padding:0}
+.worker-event summary{display:flex;align-items:baseline;gap:8px;padding:7px 0;color:var(--muted);list-style:none}
+.worker-event summary::before{content:'›';display:inline-block;flex-shrink:0;transition:transform .1s}
+.worker-event[open]>summary::before{transform:rotate(90deg)}
+.worker-event summary span{flex-shrink:0;font-size:11px}
+.worker-event summary code{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;min-width:0;font-size:11px}
+.worker-card pre,.patch-scroll{border:1px solid var(--line);border-radius:7px;background:#f6f7f9;padding:12px;overflow:auto;max-height:280px;scrollbar-gutter:stable;overscroll-behavior:contain}
+.worker-card pre::-webkit-scrollbar,.patch-scroll::-webkit-scrollbar,#content::-webkit-scrollbar{width:9px;height:9px}
+.worker-card pre::-webkit-scrollbar-thumb,.patch-scroll::-webkit-scrollbar-thumb,#content::-webkit-scrollbar-thumb{background:#b4bcc7;border:2px solid #f6f7f9;border-radius:8px}
+.worker-card pre:focus-visible,.patch-scroll:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.patch-scroll{max-height:480px;margin:0;border-radius:0;border:0}
+.patch-scroll .diff{overflow:visible}
+#task-focus,#browser-task-focus{padding:12px 16px;border-bottom:1px solid var(--line);background:var(--paper);flex-shrink:0}
+#task-focus[hidden],#browser-task-focus[hidden]{display:none}
+.focus-heading{display:flex;align-items:start;gap:10px;font-size:13px}
+.focus-heading strong{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.5;flex:1;overflow-wrap:anywhere}
+.focus-heading span{font-size:11px;color:var(--blue);white-space:nowrap}
+.focus-next{font-size:12px;line-height:1.6;margin:6px 0;color:var(--muted)}
+.focus-actions{display:flex;gap:6px;flex-wrap:wrap}.focus-actions button{font-size:11px;padding:5px 8px;border:1px solid var(--line)}
+.task-records{padding:14px 18px}.task-records details{margin:10px 0}.task-records summary{padding:6px 0;color:var(--muted)}
+.task-records .copy-message{opacity:1}.task-record{padding-left:12px;border-left:1px solid var(--line)}
+.handoff-receipt{font-size:11px;color:var(--muted);overflow-wrap:anywhere;line-height:1.6}
+.task-records .message-text{font-size:12px}.task-records pre{max-height:280px;overflow:auto;scrollbar-gutter:stable}
+body.browser-open #app main{height:100%;overflow:hidden}#app main>header,#app main>nav,#app main>footer{flex-shrink:0}
+.manifest-mode #execution-source,.manifest-mode .footnote{display:none}
+.manifest-mode footer .compose{padding:10px}.manifest-mode footer{padding-top:10px;padding-bottom:10px}
+.manifest-mode .compose-controls{flex-wrap:nowrap!important}
+.manifest-mode .executor-controls{gap:6px}
+.worker-card>header{height:auto!important;padding:0!important}

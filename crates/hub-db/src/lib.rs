@@ -110,6 +110,20 @@ impl Store {
         })
         .collect()
     }
+    pub fn rename_project(&self, id: ProjectId, name: &str) -> Result<()> {
+        let name=name.trim();
+        if name.is_empty() || name.chars().count()>120 { bail!("プロジェクト名は1〜120文字で入力してください。"); }
+        if self.conn.execute("UPDATE projects SET name=?2 WHERE id=?1 AND registered=1",params![id.to_string(),name])? != 1 { bail!("プロジェクトが見つかりません。"); }
+        Ok(())
+    }
+    pub fn archive_project_threads(&mut self, id: ProjectId) -> Result<()> {
+        let ids=self.threads()?.into_iter().filter(|t|t.project_id==id).map(|t|t.id).collect::<Vec<_>>();
+        self.check_threads_idle(&ids)?;
+        if self.threads()?.iter().any(|t|t.project_id==id && matches!(t.status.as_str(),"queued"|"integrating"|"stopping")) { bail!("実行完了後に操作してください。"); }
+        let tx=self.conn.transaction()?;
+        tx.execute("UPDATE provider_threads SET archived=1 WHERE project_id=?1",[id.to_string()])?;
+        tx.commit()?; Ok(())
+    }
     /// Removes only the app registration; repository files and task records remain intact.
     pub fn unregister_project(&self, id: ProjectId) -> Result<()> {
         let running: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM provider_threads WHERE project_id=?1 AND status IN ('running','inProgress','dispatching'))", [id.to_string()], |r| r.get(0))?;
@@ -188,6 +202,27 @@ impl Store {
     }
     pub fn save_thread(&self, t: &ThreadMapping) -> Result<()> {
         self.conn.execute("INSERT INTO provider_threads(id,project_id,provider,provider_thread_id,title,status) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=CURRENT_TIMESTAMP",params![t.id.to_string(),t.project_id.to_string(),t.provider,t.provider_thread_id,t.title,t.status])?;
+        Ok(())
+    }
+    /// A user's Manifest is consumed exactly once, atomically with its workflow state.
+    /// A restart after this commit must reconcile the task, never replay the clipboard.
+    pub fn accept_manifest(
+        &mut self,
+        manifest_id: &str,
+        manifest: &str,
+        thread: &ThreadMapping,
+        snapshot_key: &str,
+        snapshot: &str,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        let key = format!("manifest_receipt:{manifest_id}");
+        if tx.query_row("SELECT 1 FROM settings WHERE key=?1", [&key], |_| Ok(())).optional()?.is_some() {
+            bail!("このManifestは取り込み済みです。保存されたタスクを確認してください。");
+        }
+        tx.execute("INSERT INTO settings(key,value) VALUES (?1,?2)", params![key, manifest])?;
+        tx.execute("INSERT INTO provider_threads(id,project_id,provider,provider_thread_id,title,status) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=CURRENT_TIMESTAMP", params![thread.id.to_string(),thread.project_id.to_string(),thread.provider,thread.provider_thread_id,thread.title,thread.status])?;
+        tx.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![snapshot_key, snapshot])?;
+        tx.commit()?;
         Ok(())
     }
     pub fn rename_thread(&self, id: HubThreadId, title: &str) -> Result<()> {
@@ -432,8 +467,16 @@ impl Store {
         Ok(())
     }
     pub fn usage(&self) -> Result<Vec<hub_core::ModelUsageRecord>> {
-        let mut q=self.conn.prepare("SELECT id,provider,model,turn_id,prompt_tokens,cached_tokens,completion_tokens,estimated_cost,latency_ms,task_id FROM model_usage ORDER BY created_at DESC LIMIT 1000")?;
-        let rows = q.query_map([], |r| {
+        self.scoped_usage(None)
+    }
+    pub fn thread_usage(&self, id: HubThreadId) -> Result<Vec<hub_core::ModelUsageRecord>> {
+        self.scoped_usage(Some(id))
+    }
+    fn scoped_usage(&self, thread: Option<HubThreadId>) -> Result<Vec<hub_core::ModelUsageRecord>> {
+        let mut q=self.conn.prepare("SELECT u.id,u.provider,u.model,u.turn_id,u.prompt_tokens,u.cached_tokens,u.completion_tokens,u.estimated_cost,
+          COALESCE(u.latency_ms,(SELECT CAST(ROUND((julianday(MIN(CASE WHEN e.kind='turn_completed' THEN e.created_at END))-julianday(MIN(CASE WHEN e.kind='turn_started' THEN e.created_at END)))*86400000) AS INTEGER) FROM events e WHERE json_extract(e.body,'$.turn_id')=u.turn_id AND u.provider='codex')),u.task_id
+          FROM model_usage u WHERE ?1 IS NULL OR EXISTS (SELECT 1 FROM provider_threads t WHERE t.id=?1 AND ((u.turn_id IS NULL AND u.task_id IS NOT NULL AND u.task_id=t.task_id AND (SELECT COUNT(*) FROM provider_threads linked WHERE linked.task_id=u.task_id)=1) OR EXISTS (SELECT 1 FROM turns x WHERE x.thread_id=t.id AND x.provider_turn_id=u.turn_id) OR EXISTS (SELECT 1 FROM events e WHERE e.thread_id=t.id AND json_extract(e.body,'$.turn_id')=u.turn_id) OR EXISTS (SELECT 1 FROM provider_usage_snapshots p WHERE p.provider_thread_id=t.provider_thread_id AND p.turn_id=u.turn_id))) ORDER BY u.created_at DESC")?;
+        let rows = q.query_map([thread.map(|id|id.to_string())], |r| {
             Ok(hub_core::ModelUsageRecord {
                 id: r.get(0)?,
                 provider: r.get(1)?,
@@ -501,7 +544,7 @@ impl Store {
         kind: &str,
         body: &str,
     ) -> Result<i64> {
-        self.conn.execute("INSERT INTO events(thread_id,kind,body) VALUES ((SELECT id FROM provider_threads WHERE provider_thread_id=?1),?2,?3)",params![provider_thread_id,kind,body])?;
+        self.conn.execute("INSERT INTO events(thread_id,kind,body,created_at) VALUES ((SELECT id FROM provider_threads WHERE provider_thread_id=?1),?2,?3,strftime('%Y-%m-%d %H:%M:%f','now'))",params![provider_thread_id,kind,body])?;
         Ok(self.conn.last_insert_rowid())
     }
     pub fn event_history(&self, id: HubThreadId, after: i64) -> Result<Vec<(i64, String)>> {
@@ -510,6 +553,15 @@ impl Store {
             Ok((r.get(0)?, r.get(1)?))
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+    /// Bounded, durable activity for a worker's current turn. Streaming deltas
+    /// are omitted by the journal; use the live event bus for those instead.
+    pub fn recent_activity(&self, id: HubThreadId, turn: Option<&str>) -> Result<Vec<(i64, String)>> {
+        let mut q = self.conn.prepare("SELECT id,body FROM events WHERE thread_id=?1 AND (?2 IS NULL OR json_extract(body,'$.turn_id')=?2) AND kind IN ('message_completed','item_started','item_completed','error','turn_started','turn_completed','diff') ORDER BY id DESC LIMIT 60")?;
+        let rows = q.query_map(params![id.to_string(), turn], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let mut events = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        events.reverse();
+        Ok(events)
     }
     pub fn update_provider_status(
         &self,
@@ -586,6 +638,28 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn usage_is_scoped_before_reading_and_elapsed_time_is_derived() -> Result<()> {
+        let dir=tempfile::tempdir()?;
+        assert!(std::process::Command::new("git").arg("init").arg(dir.path()).output()?.status.success());
+        let store=Store::open(&dir.path().join("usage.db"))?;
+        let project=store.register_project(dir.path())?;
+        let mut ids=Vec::new();
+        for n in 0..2 {
+            let thread=ThreadMapping{id:HubThreadId::default(),project_id:project.id,provider:"codex".into(),provider_thread_id:format!("p{n}"),title:"test".into(),status:"completed".into()};
+            store.save_thread(&thread)?;
+            store.record_usage(&hub_core::ModelUsageRecord{id:format!("usage{n}"),provider:"codex".into(),model:"sol".into(),task_id:None,turn_id:Some(format!("turn{n}")),prompt_tokens:Some(10),cached_tokens:None,completion_tokens:Some(2),estimated_cost:None,latency_ms:None})?;
+            for (kind,time) in [("turn_started","2026-09-09 01:00:00.000"),("turn_completed","2026-09-09 01:00:02.500")] {
+                let seq=store.append_event(Some(&thread.provider_thread_id),kind,&serde_json::json!({"turn_id":format!("turn{n}")}).to_string())?;
+                store.conn.execute("UPDATE events SET created_at=?2 WHERE id=?1",params![seq,time])?;
+            }
+            ids.push(thread.id);
+        }
+        assert_eq!(store.usage()?.len(),2);
+        for (n,id) in ids.into_iter().enumerate() {let rows=store.thread_usage(id)?;assert_eq!(rows.len(),1);assert_eq!(rows[0].id,format!("usage{n}"));assert_eq!(rows[0].latency_ms,Some(2500));}
+        assert!(store.thread_usage(HubThreadId::default())?.is_empty());
+        Ok(())
+    }
     #[test]
     fn archive_delete_and_unregister_preserve_workspace() -> Result<()> {
         let dir = tempfile::tempdir()?;
