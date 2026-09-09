@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-09-09T08:28:46.150576+00:00",
+  "reviewer_model": "gpt-6-astra",
+  "reasoning": "low",
+  "verdict": "fail",
+  "frozen_six_cases": "pass",
+  "requirement": "Lowercase ASCII capitals only; replace all other characters outside a-z and 0-9",
+  "finding": "text.lower() turns Unicode characters into retained ASCII letters",
+  "probes": [
+    {
+      "input": "İABC",
+      "expected": "abc",
+      "actual": "i-abc"
+    },
+    {
+      "input": "K",
+      "expected": "",
+      "actual": "k"
+    }
+  ],
+  "repair_policy": "One targeted correction in the same condition/child, retained original artifact; no restart or fixture regeneration"
+}

@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
             s.save_dependencies(t)?;
         }
     }
-    let briefs=tasks.iter().map(|t|(t.id,WorkerBrief{acceptance_criteria:vec!["Implement the requested behavior and run unittest successfully".into()],constraints:vec!["No parent conversation is available. Use hub_context for missing evidence.".into()],context_items:vec![],budget:ContextBudget{initial_tokens:2000,max_total_tokens:4000,max_single_retrieval_tokens:600}})).collect();
+    let briefs=tasks.iter().map(|t|(t.id,WorkerBrief{execution:None,handoff:None,acceptance_criteria:vec!["Implement the requested behavior and run unittest successfully".into()],constraints:vec!["No parent conversation is available. Use hub_context for missing evidence.".into()],context_items:vec![],budget:ContextBudget{initial_tokens:2000,max_total_tokens:4000,max_single_retrieval_tokens:600}})).collect();
     let workers = Arc::new(Workers {
         memory: None,
         store: store.clone(),

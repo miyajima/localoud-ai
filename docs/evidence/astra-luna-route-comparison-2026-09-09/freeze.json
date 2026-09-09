@@ -1,0 +1,35 @@
+{
+  "schema": "astra-luna-route-calibration/v1",
+  "parent": {
+    "model": "gpt-6-astra",
+    "reasoning": "low"
+  },
+  "implementation": {
+    "model": "gpt-5.6-luna",
+    "reasoning": "max"
+  },
+  "conditions": {
+    "native": {
+      "route": "native_spawn_agent",
+      "fork_turns": "1"
+    },
+    "localoud": {
+      "route": "Workers independent worker",
+      "handoff": "deterministic handoff/v1"
+    }
+  },
+  "initial_files": {
+    "slug.py": "f834e1b5b244ca3f875cf0b3dfab486fc64b3d945328d255761f207292fbbfcc",
+    "AGENTS.md": "d19cf301a5ac46eee7c835fcb1d20233f002f3d3754a355bb7c89d8c65e27e54",
+    ".gitignore": "5053fe87be47a19416aee370ffb7ac5c3d4bc70610ae8fc9028afa646219d5ca"
+  },
+  "base_shas": {
+    "native": "6b2e38203d83d6f8b1455f423e33eb1d5c984039",
+    "localoud": "0259c1d80ba91e88ccb8f7b5eea1fd6517a03a90"
+  },
+  "plan_sha256": "4f5a729703b6b93d9d1585265ff2857c5d3566465ec6816f7e1447a006714056",
+  "acceptance_sha256": "b0dc8368cafd5371e7a99d6564a79840b72c080892c46fd013eb8e91b91c725f",
+  "status": "frozen_not_run",
+  "attempt_limit_per_condition": 1,
+  "parent_preparation": "Common plan prepared once; quota snapshots per condition include dispatch, extraction, implementation and parent acceptance/review. Shared preparation reported separately."
+}

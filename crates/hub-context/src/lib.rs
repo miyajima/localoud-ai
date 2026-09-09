@@ -1,3 +1,4 @@
+pub mod handoff;
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use cap_std::{ambient_authority, fs::Dir};
@@ -38,6 +39,52 @@ pub struct RetrievalResult {
     pub text: String,
     pub truncated: bool,
 }
+/// Pure preflight, shared by plan validation and persisted capsule construction.
+pub fn prepare_capsule(
+    task: TaskId,
+    project: ProjectId,
+    goal: String,
+    acceptance: Vec<String>,
+    constraints: Vec<String>,
+    mut items: Vec<ContextItem>,
+    budget: ContextBudget,
+) -> Result<ContextCapsule> {
+    budget.validate().map_err(|e| anyhow!(e))?;
+    if goal.trim().is_empty() {
+        bail!("capsule goal is empty");
+    }
+    for i in &mut items {
+        if hub_policy::redact(&i.text) != i.text {
+            bail!("context item contains secret-like text");
+        }
+        i.token_estimate = estimate_tokens(&i.text);
+    }
+    if hub_policy::redact(&goal) != goal {
+        bail!("goal contains secret-like text");
+    }
+    let c = ContextCapsule {
+        id: ContextCapsuleId::default(),
+        task_id: task,
+        project_id: project,
+        goal,
+        acceptance_criteria: acceptance,
+        constraints,
+        items,
+        budget,
+    };
+    let serialized = serde_json::to_string(&c)?;
+    if hub_policy::redact(&serialized) != serialized {
+        bail!("capsule contains secret-like text");
+    }
+    let initial = estimate_tokens(&serialized);
+    if initial > c.budget.initial_tokens {
+        bail!(
+            "initial capsule exceeds budget ({initial} > {})",
+            c.budget.initial_tokens
+        );
+    }
+    Ok(c)
+}
 pub struct Broker {
     pub store: Arc<Mutex<Store>>,
     pub task: TaskId,
@@ -51,43 +98,19 @@ impl Broker {
         goal: String,
         acceptance: Vec<String>,
         constraints: Vec<String>,
-        mut items: Vec<ContextItem>,
+        items: Vec<ContextItem>,
         budget: ContextBudget,
     ) -> Result<ContextCapsule> {
-        budget.validate().map_err(|e| anyhow!(e))?;
-        if goal.trim().is_empty() {
-            bail!("capsule goal is empty");
-        }
-        for i in &mut items {
-            if hub_policy::redact(&i.text) != i.text {
-                bail!("context item contains secret-like text");
-            }
-            i.token_estimate = estimate_tokens(&i.text);
-        }
-        if hub_policy::redact(&goal) != goal {
-            bail!("goal contains secret-like text");
-        }
-        let c = ContextCapsule {
-            id: ContextCapsuleId::default(),
-            task_id: self.task,
-            project_id: self.project,
+        let c = prepare_capsule(
+            self.task,
+            self.project,
             goal,
-            acceptance_criteria: acceptance,
+            acceptance,
             constraints,
             items,
             budget,
-        };
-        let serialized = serde_json::to_string(&c)?;
-        if hub_policy::redact(&serialized) != serialized {
-            bail!("capsule contains secret-like text");
-        }
-        let initial = estimate_tokens(&serialized);
-        if initial > c.budget.initial_tokens {
-            bail!(
-                "initial capsule exceeds budget ({initial} > {})",
-                c.budget.initial_tokens
-            );
-        }
+        )?;
+        let initial = estimate_tokens(&serde_json::to_string(&c)?);
         self.store
             .lock()
             .map_err(|_| anyhow!("database lock poisoned"))?

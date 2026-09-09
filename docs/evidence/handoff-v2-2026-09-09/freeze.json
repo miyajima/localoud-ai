@@ -1,0 +1,17 @@
+{
+  "schema": "handoff-comparison-freeze/v1",
+  "initial_files": {
+    "slug.py": "f834e1b5b244ca3f875cf0b3dfab486fc64b3d945328d255761f207292fbbfcc",
+    "AGENTS.md": "68ff3d8bcaca677d10205ae0751bb0e885a1be95c89297b9c077c9a14fe96a0d"
+  },
+  "plan_sha256": "4d6552f9141924992813ccd73cb7c0ec96ba76ada168fa154c48b74d0ec39d9c",
+  "acceptance_sha256": "b0dc8368cafd5371e7a99d6564a79840b72c080892c46fd013eb8e91b91c725f",
+  "conditions": {
+    "all": "all",
+    "one": "1",
+    "extracted-none": "none"
+  },
+  "status": "prepared_not_executed",
+  "model": null,
+  "reasoning": null
+}

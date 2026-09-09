@@ -1,0 +1,10 @@
+{
+  "route": "native_spawn_agent",
+  "agent": "/root/native_luna_calibration",
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "max",
+  "fork_turns": "1",
+  "full_brief_read_from": "/private/tmp/localoud-astra-luna-compare-b6af-20260909/native/evidence/prompt.txt",
+  "reviewer": "original Astra/low parent",
+  "timestamp": "2026-09-09T08:27:14.737132+00:00"
+}

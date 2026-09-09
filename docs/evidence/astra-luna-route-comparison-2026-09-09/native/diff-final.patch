@@ -1,0 +1,17 @@
+diff --git a/slug.py b/slug.py
+index ca1a85a..8278c81 100644
+--- a/slug.py
++++ b/slug.py
+@@ -1,2 +1,11 @@
++import re
++
++
++_ASCII_LOWER = str.maketrans(
++    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
++    "abcdefghijklmnopqrstuvwxyz",
++)
++
++
+ def slugify(text):
+-    raise NotImplementedError
++    return re.sub(r"[^a-z0-9]+", "-", text.translate(_ASCII_LOWER)).strip("-")

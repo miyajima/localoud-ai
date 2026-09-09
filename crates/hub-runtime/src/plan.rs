@@ -36,6 +36,8 @@ impl ExecutionPlan {
                 bail!("each step needs a key, title, goal and acceptance criteria");
             }
             s.brief.budget.validate().map_err(anyhow::Error::msg)?;
+            s.brief
+                .prepare_handoff(&Task::new(project, &s.title, &s.goal))?;
             if ids.insert(s.key.clone(), TaskId::default()).is_some() {
                 bail!("duplicate step key");
             }
@@ -118,6 +120,8 @@ mod recovery_tests {
         b.status = TaskStatus::Running;
         b.dependencies = vec![a.id];
         let brief = WorkerBrief {
+            handoff: None,
+            execution: None,
             acceptance_criteria: vec!["test".into()],
             constraints: vec![],
             context_items: vec![],

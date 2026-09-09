@@ -1,0 +1,98 @@
+{
+  "status": "inconclusive",
+  "native_comparison": "not_run_model_alignment_requires_user_choice",
+  "current_parent": {
+    "model": "gpt-6-astra",
+    "effort": "low",
+    "evidence": "current session turn_context"
+  },
+  "requested_implementation": {
+    "model": "gpt-5.6-luna",
+    "effort": "max"
+  },
+  "fixture_root": "/private/tmp/localoud-handoff-v2-b6af-20260909",
+  "condition_runs": [],
+  "subscription_usage_difference": null,
+  "extra_extraction_model_calls": 0,
+  "preparation_only": true,
+  "local_checks": {
+    "hub_context_and_runtime_existing_and_extraction": 20,
+    "worker_integration": 2,
+    "cargo_check_hub_runtime_examples": "pass",
+    "git_diff_check": "pass",
+    "fixture_initial_hashes": "identical_all_three",
+    "fixture_initial_acceptance": "expected_failure_all_three",
+    "separate_reference_implementation_acceptance": "6_pass",
+    "existing_run_overwrite": "rejected",
+    "handoff_regression_after_review": 5,
+    "total_distinct_rust_tests": 23
+  },
+  "extraction": {
+    "input_source_utf8_bytes": 18097,
+    "serialized_selection_utf8_bytes": 2413,
+    "sources_retained": 7,
+    "omitted_background_groups": [
+      "g7"
+    ]
+  },
+  "account_api_observations": [
+    {
+      "usedPercent": 55,
+      "windowDurationMins": 10080,
+      "resetsAt": 1789435445
+    },
+    {
+      "usedPercent": 55,
+      "windowDurationMins": 10080,
+      "resetsAt": 1789435446
+    }
+  ],
+  "limitations": [
+    "Account-wide usage, not task attribution",
+    "Integer values observed; API precision and rounding policy unknown",
+    "Update freshness not guaranteed",
+    "Reset timestamp changed by one second; reason unknown",
+    "Other task or device consumption not excluded; user work was not stopped",
+    "No model calls for native conditions; no zero-cost or quota-savings claim",
+    "Source roles/references and classification supplied by caller, not authenticated by extractor",
+    "Synthetic tests are not human semantic acceptance"
+  ],
+  "orgbrain_reference_sha256": {
+    "packages/shared/src/memory-extraction-coverage-runtime.mjs": "5fcab7f2f6d25b8b0c810f82899fe4db1f2d1bbad6f83d4bb3f26b41ea94701e",
+    "packages/shared/src/memory-extraction-verifier-runtime.mjs": "8269147b2e10acd1f4d5e4fa4e6c391f03e8dc6a2a0c1e78ce1ef9cfc925419c",
+    "packages/shared/src/memory-extraction-provider-contract-runtime.mjs": "fcc21d508e8263d9b45b49205691b3d6df54bd54501049c180831acefa8aec13",
+    "packages/orgbrain-cli/src/lib/coverage-review-signals.mjs": "e62871589eecaa3d40d81a7d5c56f38b4d64cb9daf0d53bb79f82a21e24855ca",
+    "docs/MEMORY_EXTRACTION_COVERAGE_V1.md": "fedbb4e70b3772404928763af09d9a5ff8b90897952e418aeb3db03139c8afd0",
+    "artifacts/benchmarks/2026-09-09/memory-extraction-a-plus-run9-report.json": "6c404d46089db2aea9a2cbc753a6597dbc21ec9e25786696602f2d59808a5f06"
+  },
+  "parent_preparation_checkpoint": {
+    "timestamp": "2026-09-09T08:11:08.115Z",
+    "tokens": {
+      "input_tokens": 1549266,
+      "cached_input_tokens": 1466880,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 12608,
+      "reasoning_output_tokens": 1078,
+      "total_tokens": 1561874
+    },
+    "scope": "Partial parent implementation/preparation only, not a condition run or final total"
+  },
+  "review": {
+    "reviewer": "same_parent",
+    "local_contract_and_mock_connection": "pass",
+    "semantic_quality_and_quota_savings": "inconclusive",
+    "fixed_finding": "Malformed correction target could panic before its source validation; validate all groups before chronology lookup"
+  },
+  "implementation_sha256": {
+    "crates/hub-context/src/lib.rs": "e9047e27400484cfbaafdb18578bdc998952420854cf833cda5ba451cd095a52",
+    "crates/hub-context/src/handoff.rs": "4c0e3ebbea727c6db7fc6f07e03fcfd4195b108dc12be13ea8a8a65e39386089",
+    "crates/hub-context/tests/handoff.rs": "0d7a25fff2e2da2dd2f533a263db633f1d742ff40833b16034061733deb7f03e",
+    "crates/hub-runtime/src/plan.rs": "5362f601e1eee6e52f459bdab41c49c5a20e620dfdc426bb2c040a701325100e",
+    "crates/hub-runtime/src/workers.rs": "bcddb51bee64e81a5e347232b13c46fc7eb4325f65d9fff9a6253ad4ec524c23",
+    "crates/hub-runtime/tests/handoff.rs": "2670d7625247d226440492ccc01da7f15359151a920a836a7813fbc16c88f810",
+    "crates/hub-runtime/examples/prepare_handoff.rs": "a0f4edbd58e98840b3139db660cab9c18a16add27017a93577eff9b33963ebb9",
+    "crates/hub-runtime/examples/worker_fixture.rs": "67bc9286963285e6dbbdd7c6d9bce06c53890b6dcce7592ae6f6263bd0edfc0d",
+    "fixtures/codex-events/handoff_server.py": "6f6d216caa552765168a0b25473a927c78a21a2ce3c7e4b4058135551befcfcc",
+    "scripts/prepare-handoff-comparison.py": "94d177f2387104b1bad97bbb1b76c30dd724af64f2292abb2fd3bfce7cde17eb"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-09-09T08:32:40.206054+00:00",
+  "command": [
+    "python3",
+    "-B",
+    "/private/tmp/localoud-astra-luna-compare-b6af-20260909/acceptance.py",
+    "/private/tmp/localoud-astra-luna-compare-b6af-20260909/localoud/fixture/.agent-worktrees/task-5eb7f3ee-4cbe-4ca0-9560-2c05889165c3"
+  ],
+  "exit_code": 0,
+  "stdout": "6 fixed cases passed\n",
+  "stderr": "",
+  "status_porcelain": " M slug.py\n",
+  "head_unchanged": true,
+  "sha256": "9aa6f1627b537540011db1bbd03cf21797e41d0e85ea9e7b44e3037501875f40",
+  "review_probes": [
+    {
+      "input": "İABC",
+      "expected": "abc",
+      "actual": "abc"
+    },
+    {
+      "input": "K",
+      "expected": "",
+      "actual": ""
+    }
+  ],
+  "worktree": "/private/tmp/localoud-astra-luna-compare-b6af-20260909/localoud/fixture/.agent-worktrees/task-5eb7f3ee-4cbe-4ca0-9560-2c05889165c3",
+  "worker_elapsed_ms": 78909
+}

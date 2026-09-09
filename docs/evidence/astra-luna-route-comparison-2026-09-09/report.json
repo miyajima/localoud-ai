@@ -1,0 +1,306 @@
+{
+  "schema": "astra-luna-route-comparison/v1",
+  "status": "inconclusive",
+  "runs": {
+    "native": {
+      "begin": "2026-09-09 08:26:39 UTC",
+      "end": "2026-09-09 08:30:24 UTC",
+      "elapsed_seconds_through_parent_review": 225.0,
+      "parent": {
+        "model_responses": 10,
+        "input_tokens": 1441363,
+        "cached_input_tokens": 1433344,
+        "output_tokens": 4737,
+        "reasoning_output_tokens": 1959,
+        "total_tokens": 1446100,
+        "non_cached_input_tokens": 8019
+      },
+      "implementation_child": {
+        "model_responses": 13,
+        "input_tokens": 687676,
+        "cached_input_tokens": 638720,
+        "output_tokens": 3331,
+        "reasoning_output_tokens": 1655,
+        "total_tokens": 691007,
+        "non_cached_input_tokens": 48956
+      },
+      "parent_plus_child": {
+        "model_responses": 23,
+        "input_tokens": 2129039,
+        "cached_input_tokens": 2072064,
+        "output_tokens": 8068,
+        "reasoning_output_tokens": 3614,
+        "total_tokens": 2137107,
+        "non_cached_input_tokens": 56975
+      },
+      "models_verified_from_turn_context": {
+        "01a08546-e1c0-7c80-8eca-11759f6c9220": {
+          "model": "gpt-5.6-luna",
+          "reasoning": "max"
+        },
+        "01a08548-d1f2-73e1-8ad0-c62bd7da70ea": {
+          "model": "gpt-5.6-luna",
+          "reasoning": "max"
+        }
+      },
+      "child_thread_id": "01a08546-e14c-7a70-832c-c46f1717eb4d",
+      "source": {
+        "subagent": {
+          "thread_spawn": {
+            "parent_thread_id": "01a08531-1291-74b2-a5a3-2226ca2b0887",
+            "depth": 1,
+            "agent_path": "/root/native_luna_calibration",
+            "agent_nickname": "Nietzsche",
+            "agent_role": null
+          }
+        }
+      },
+      "cli_version": "0.153.4",
+      "repair_turns": 1,
+      "quality": "pass",
+      "quota_before": {
+        "codex": {
+          "limitId": "codex",
+          "limitName": null,
+          "primary": {
+            "usedPercent": 56,
+            "windowDurationMins": 10080,
+            "resetsAt": 1789435445
+          },
+          "secondary": null,
+          "credits": {
+            "hasCredits": false,
+            "unlimited": false,
+            "balance": "0"
+          },
+          "individualLimit": null,
+          "spendControlReached": false,
+          "planType": "pro",
+          "rateLimitReachedType": null
+        }
+      },
+      "quota_after": {
+        "codex": {
+          "limitId": "codex",
+          "limitName": null,
+          "primary": {
+            "usedPercent": 56,
+            "windowDurationMins": 10080,
+            "resetsAt": 1789435445
+          },
+          "secondary": null,
+          "credits": {
+            "hasCredits": false,
+            "unlimited": false,
+            "balance": "0"
+          },
+          "individualLimit": null,
+          "spendControlReached": false,
+          "planType": "pro",
+          "rateLimitReachedType": null
+        }
+      },
+      "displayed_used_percent_delta": 0,
+      "attributable_quota_consumption": null,
+      "concurrent_unrelated_usage_record_count": 3,
+      "concurrent_unrelated_thread_count": 2,
+      "observed_related_platform_usage": {
+        "model_responses": 3,
+        "input_tokens": 45463,
+        "cached_input_tokens": 28928,
+        "output_tokens": 322,
+        "reasoning_output_tokens": 226,
+        "total_tokens": 45785,
+        "non_cached_input_tokens": 16535
+      },
+      "platform_quota_accounting": "unknown; observed usage is not proof of subscription charge"
+    },
+    "localoud": {
+      "begin": "2026-09-09 08:30:51 UTC",
+      "end": "2026-09-09 08:33:10 UTC",
+      "elapsed_seconds_through_parent_review": 139.0,
+      "parent": {
+        "model_responses": 6,
+        "input_tokens": 896208,
+        "cached_input_tokens": 891136,
+        "output_tokens": 2537,
+        "reasoning_output_tokens": 544,
+        "total_tokens": 898745,
+        "non_cached_input_tokens": 5072
+      },
+      "implementation_child": {
+        "model_responses": 7,
+        "input_tokens": 284973,
+        "cached_input_tokens": 236032,
+        "output_tokens": 3207,
+        "reasoning_output_tokens": 2002,
+        "total_tokens": 288180,
+        "non_cached_input_tokens": 48941
+      },
+      "parent_plus_child": {
+        "model_responses": 13,
+        "input_tokens": 1181181,
+        "cached_input_tokens": 1127168,
+        "output_tokens": 5744,
+        "reasoning_output_tokens": 2546,
+        "total_tokens": 1186925,
+        "non_cached_input_tokens": 54013
+      },
+      "models_verified_from_turn_context": {
+        "01a0854a-b4a7-7ac1-9fc5-a7d80a41a863": {
+          "model": "gpt-5.6-luna",
+          "reasoning": "max"
+        }
+      },
+      "child_thread_id": "01a0854a-b42e-70e2-8e58-0bac9f3c7650",
+      "source": "vscode",
+      "cli_version": "0.153.4",
+      "repair_turns": 0,
+      "quality": "pass",
+      "quota_before": {
+        "codex": {
+          "limitId": "codex",
+          "limitName": null,
+          "primary": {
+            "usedPercent": 56,
+            "windowDurationMins": 10080,
+            "resetsAt": 1789435445
+          },
+          "secondary": null,
+          "credits": {
+            "hasCredits": false,
+            "unlimited": false,
+            "balance": "0"
+          },
+          "individualLimit": null,
+          "spendControlReached": false,
+          "planType": "pro",
+          "rateLimitReachedType": null
+        }
+      },
+      "quota_after": {
+        "codex": {
+          "limitId": "codex",
+          "limitName": null,
+          "primary": {
+            "usedPercent": 56,
+            "windowDurationMins": 10080,
+            "resetsAt": 1789435445
+          },
+          "secondary": null,
+          "credits": {
+            "hasCredits": false,
+            "unlimited": false,
+            "balance": "0"
+          },
+          "individualLimit": null,
+          "spendControlReached": false,
+          "planType": "pro",
+          "rateLimitReachedType": null
+        }
+      },
+      "displayed_used_percent_delta": 0,
+      "attributable_quota_consumption": null,
+      "concurrent_unrelated_usage_record_count": 7,
+      "concurrent_unrelated_thread_count": 3,
+      "observed_related_platform_usage": {
+        "model_responses": 2,
+        "input_tokens": 57960,
+        "cached_input_tokens": 54784,
+        "output_tokens": 220,
+        "reasoning_output_tokens": 100,
+        "total_tokens": 58180,
+        "non_cached_input_tokens": 3176
+      },
+      "platform_quota_accounting": "unknown; observed usage is not proof of subscription charge"
+    }
+  },
+  "parent_model": {
+    "model": "gpt-6-astra",
+    "reasoning": "low"
+  },
+  "parent_thread_id": "01a08531-1291-74b2-a5a3-2226ca2b0887",
+  "parent_turn_id": "01a08541-16cb-7361-8828-1d5a8e2184a7",
+  "parent_setup_and_common_plan": {
+    "model_responses": 10,
+    "input_tokens": 1322474,
+    "cached_input_tokens": 1298560,
+    "output_tokens": 9657,
+    "reasoning_output_tokens": 3713,
+    "total_tokens": 1332131,
+    "non_cached_input_tokens": 23914
+  },
+  "inter_condition_parent_overhead": {
+    "model_responses": 0,
+    "input_tokens": 0,
+    "cached_input_tokens": 0,
+    "output_tokens": 0,
+    "reasoning_output_tokens": 0,
+    "total_tokens": 0,
+    "non_cached_input_tokens": 0
+  },
+  "post_run_analysis_parent_checkpoint": {
+    "model_responses": 7,
+    "input_tokens": 1116233,
+    "cached_input_tokens": 1098112,
+    "output_tokens": 12855,
+    "reasoning_output_tokens": 5083,
+    "total_tokens": 1129088,
+    "non_cached_input_tokens": 18121
+  },
+  "full_parent_turn_checkpoint": {
+    "model_responses": 33,
+    "input_tokens": 4776278,
+    "cached_input_tokens": 4721152,
+    "output_tokens": 29786,
+    "reasoning_output_tokens": 11299,
+    "total_tokens": 4806064,
+    "non_cached_input_tokens": 55126
+  },
+  "checkpoint_timestamp": "2026-09-09T08:40:16.543Z",
+  "accounting": "Each response ID counted once, matching owning thread ID. Reasoning tokens are included in output, not added again. Parent phase windows include extraction/dispatch, waiting, verification/review and repair. Setup/common planning is separate and shared, not claimed free; cannot separate implementation engineering from plan preparation in this session. Post-run analysis is retained separately through this checkpoint; final response usage is not yet known.",
+  "quota_savings": null,
+  "limits": [
+    "Single small synthetic case, sequential order not randomized",
+    "Native reads full brief from a file with fork_turns=1; Localoud receives extracted capsule in an independent worker; route and context delivery both differ",
+    "Original Astra parent retains a large live conversation; this is not an isolated parent benchmark",
+    "Same fixed six cases plus two review-derived counterexamples; one retained native repair, no restart",
+    "Common planning/setup cannot be billed to one condition precisely",
+    "Other task usage observed; account/device isolation not established",
+    "Used-percent values are integer in observed snapshots; precision, rounding and update lag unknown",
+    "Platform checks and post-run reporting have separately recorded overhead; billable attribution unavailable",
+    "Total or non-cached token differences are not subscription utilization savings"
+  ],
+  "session_sources": {
+    "parent": {
+      "path": "/Users/miyajimakazuhiro/.codex/sessions/2026/09/09/rollout-2026-09-09T17-03-00-01a08531-1291-74b2-a5a3-2226ca2b0887.jsonl",
+      "id": "01a08531-1291-74b2-a5a3-2226ca2b0887"
+    },
+    "native": {
+      "path": "/Users/miyajimakazuhiro/.codex/sessions/2026/09/09/rollout-2026-09-09T17-26-50-01a08546-e14c-7a70-832c-c46f1717eb4d.jsonl",
+      "id": "01a08546-e14c-7a70-832c-c46f1717eb4d"
+    },
+    "localoud": {
+      "path": "/Users/miyajimakazuhiro/.codex/sessions/2026/09/09/rollout-2026-09-09T17-31-00-01a0854a-b42e-70e2-8e58-0bac9f3c7650.jsonl",
+      "id": "01a0854a-b42e-70e2-8e58-0bac9f3c7650"
+    }
+  },
+  "implementation_sha256": {
+    "crates/protocol-types/src/lib.rs": "85df8045837bdf93a79940edca06a4205a8b812cbbf341fd2ee845ffce8315e5",
+    "crates/provider-codex/src/lib.rs": "6efa384fd556dc20fea19dd92a69f47b32d454cc026efad74e455c63d725f39b",
+    "crates/hub-runtime/src/lib.rs": "273a4675f0af420683d3b879648162c8791da32f32a2a14c5c20304e7d143433",
+    "crates/hub-runtime/src/workers.rs": "d9fe10cc7b6e22ee2d63be48d34572b8ad1a0350aa3cfa6256f1473fc5159726",
+    "crates/hub-runtime/src/plan.rs": "a4249da2678236353c272f3ce45d5a99e6dd90390e7ef5e02fb42cc7a052bc2d",
+    "crates/hub-runtime/tests/handoff.rs": "a57fddd73844aaaced8892c150311eb68215c61b555db5479da465d4845985d6",
+    "fixtures/codex-events/handoff_server.py": "8ca0826c2d609cd3b3c21bd25e1fa8a30a55b0cea68ed022b28b763a00a694a1",
+    "crates/hub-runtime/examples/handoff_worker_benchmark.rs": "077334c00eb29ed706fe1ccd25b5e20c9074745f11159648afa11b128647a565",
+    "scripts/summarize-routed-comparison.py": "a4fa7317e9cd04a886c7e2602378bd58f62dcbb04a08d8a4890a7ac3200f161b"
+  },
+  "driver_binary_sha256": "1ee427febe0fc55b28d7ff809f82eae8e97308badfc8192a90606b563fb6d8c5",
+  "local_verification": {
+    "model_and_handoff_and_reasoning_tests": "5 passed",
+    "related_library_and_lifecycle_tests": "18 passed",
+    "examples_cargo_check": "pass",
+    "git_diff_check": "pass"
+  }
+}

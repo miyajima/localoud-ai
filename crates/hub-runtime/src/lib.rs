@@ -114,10 +114,33 @@ impl Sessions {
         handler: Arc<dyn protocol_types::AgentTool>,
         tools: Vec<protocol_types::ToolDefinition>,
     ) -> Result<ThreadMapping> {
-        let thread = self
-            .provider
-            .start_worker(worktree.path.clone(), tools, handler)
-            .await?;
+        self.create_worker_with_options(task, worktree, handler, tools, None, None)
+            .await
+    }
+    pub async fn create_worker_with_options(
+        &self,
+        task: &hub_core::Task,
+        worktree: &hub_core::Worktree,
+        handler: Arc<dyn protocol_types::AgentTool>,
+        tools: Vec<protocol_types::ToolDefinition>,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> Result<ThreadMapping> {
+        if model.is_none() && effort.is_some() {
+            bail!("Worker reasoning requires an explicit model");
+        }
+        let thread = match model {
+            Some(model) => {
+                self.provider
+                    .start_worker_with_model(worktree.path.clone(), tools, handler, model, effort)
+                    .await?
+            }
+            None => {
+                self.provider
+                    .start_worker(worktree.path.clone(), tools, handler)
+                    .await?
+            }
+        };
         let mapping = ThreadMapping {
             id: HubThreadId::default(),
             project_id: task.project_id,
@@ -133,6 +156,12 @@ impl Sessions {
                 .map_err(|_| anyhow!("database lock poisoned"))?;
             store.save_thread(&mapping)?;
             store.bind_worker_thread(mapping.id, task.id, hub_core::WorkerId::default())?;
+            if let Some(model) = model {
+                store.set_setting(&format!("thread_model:{}", mapping.id), model)?;
+                if let Some(effort) = effort {
+                    store.set_setting(&format!("thread_reasoning:{}", mapping.id), effort)?;
+                }
+            }
         }
         self.actor(mapping.id).await.lock().await.reconciled = true;
         Ok(mapping)

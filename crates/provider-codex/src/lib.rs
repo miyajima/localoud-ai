@@ -533,6 +533,36 @@ impl CodingAgentProvider for CodexProvider {
         Ok(thread)
     }
 
+    async fn start_worker_with_model(
+        &self,
+        root: PathBuf,
+        tools: Vec<ToolDefinition>,
+        handler: Arc<dyn AgentTool>,
+        model: &str,
+        effort: Option<&str>,
+    ) -> Result<ProviderThread> {
+        self.validate_model_reasoning(model, effort).await?;
+        let tools: Vec<_> = tools.into_iter().map(|t| json!({"type":"function","name":t.name,"description":t.description,"inputSchema":t.schema})).collect();
+        let v = self.request("thread/start", json!({
+            "cwd":root,"model":model,"sandbox":"workspace-write",
+            "approvalPolicy":"on-request","dynamicTools":tools,"runtimeWorkspaceRoots":[root]
+        })).await?;
+        if v["model"].as_str() != Some(model) {
+            bail!("Worker model mismatch; no task instructions were sent");
+        }
+        let thread = ProviderThread {
+            id: v["thread"]["id"]
+                .as_str()
+                .context("missing worker thread ID")?
+                .into(),
+        };
+        self.handlers
+            .lock()
+            .await
+            .insert(thread.id.clone(), handler);
+        Ok(thread)
+    }
+
     async fn attach_worker(
         &self,
         thread: &ProviderThread,

@@ -45,6 +45,17 @@ pub trait CodingAgentProvider: Send + Sync {
         handler: std::sync::Arc<dyn AgentTool>,
     ) -> Result<ProviderThread>;
 
+    async fn start_worker_with_model(
+        &self,
+        _root: PathBuf,
+        _tools: Vec<ToolDefinition>,
+        _handler: std::sync::Arc<dyn AgentTool>,
+        _model: &str,
+        _effort: Option<&str>,
+    ) -> Result<ProviderThread> {
+        anyhow::bail!("Explicit worker model selection is unavailable for this provider")
+    }
+
     async fn attach_worker(
         &self,
         thread: &ProviderThread,
