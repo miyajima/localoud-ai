@@ -7,6 +7,10 @@ Localoud是Local与Cloud的组合名称。Localoud AI是开源的桌面编码工
 这是一个本地优先的桌面编码工作区。Rust负责生命周期和持久化，Tauri提供工作区界面。Codex app-server在隔离的Git worktree中执行编码任务。[Spark-X2.5-4B-MLX-8bit](https://huggingface.co/abenzerps/Spark-X2.5-4B-MLX-8bit)负责本地路由、小规模编辑、摘要和提取；Astra可按需规划和审查结果。worker从明确的上下文胶囊开始，不会隐式复制父会话。
 
 
+## 支持开发 ☕
+
+Localoud AI 是免费开源软件。如果它让你的开发工作更轻松，欢迎[请我喝杯咖啡](https://buymeacoffee.com/miyajima)。你的支持将用于开发、模型测试和持续改进。支持完全自愿。
+
 ## 为什么选择 Localoud
 
 Localoud把日常、范围明确的编码工作留在本机处理，同时为规模更大或更复杂的工作提供清晰的Codex和Astra路径。你可以查看当前选择的模型，把改动限制在隔离的worktree中，在本地保存任务状态，并在应用改动前审查边界。

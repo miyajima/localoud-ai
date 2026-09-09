@@ -7,6 +7,10 @@ Localoud combines Local + Cloud. Localoud AI is an open-source desktop coding wo
 Local-first desktop coding workspace. Rust owns lifecycle and persistence; Tauri provides the workspace UI. Codex app-server executes coding tasks in isolated Git worktrees. [Spark-X2.5-4B-MLX-8bit](https://huggingface.co/abenzerps/Spark-X2.5-4B-MLX-8bit) handles local routing, small edits, summaries and extraction; optional Astra plans and reviews the result. Workers start from explicit context capsules, never an implicit copy of the parent conversation.
 
 
+## Support development ☕
+
+Localoud AI is free and open source. If it makes your workflow better, consider [buying me a coffee](https://buymeacoffee.com/miyajima). Your support helps cover development, model testing, and ongoing improvements. Support is entirely optional.
+
 ## Why Localoud
 
 Localoud keeps routine, bounded coding work close to your machine while giving larger or more involved work a clear path to Codex and Astra. You can see which model is selected, keep changes inside an isolated worktree, preserve the task state locally, and review the boundary before a change is applied.
