@@ -1,5 +1,7 @@
 # Local MLX service (default: Spark X-2.5 8bit)
 
+[日本語版](README.ja.md) | [简体中文版](README.zh-CN.md)
+
 Uses the community MLX 8-bit conversion `abenzerps/Spark-X2.5-4B-MLX-8bit` at the pinned revision in `model-revision.txt`, with XHToken's architecture adapter pinned in `requirements.txt`. No downloaded model Python is executed. Model weight SHA-256 is checked before loading. The package's strict tensor loading and an actual generation test are separate checks.
 
 ```sh
