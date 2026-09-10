@@ -653,6 +653,7 @@ fn main() {
             workspace_ui::open_web_link,
             workspace_ui::rename_thread,
             workspace_ui::archived_threads,
+            workspace_ui::sync_archived_sessions,
             workspace_ui::manage_session,
             workspace_ui::unregister_project,
             workspace_ui::manage_project,

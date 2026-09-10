@@ -45,6 +45,7 @@ let projects: Project[] = [], threads: Thread[] = [], activeProject: string | nu
 const views = new Map<string, View>();
 const tabs = ['Chat', 'Plan', 'Diff', 'Agents', 'Terminal', 'Context', 'Usage'];
 let taskFilter = '';
+function archivedThread(){return !!activeThread&&archivedThreads.includes(activeThread);}
 function autonomousMode(){return composerMode()==='autonomous';}
 function autonomousThread(){return threads.find(t=>t.id===activeThread)?.provider==='autonomous';}
 function workflowThread(){return threads.find(t=>t.id===activeThread)?.provider==='workflow';}
@@ -262,7 +263,7 @@ function render() {
   stop.setAttribute('aria-busy',String(stopping));
   send.hidden=autonomousMode()||!!v?.running;
   if(autonomousMode()&&!activeThread){send.textContent='依頼をコピー';send.setAttribute('aria-label','ChatGPTへの依頼をコピー');send.title='ChatGPTへの依頼をコピー';send.disabled=busy||!activeProject||!input.value.trim();input.hidden=false;input.placeholder='何を実現したいですか？ 条件や制約もここに書けます。';}
-  document.querySelector<HTMLElement>('main>footer')!.hidden=activeTab!=='Chat'||autonomousMode()||legacyThread();
+  document.querySelector<HTMLElement>('main>footer')!.hidden=activeTab!=='Chat'||autonomousMode()||legacyThread()||archivedThread();
   more.hidden=autonomousMode();
   renderContent();
 }
@@ -418,6 +419,7 @@ async function selectThread(id: string) {
   if(activeProject)void composer?.seedHistory(view(id).messages.filter(m=>m.role==='user').map(m=>m.text).slice(-10),activeProject);
 }
 async function send(approvedRoute?:AutoPreview) {
+  if(archivedThread()){error('アーカイブを解除してから送信してください。');return;}
   if(legacyThread()){error('旧ブラウザ方式の記録は閲覧専用です。新しいタスクで開始してください。');return;}
   if(autonomousMode()){browserWorkspace.showBrowser();return;}
   if(busy||preparingComposer)return;preparingComposer=true;
@@ -545,6 +547,7 @@ window.addEventListener('error', e => error(e.message));
 render();
 if (isTauri()) {
   void refreshModels();
+  void invoke<string[]>('sync_archived_sessions').then(failures=>{if(failures.length)error(failures.join('\n'));}).catch(e=>error(String(e)));
   await listen<JournalEvent>('hub-event', e => applyEvent(e.payload));
   await listen<number>('hub-stream-gap', () => { if (activeThread) { view(activeThread).needsResume = true; error('イベント配信が遅れました。「再開・状態を確認」で保存済み履歴を読み直してください。'); render(); } });
   try { [projects, threads, archivedThreads] = await Promise.all([invoke<Project[]>('projects'), invoke<Thread[]>('threads'),invoke<string[]>('archived_threads')]); activeProject = projects.find(p=>p.id===ui.project)?.id || projects[0]?.id || null; activeTab=tabs.includes(ui.tab||'')?ui.tab!:'Chat';planText=activeProject?ui.plans![activeProject]||planText:planText;restoreDraft();render();if(ui.thread && threads.some(t=>t.id===ui.thread&&t.project_id===activeProject))await selectThread(ui.thread);if(activeTab==='Plan')void refreshGraph();if(activeTab==='Diff'&&activeThread)void refreshDiff(activeThread);if(activeTab==='Context'&&activeThread)void refreshContext(activeThread);if(activeTab==='Usage')void refreshUsage(); } catch (e) { error(String(e)); }
@@ -660,7 +663,7 @@ document.querySelector('#lifecycle-close')!.addEventListener('click',()=>documen
 function openLifecycle(kind:'project'|'session',id:string){
   if(busy)return;const dialog=document.querySelector<HTMLDialogElement>('#lifecycle-dialog')!;
   document.querySelector('#lifecycle-title')!.textContent=kind==='project'?projects.find(p=>p.id===id)?.name||'プロジェクト':threads.find(t=>t.id===id)?.title||'セッション';
-  document.querySelector('#lifecycle-description')!.textContent=kind==='project'?'アプリから登録を解除します。フォルダとファイルは残り、同じフォルダを登録するとセッションも戻ります。':'アーカイブは後から復元できます。削除すると、このアプリの会話履歴が削除されます。プロバイダー側の会話と作業ファイルは残ります。';
+  document.querySelector('#lifecycle-description')!.textContent=kind==='project'?'アプリから登録を解除します。フォルダとファイルは残り、同じフォルダを登録するとセッションも戻ります。':'アーカイブはCodex側にも反映され、後から復元できます。削除すると、このアプリの会話履歴が削除されます。プロバイダー側の会話と作業ファイルは残ります。';
   const actions=document.querySelector('#lifecycle-actions')!;actions.replaceChildren();document.querySelector('#lifecycle-error')!.textContent='';
   const items=kind==='project'?[['unregister','登録を解除']]:[['rename','名前を変更'],[archivedThreads.includes(id)?'restore':'archive',archivedThreads.includes(id)?'アーカイブから復元':'アーカイブ'],['delete','履歴を削除']];
   for(const [action,label] of items){const button=document.createElement('button');button.textContent=label;button.onclick=async()=>{
@@ -668,7 +671,7 @@ function openLifecycle(kind:'project'|'session',id:string){
     button.disabled=true;
     try{
       if(action==='unregister'){await invoke('unregister_project',{projectId:id});projects=await invoke<Project[]>('projects');if(activeProject===id){saveDraft();activeProject=projects[0]?.id||null;activeThread=null;restoreDraft();rememberSelection();}}
-      else {await invoke('manage_session',{threadId:id,action});if(action==='delete'){views.delete(id);ui.pins=ui.pins!.filter(p=>p!==id);if(activeThread===id){activeThread=null;restoreDraft();rememberSelection();}}else if(action==='archive'&&activeThread===id){activeThread=null;restoreDraft();rememberSelection();}await refreshThreads();}
+      else {await invoke('manage_session',{threadId:id,action});if(action==='delete'){views.delete(id);ui.pins=ui.pins!.filter(p=>p!==id);if(activeThread===id){activeThread=null;restoreDraft();rememberSelection();}}else if(action==='archive'&&activeThread===id){activeThread=null;restoreDraft();rememberSelection();}await refreshThreads();if(action==='restore'&&activeThread===id)await selectThread(id);}
       dialog.close();render();
     }catch(e){document.querySelector('#lifecycle-error')!.textContent=String(e);}finally{button.disabled=false;}
   };actions.append(button);}

@@ -1,6 +1,7 @@
 """Deterministic app-server fixture: no model, network, or repository writes."""
 import json, sys
 thread = {"id": "fixture-thread", "turns": []}
+archived = False
 for line in sys.stdin:
     v = json.loads(line)
     method = v.get("method")
@@ -12,7 +13,25 @@ for line in sys.stdin:
     elif method == "thread/start":
         thread["model"] = p.get("model", "fixture-a")
         result = {"thread": thread,"model":thread["model"]}
-    elif method in ("thread/read", "thread/resume"): result = {"thread": thread,"model":p.get("model",thread.get("model","fixture-a"))}
+    elif method == "thread/archive":
+        if "--reject-archive" in sys.argv or any(t["status"] == "inProgress" for t in thread["turns"]):
+            print(json.dumps({"id":v["id"],"error":{"message":"archive refused"}}),flush=True)
+            continue
+        assert p["threadId"] == thread["id"]
+        archived = True
+        result = {}
+    elif method == "thread/unarchive":
+        if "--reject-unarchive" in sys.argv:
+            print(json.dumps({"id":v["id"],"error":{"message":"restore refused"}}),flush=True)
+            continue
+        assert p["threadId"] == thread["id"]
+        archived = False
+        result = {"thread":thread}
+    elif method in ("thread/read", "thread/resume"):
+        if archived and method == "thread/resume":
+            print(json.dumps({"id":v["id"],"error":{"message":"archived thread must not be resumed"}}),flush=True)
+            continue
+        result = {"thread": thread,"model":p.get("model",thread.get("model","fixture-a"))}
     elif method == "turn/start":
         if p.get("input", [{}])[0].get("text") == "verify reasoning":
             assert p.get("model") == "fixture-b", "wrong model sent"

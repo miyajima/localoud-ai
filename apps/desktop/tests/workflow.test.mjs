@@ -33,7 +33,8 @@ async function fixture({saved,existing=false,connected=true,duplicate=false,impo
    case 'worker_insights':return {review:null,recovery:null};
    case 'projects':return state.projects||[project];
    case 'threads':return state.threads;
-   case 'archived_threads':return [];
+   case 'sync_archived_sessions':return [];
+   case 'archived_threads':return state.archived||[];
    case 'thread_models':return state.threads.some(t=>t.provider==='codex')?{'direct-task':'codex-implementation'}:{};
    case 'thread_reasoning':return {};
    case 'workflow_snapshot':return {status:'legacy_read_only',running:state.running,messages:state.messages,phase:state.phase,model:state.model,targets:state.targets,handoff:state.phase==='review'?'要件・プラン・実装結果・作業差分':'これまでの会話'};
@@ -293,5 +294,16 @@ test('a saved explicit model remains explicit and routing failure preserves the 
   f.select.value='codex:codex-implementation';f.input.value='指定したモデルで修正';await f.api.send();
   assert.ok(!f.calls.some(c=>c.command==='preview_auto_route'));assert.equal(f.calls.find(c=>c.command==='create_routed_task').args.request.model,'codex-implementation');
   assert.equal(f.input.value,'指定したモデルで修正');assert.equal(f.api.activeId(),null);
+ }finally{f.close();}
+});
+
+test('archived session history cannot send until explicitly restored',async()=>{
+ const f=await fixture();try{
+  f.select.value='codex:codex-implementation';f.input.value='履歴を確認';await f.api.send();
+  f.state.archived=['direct-task'];await f.api.refreshThreads();await f.api.selectThread('direct-task');
+  assert.equal(f.document.querySelector('main>footer').hidden,true);
+  const count=f.calls.filter(c=>c.command==='send_composed_turn').length;
+  f.input.value='送信しない';await f.api.send();
+  assert.equal(f.calls.filter(c=>c.command==='send_composed_turn').length,count);assert.match(f.document.querySelector('#error').textContent,/アーカイブを解除/);
  }finally{f.close();}
 });

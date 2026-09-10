@@ -172,6 +172,11 @@ impl Sessions {
         let mut state = actor.lock().await;
         state.reconciled = false;
         let mut m = self.mapping(id)?;
+        if self.is_archived(id)? {
+            // Viewing archived history must not reload/claim the provider thread.
+            state.active = None;
+            return self.provider.read_thread(&ProviderThread { id: m.provider_thread_id }).await;
+        }
         let root = self
             .store
             .lock()
@@ -258,6 +263,7 @@ impl Sessions {
         }
         let actor = self.actor(id).await;
         let mut state = actor.lock().await;
+        anyhow::ensure!(!self.is_archived(id)?, "アーカイブを解除してから実行してください。");
         if !state.reconciled {
             bail!("resume the thread to reconcile provider state first");
         }
@@ -397,11 +403,81 @@ impl Sessions {
         state.reconciled = true;
         Ok(())
     }
+
+    fn is_archived(&self, id: HubThreadId) -> Result<bool> {
+        Ok(self.store.lock().map_err(|_| anyhow!("database lock poisoned"))?
+            .archived_threads()?.contains(&id.to_string()))
+    }
+
+    pub async fn set_archived(&self, id: HubThreadId, archived: bool) -> Result<()> {
+        let actor = self.actor(id).await;
+        let mut state = actor.lock().await;
+        let mapping = self.mapping(id)?;
+        self.store.lock().map_err(|_| anyhow!("database lock poisoned"))?
+            .check_threads_idle(&[id])?;
+        let thread = ProviderThread { id: mapping.provider_thread_id };
+        // read, never resume: check provider state without acquiring a new runtime.
+        let snapshot = self.provider.read_thread(&thread).await?;
+        anyhow::ensure!(snapshot.active_turn.is_none(), "実行完了後にアーカイブを操作してください。");
+        state.reconciled = false;
+        if archived {
+            self.provider.archive_thread(&thread).await?;
+        } else {
+            self.provider.unarchive_thread(&thread).await?;
+        }
+        state.active = None;
+        let store = self.store.lock().map_err(|_| anyhow!("database lock poisoned"))?;
+        // A failed provider operation must not appear as a successful local archive.
+        store.set_thread_archived(id, archived)?;
+        store.set_setting(&format!("codex_archive_synced:{id}"), if archived { "true" } else { "false" })?;
+        Ok(())
+    }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     use provider_codex::CodexProvider;
+    #[tokio::test]
+    async fn archive_sync_preserves_history_and_failed_provider_operations() -> Result<()> {
+        for rejection in ["", "--reject-archive", "--reject-unarchive"] {
+            let dir = tempfile::tempdir()?;
+            assert!(std::process::Command::new("git").arg("init").arg(dir.path()).output()?.status.success());
+            let store = Arc::new(StdMutex::new(Store::open(&dir.path().join("hub.db"))?));
+            let project = store.lock().unwrap().register_project(dir.path())?;
+            let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/codex-events/fake_server.py");
+            let provider = Arc::new(CodexProvider::spawn_command("python3", &[script, rejection]).await?);
+            let sessions = Sessions::new(store.clone(), provider.clone());
+            let thread = sessions.create(project.id, "archive fixture".into()).await?;
+            // Provider activity may be newer than the local database.
+            let external_turn = provider.start_turn(&ProviderThread { id: thread.provider_thread_id.clone() }, "external activity".into()).await?;
+            assert!(sessions.set_archived(thread.id, true).await.is_err());
+            assert!(store.lock().unwrap().archived_threads()?.is_empty());
+            provider.interrupt_turn(&external_turn).await?;
+            let result = sessions.set_archived(thread.id, true).await;
+            if rejection == "--reject-archive" {
+                assert!(result.is_err());
+                assert!(store.lock().unwrap().archived_threads()?.is_empty());
+                assert!(store.lock().unwrap().setting(&format!("codex_archive_synced:{}", thread.id))?.is_none());
+            } else {
+                result?;
+                assert_eq!(store.lock().unwrap().archived_threads()?, vec![thread.id.to_string()]);
+                assert_eq!(sessions.resume(thread.id).await?.thread.id, thread.provider_thread_id);
+                assert!(sessions.start(thread.id, "must not execute".into()).await.is_err());
+                let result = sessions.set_archived(thread.id, false).await;
+                if rejection == "--reject-unarchive" {
+                    assert!(result.is_err());
+                    assert_eq!(store.lock().unwrap().archived_threads()?, vec![thread.id.to_string()]);
+                } else {
+                    result?;
+                    assert!(store.lock().unwrap().archived_threads()?.is_empty());
+                    assert!(sessions.resume(thread.id).await?.active_turn.is_none());
+                    sessions.start(thread.id, "after restore".into()).await?;
+                }
+            }
+            provider.shutdown().await?;
+        }
+        Ok(())
+    }
     #[tokio::test]
     async fn mappings_survive_restart_and_start_is_serialized() -> Result<()> {
         let dir = tempfile::tempdir()?;

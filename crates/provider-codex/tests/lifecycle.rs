@@ -14,7 +14,12 @@ async fn lifecycle_stream_steer_interrupt_resume() -> anyhow::Result<()> {
     assert_eq!(event.text, "fixture output");
     p.steer_turn(&turn, "stay in scope".into()).await?;
     assert_eq!(p.read_thread(&t).await?.active_turn.unwrap().id, turn.id);
+    assert!(p.archive_thread(&t).await.is_err());
     p.interrupt_turn(&turn).await?;
+    p.archive_thread(&t).await?;
+    assert!(p.read_thread(&t).await?.active_turn.is_none());
+    assert!(p.resume_thread(&t, root.clone()).await.is_err());
+    p.unarchive_thread(&t).await?;
     assert!(p.resume_thread(&t, root).await?.active_turn.is_none());
     p.shutdown().await?;
     Ok(())

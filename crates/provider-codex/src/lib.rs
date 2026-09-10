@@ -545,6 +545,20 @@ impl CodexProvider {
 }
 #[async_trait]
 impl CodingAgentProvider for CodexProvider {
+    async fn archive_thread(&self, thread: &ProviderThread) -> Result<()> {
+        // Archive through the owning app-server: local metadata alone does not
+        // release its runtime or move the Codex rollout into the archive.
+        self.request("thread/archive", json!({"threadId":thread.id}))
+            .await?;
+        self.handlers.lock().await.remove(&thread.id);
+        Ok(())
+    }
+    async fn unarchive_thread(&self, thread: &ProviderThread) -> Result<()> {
+        let result = self.request("thread/unarchive", json!({"threadId":thread.id}))
+            .await?;
+        anyhow::ensure!(result["thread"]["id"].as_str() == Some(thread.id.as_str()), "Restored thread ID does not match");
+        Ok(())
+    }
     async fn start_worker(
         &self,
         root: PathBuf,

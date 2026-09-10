@@ -80,6 +80,12 @@ pub trait CodingAgentProvider: Send + Sync {
         anyhow::bail!("Pinned model resume is unavailable for this provider")
     }
     async fn read_thread(&self, thread: &ProviderThread) -> Result<ThreadSnapshot>;
+    async fn archive_thread(&self, _thread: &ProviderThread) -> Result<()> {
+        anyhow::bail!("Thread archiving is unavailable for this provider")
+    }
+    async fn unarchive_thread(&self, _thread: &ProviderThread) -> Result<()> {
+        anyhow::bail!("Thread restoration is unavailable for this provider")
+    }
     async fn start_turn(&self, thread: &ProviderThread, text: String) -> Result<ProviderTurn>;
     async fn start_turn_with_reasoning(
         &self,
