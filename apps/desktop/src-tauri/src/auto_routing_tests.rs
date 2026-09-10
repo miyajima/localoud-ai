@@ -2,7 +2,7 @@ use super::*;
 use hub_db::Store;
 use hub_events::EventBus;
 use hub_runtime::local_worker::LocalExecutor;
-use provider_spark::{LocalServiceConfig, SparkProvider};
+use provider_spark::{LocalProtocol, LocalServiceConfig, SparkProvider};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
@@ -91,6 +91,7 @@ async fn fixture() -> Fixture {
         model_id: "fixture/local".into(),
         display_name: "Fixture".into(),
         quantization_bits: 8,
+        protocol: LocalProtocol::Dedicated,
     };
     let bus = EventBus::new(store.clone());
     let local = LocalExecutor {
@@ -170,6 +171,31 @@ async fn classifier_uses_the_local_difficulty_protocol_and_records_usage() {
     result.validate().unwrap();
     assert_eq!(result.difficulty, 1);
     assert_eq!(f.state.store.lock().unwrap().usage().unwrap().len(), 1);
+    let history = read_difficulty_history(f.project, &f.state).unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].classifier.model, "fixture/local");
+    assert_eq!(history[0].quantization_bits, Some(8));
+    assert_eq!(history[0].assessment.as_ref().unwrap().difficulty, 1);
+    assert!(history[0].valid);
+    assert!(history[0].error.is_none());
+
+    let replacement = ModelTarget {
+        provider: ModelProvider::Codex,
+        model: "fixture/replacement".into(),
+        reasoning: Some("low".into()),
+    };
+    let mut unreliable = assessment();
+    unreliable.confidence = 0.5;
+    let repeated = Ok(unreliable);
+    record_difficulty_history(f.project, &route.input, &replacement, &repeated, &f.state).unwrap();
+    let history = read_difficulty_history(f.project, &f.state).unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].classifier.model, "fixture/local");
+    assert_eq!(history[1].classifier.model, "fixture/replacement");
+    assert_eq!(history[0].input_sha256, history[1].input_sha256);
+    assert_eq!(history[1].quantization_bits, None);
+    assert!(!history[1].valid);
+    assert!(history[1].error.is_some());
     assert!(f.state.connection.lock().await.is_none());
 }
 #[tokio::test]

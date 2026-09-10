@@ -7,7 +7,11 @@ use protocol_types::local::{
     difficulty_prompt, difficulty_schema, DifficultyAssessment, RoutingInput,
 };
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, Instant};
+use sha2::{Digest, Sha256};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+const DIFFICULTY_HISTORY_LIMIT: usize = 50;
+const DIFFICULTY_RUBRIC_VERSION: u8 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutoPreview {
@@ -24,6 +28,20 @@ pub struct AutoPreview {
     pub needs_plan: bool,
     pub confirm_before_run: bool,
     pub manual_override: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DifficultyHistoryEntry {
+    pub id: String,
+    pub recorded_at_ms: u64,
+    pub rubric_version: u8,
+    pub input_sha256: String,
+    pub input: RoutingInput,
+    pub classifier: ModelTarget,
+    pub quantization_bits: Option<u8>,
+    pub assessment: Option<DifficultyAssessment>,
+    pub valid: bool,
+    pub error: Option<String>,
 }
 #[derive(Clone)]
 pub struct PreparedRoute {
@@ -43,6 +61,74 @@ fn saved_settings(state: &AppState) -> Result<Option<String>, String> {
         .setting("auto_routing_settings")
         .map_err(|e| e.to_string())
 }
+
+fn difficulty_history_key(project: ProjectId) -> String {
+    format!("difficulty_history:{project}")
+}
+
+fn read_difficulty_history(
+    project: ProjectId,
+    state: &AppState,
+) -> Result<Vec<DifficultyHistoryEntry>, String> {
+    state
+        .store
+        .lock()
+        .map_err(|e| e.to_string())?
+        .setting(&difficulty_history_key(project))
+        .map_err(|e| e.to_string())?
+        .map(|value| serde_json::from_str(&value).map_err(|e| e.to_string()))
+        .unwrap_or_else(|| Ok(Vec::new()))
+}
+
+fn record_difficulty_history(
+    project: ProjectId,
+    input: &RoutingInput,
+    classifier: &ModelTarget,
+    result: &Result<DifficultyAssessment, String>,
+    state: &AppState,
+) -> Result<(), String> {
+    let error = match result {
+        Ok(assessment) => assessment.validate().err().map(|e| e.to_string()),
+        Err(error) => Some(error.clone()),
+    };
+    let input_bytes = serde_json::to_vec(input).map_err(|e| e.to_string())?;
+    let recorded_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64;
+    let entry = DifficultyHistoryEntry {
+        id: TaskId::default().to_string(),
+        recorded_at_ms,
+        rubric_version: DIFFICULTY_RUBRIC_VERSION,
+        input_sha256: format!("{:x}", Sha256::digest(&input_bytes)),
+        input: input.clone(),
+        classifier: classifier.clone(),
+        quantization_bits: (classifier.provider == ModelProvider::Local)
+            .then_some(state.local_config.quantization_bits),
+        assessment: result.as_ref().ok().cloned(),
+        valid: result.is_ok() && error.is_none(),
+        error,
+    };
+    let key = difficulty_history_key(project);
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    let mut history: Vec<DifficultyHistoryEntry> = store
+        .setting(&key)
+        .map_err(|e| e.to_string())?
+        .map(|value| serde_json::from_str(&value).map_err(|e| e.to_string()))
+        .unwrap_or_else(|| Ok(Vec::new()))?;
+    history.push(entry);
+    if history.len() > DIFFICULTY_HISTORY_LIMIT {
+        history.drain(..history.len() - DIFFICULTY_HISTORY_LIMIT);
+    }
+    store
+        .set_setting(
+            &key,
+            &serde_json::to_string(&history).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())
+}
+
 async fn read_settings(state: &AppState) -> Result<AutoSettings, String> {
     if let Some(value) = saved_settings(state)? {
         let config: AutoSettings = serde_json::from_str(&value).map_err(|e| e.to_string())?;
@@ -139,7 +225,7 @@ pub async fn set_auto_settings(
         )
         .map_err(|e| e.to_string())
 }
-async fn classify(
+async fn classify_once(
     project: ProjectId,
     input: &RoutingInput,
     config: &AutoSettings,
@@ -192,6 +278,17 @@ async fn classify(
             serde_json::from_value(value).map_err(|e| e.to_string())
         }
     }
+}
+
+async fn classify(
+    project: ProjectId,
+    input: &RoutingInput,
+    config: &AutoSettings,
+    state: &AppState,
+) -> Result<DifficultyAssessment, String> {
+    let result = classify_once(project, input, config, state).await;
+    record_difficulty_history(project, input, &config.classifier, &result, state)?;
+    result
 }
 async fn target_status(
     target: &ModelTarget,

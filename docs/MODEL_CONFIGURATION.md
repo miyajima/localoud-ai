@@ -30,7 +30,7 @@
 | 接続先 | `http://127.0.0.1:8765` |
 | 量子化ビット数 | 8 |
 
-Localoud AI の「接続設定 → ローカルモデル」で変更します。保存前に接続先の `/health` が返す ID・ready 状態を照合し、量子化ビット数を自動取得します。ビット数は手入力しません。取得値は実行時のモデル照合に使用し、量子化や推論品質を変更する設定ではありません。設定はアプリの SQLite に保存され、アプリ再起動後に反映されます。推論結果でもモデル ID とビット数を照合し、使用量は設定された実モデル ID で記録します。
+Localoud AI の「接続設定 → ローカルモデル」で変更します。保存時に専用 API または OpenAI 互換 API を検出し、モデル ID と ready 状態を照合して量子化ビット数を自動取得します。ビット数は手入力しません。取得値は実行時のモデル照合に使用し、量子化や推論品質を変更する設定ではありません。設定はアプリの SQLite に保存され、アプリ再起動後に反映されます。推論結果でもモデル ID とビット数を照合し、使用量は設定された実モデル ID で記録します。
 
 ループバック HTTP 接続のみ対応します。URL に認証情報は入れられません。認証情報を使う別形式のプロバイダーには専用アダプターが必要です。
 
@@ -60,18 +60,15 @@ LOCAL_MODEL_CONFIG=/absolute/path/to/model.json \
 
 サービスが ready になったら、アプリ側の表示名・モデル IDを合わせて保存し、Localoud AI を再起動します。別ポートで並行して準備する場合は `SPARK_PORT` を指定し、アプリの接続先も合わせます。
 
-汎用 MLX-LM 経路は config.json のビット数、重み shard の存在、strict load を確認します。Spark のような配布元 checksum 検証は追加モデルには自動で付きません。モデルコードの `trust_remote_code` は無効です。新しいモデルの生成品質・JSON 応答適合性・メモリ使用量は別途確認が必要です。今回、追加モデルのダウンロードや実モデル比較は行っていません。
+汎用 MLX-LM 経路は config.json のビット数、重み shard の存在、strict load を確認します。Spark のような配布元 checksum 検証は追加モデルには自動で付きません。モデルコードの `trust_remote_code` は無効です。新しいモデルの生成品質・JSON 応答適合性・メモリ使用量は別途確認が必要です。OpenAI 互換経路で実測した難易度判定の固定 10 ケースは [`docs/evidence/local-difficulty-comparison-2026-09-10/RESULT.md`](evidence/local-difficulty-comparison-2026-09-10/RESULT.md) に記録しています。
 
 ## 別の推論サービスを使う場合
 
 アプリの Rust 側は `LocalModelProvider` に依存します。同梱 HTTP アダプターは、設定で接続先とモデル情報を差し替えられます。以下の契約に対応するサービスならアプリのコード変更は不要です。
 
-- `GET /health` → `status: "ready"`, `model`, `quantization_bits`
-- `POST /v1/generate` ← `model`, `task`, `messages`, `schema`, `max_tokens`, `temperature`
-- 成功応答 → `output`（要求 schema を満たす JSON）, `usage.prompt_tokens`, `usage.completion_tokens`, `latency_ms`, `model`, `quantization_bits`
-- `task` は `difficulty`, `route`, `draft_context`, `implement`, `summarize`, `review`, `retrieval_query`, `memory_extract`, `input_completion`
-
-OpenAI Responses API（`/v1/responses`）や通常の OpenAI 互換 `/v1/chat/completions` をそのまま指定することはできません。この契約への変換アダプターが必要です。互換性のため内部 crate 名・永続 provider key は `spark` を保持しますが、表示・照合・使用量のモデル名は固定していません。
+- 専用 API: `GET /health` → `status: "ready"`, `model`, `quantization_bits`; `POST /v1/generate` ← `model`, `task`, `messages`, `schema`, `max_tokens`, `temperature`; 成功応答 → `output`（要求 schema を満たす JSON）, `usage.prompt_tokens`, `usage.completion_tokens`, `latency_ms`, `model`, `quantization_bits`
+- OpenAI 互換 API: `GET /health` が `status: "ok"` または `"ready"`、`GET /v1/models` に指定したモデル ID（`meta.ftype` または ID の `Q8_0` / `q8` / `f16` などから量子化を検出）、`POST /v1/chat/completions` に構造化 JSON を要求
+- どちらの経路も `difficulty`, `route`, `draft_context`, `implement`, `summarize`, `review`, `retrieval_query`, `memory_extract`, `input_completion` を同じ `LocalModelProvider` 操作へ変換します。OpenAI Responses API（`/v1/responses`）だけのサービスは対象外です。互換性のため内部 crate 名・永続 provider key は `spark` を保持しますが、表示・照合・使用量のモデル名は固定していません。
 
 ## 今回の確認
 
