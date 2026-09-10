@@ -1,0 +1,218 @@
+{
+  "ok": true,
+  "reasoning": "off",
+  "enable_thinking": false,
+  "preserve_thinking": "auto",
+  "preserve_thinking_effective": true,
+  "reasoning_history_mode": "scoped",
+  "reasoning_parser": "qwen3",
+  "generation_mode": "mtp",
+  "depth": 3,
+  "model": "qwen35-mtplx-quality",
+  "metal_memory_caps": {
+    "applied": true,
+    "total_ram_bytes": 51539607552,
+    "total_ram_source": "sysctl_hw_memsize",
+    "memory_limit_api": "mx.set_memory_limit",
+    "memory_limit_bytes": 38654705664,
+    "memory_limit_source": "default",
+    "wired_limit_api": "mx.set_wired_limit",
+    "wired_limit_bytes": 30923764531
+  },
+  "tool_prompt_mode": "native",
+  "tool_contract_active": false,
+  "tool_contract_policy_version": "native_template_tools:agent_tail:v7",
+  "chat_template_profile": "tokenizer",
+  "chat_template_hash": "a4aee8afcf2e0711",
+  "depth_max": 3,
+  "adaptive_policy": "none",
+  "adaptive_depth_supported": true,
+  "draft_control": {
+    "supported": true,
+    "request_field": "depth",
+    "display_label": "Draft depth",
+    "default": 3,
+    "minimum": 1,
+    "maximum": 3,
+    "unit": "depth",
+    "value_labels": [
+      "D1",
+      "D2",
+      "D3"
+    ]
+  },
+  "backend_id": "qwen3_next",
+  "architecture_id": "qwen3-next-mtp",
+  "model_family": "qwen3_5",
+  "support_level": "qa_verified",
+  "model_controls": {
+    "schema_version": 1,
+    "model_ref": "/Users/miyajimakazuhiro/.cache/huggingface/hub/models--Youssofal--Qwen3.5-4B-MTPLX-Optimized-Quality/snapshots/28fefcaf858a6176dcf536163d4cd3c25e48c7b8",
+    "model_family": "qwen3_5",
+    "backend_id": "qwen3_next",
+    "architecture_id": "qwen3-next-mtp",
+    "support_level": "qa_verified",
+    "display_name": "Qwen native MTP",
+    "draft_control": {
+      "supported": true,
+      "request_field": "depth",
+      "display_label": "Draft depth",
+      "default": 3,
+      "minimum": 1,
+      "maximum": 3,
+      "unit": "depth",
+      "value_labels": [
+        "D1",
+        "D2",
+        "D3"
+      ]
+    },
+    "sampling": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "family_default_reason": "Qwen coding sampler"
+    },
+    "reasoning": {
+      "supported": true,
+      "parser": "qwen3",
+      "display_name": "Qwen think tags",
+      "modes": [
+        "auto",
+        "on",
+        "off"
+      ],
+      "default_mode": "auto",
+      "default": "auto",
+      "history_policy": "preserve_when_enabled",
+      "effort_levels": [],
+      "default_effort": null
+    },
+    "tune": {
+      "supported": true,
+      "supported_families": [
+        "qwen3_5",
+        "qwen3_6",
+        "qwen3_8",
+        "gemma4"
+      ],
+      "control_field": "depth",
+      "candidates": [
+        "AR",
+        "D1",
+        "D2",
+        "D3"
+      ],
+      "unsupported_reason": null
+    },
+    "kv_quant": {
+      "supported": true,
+      "modes": [
+        "off",
+        "q8",
+        "q4"
+      ],
+      "restart_required": true,
+      "proof_level": "unit_and_runtime_cache_validated",
+      "disabled_reason": null
+    },
+    "context_window": {
+      "supported": true,
+      "minimum": 4096,
+      "maximum": 262144,
+      "default": 262144,
+      "step": 1024,
+      "source": "runtime",
+      "unit": "tokens"
+    }
+  },
+  "reasoning_policy": {
+    "supported": true,
+    "parser": "qwen3",
+    "display_name": "Qwen think tags",
+    "modes": [
+      "auto",
+      "on",
+      "off"
+    ],
+    "default_mode": "auto",
+    "default": "auto",
+    "history_policy": "preserve_when_enabled",
+    "effort_levels": [],
+    "default_effort": null
+  },
+  "kv_quant_policy": {
+    "supported": true,
+    "modes": [
+      "off",
+      "q8",
+      "q4"
+    ],
+    "restart_required": true,
+    "proof_level": "unit_and_runtime_cache_validated",
+    "disabled_reason": null
+  },
+  "tune_policy": {
+    "supported": true,
+    "supported_families": [
+      "qwen3_5",
+      "qwen3_6",
+      "qwen3_8",
+      "gemma4"
+    ],
+    "control_field": "depth",
+    "candidates": [
+      "AR",
+      "D1",
+      "D2",
+      "D3"
+    ],
+    "unsupported_reason": null
+  },
+  "context_window_policy": {
+    "supported": true,
+    "minimum": 4096,
+    "maximum": 262144,
+    "default": 262144,
+    "step": 1024,
+    "source": "runtime",
+    "unit": "tokens"
+  },
+  "sampling_defaults": {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20,
+    "family_default_reason": "Qwen coding sampler"
+  },
+  "temperature": 0.6,
+  "top_p": 0.95,
+  "top_k": 20,
+  "presence_penalty": 0.0,
+  "frequency_penalty": 0.0,
+  "max_response_tokens": 1024,
+  "stream_interval": 1,
+  "api_key_required": false,
+  "api_key_source": "disabled_by_no_auth_flag",
+  "reasoning_effort": "auto",
+  "draft_temperature": 0.6,
+  "draft_top_p": 0.95,
+  "draft_top_k": 20,
+  "prefill_chunk_tokens": 2048,
+  "ssd_session_cache": "off",
+  "ssd_session_cache_dir": "~/.mtplx/session-bank",
+  "ssd_session_cache_max_size": "100GB",
+  "ssd_session_cache_min_prefix_tokens": 512,
+  "paged_kv_quantization": "off",
+  "restart_required_settings": [
+    "model",
+    "backend_id",
+    "context_window",
+    "paged_kv_quantization",
+    "ssd_session_cache"
+  ],
+  "ram_session_cache_policy": "bounded",
+  "ram_session_block_prefix_restore": true,
+  "ram_session_cache_max_entries": 4,
+  "ram_session_cache_max_size": "2.0G",
+  "ram_session_cache_per_session_max_size": "8.0G"
+}

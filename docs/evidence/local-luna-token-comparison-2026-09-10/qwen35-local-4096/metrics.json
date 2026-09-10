@@ -1,0 +1,14 @@
+{
+  "elapsed_seconds": 23.103485333000208,
+  "usage": {
+    "prompt_tokens": 392,
+    "completion_tokens": 2503,
+    "total_tokens": 2895,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    }
+  },
+  "requested_model": "qwen35-mtplx-quality",
+  "response_model": "qwen35-mtplx-quality",
+  "finish_reason": "stop"
+}

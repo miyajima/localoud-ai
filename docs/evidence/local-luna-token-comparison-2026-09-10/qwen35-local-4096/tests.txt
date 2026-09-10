@@ -1,0 +1,111 @@
+.FFEFFFFFF
+======================================================================
+ERROR: test_invalid_collections_and_entries (__main__.Acceptance.test_invalid_collections_and_entries) (value='1')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/miyajimakazuhiro/projects/localoud/docs/evidence/local-luna-token-comparison-2026-09-10/acceptance.py", line 43, in test_invalid_collections_and_entries
+    with self.assertRaises(ValueError): m.normalize(x)
+                                        ~~~~~~~~~~~^^^
+  File "/Users/miyajimakazuhiro/projects/localoud/docs/evidence/local-luna-token-comparison-2026-09-10/qwen35-local-4096/intervals.py", line 11, in normalize
+    for i, interval in enumerate(intervals):
+                       ~~~~~~~~~^^^^^^^^^^^
+TypeError: 'int' object is not iterable
+
+======================================================================
+FAIL: test_examples_and_boundaries (__main__.Acceptance.test_examples_and_boundaries)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/miyajimakazuhiro/projects/localoud/docs/evidence/local-luna-token-comparison-2026-09-10/acceptance.py", line 28, in test_examples_and_boundaries
+    self.assertEqual(m.subtract([(0,10)],[(2,4),(6,20)]),[(0,2),(4,6)])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [(0, 2), (4, 10)] != [(0, 2), (4, 6)]
+
+First differing element 1:
+(4, 10)
+(4, 6)
+
+- [(0, 2), (4, 10)]
+?              ^^
+
++ [(0, 2), (4, 6)]
+?              ^
+
+
+======================================================================
+FAIL: test_invalid_collections_and_entries (__main__.Acceptance.test_invalid_collections_and_entries) (value='None')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/miyajimakazuhiro/projects/localoud/docs/evidence/local-luna-token-comparison-2026-09-10/acceptance.py", line 43, in test_invalid_collections_and_entries
+    with self.assertRaises(ValueError): m.normalize(x)
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_invalid_collections_and_entries (__main__.Acceptance.test_invalid_collections_and_entries) (value='{}')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/miyajimakazuhiro/projects/localoud/docs/evidence/local-luna-token-comparison-2026-09-10/acceptance.py", line 43, in test_invalid_collections_and_entries
+    with self.assertRaises(ValueError): m.normalize(x)
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_invalid_collections_and_entries (__main__.Acceptance.test_invalid_collections_and_entries) (value='[(False, 2)]')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/miyajimakazuhiro/projects/localoud/docs/evidence/local-luna-token-comparison-2026-09-10/acceptance.py", line 43, in test_invalid_collections_and_entries
+    with self.assertRaises(ValueError): m.normalize(x)
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_invalid_collections_and_entries (__main__.Acceptance.test_invalid_collections_and_entries) (value='[(0, True)]')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/miyajimakazuhiro/projects/localoud/docs/evidence/local-luna-token-comparison-2026-09-10/acceptance.py", line 43, in test_invalid_collections_and_entries
+    with self.assertRaises(ValueError): m.normalize(x)
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_invalid_slot_arguments (__main__.Acceptance.test_invalid_slot_arguments) (window='(True, 3)')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/miyajimakazuhiro/projects/localoud/docs/evidence/local-luna-token-comparison-2026-09-10/acceptance.py", line 54, in test_invalid_slot_arguments
+    with self.assertRaises(ValueError): m.earliest_slot([],1,w)
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_seeded_oracle_and_immutability (__main__.Acceptance.test_seeded_oracle_and_immutability)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/miyajimakazuhiro/projects/localoud/docs/evidence/local-luna-token-comparison-2026-09-10/acceptance.py", line 64, in test_seeded_oracle_and_immutability
+    self.assertEqual(m.subtract(xs,ys),canonical(points(xs)-points(ys)))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [(-1, 6)] != [(-1, 0), (3, 4), (5, 6)]
+
+First differing element 0:
+(-1, 6)
+(-1, 0)
+
+Second list contains 2 additional elements.
+First extra element 1:
+(3, 4)
+
+- [(-1, 6)]
++ [(-1, 0), (3, 4), (5, 6)]
+
+======================================================================
+FAIL: test_tuple_input_and_large_integers (__main__.Acceptance.test_tuple_input_and_large_integers)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/miyajimakazuhiro/projects/localoud/docs/evidence/local-luna-token-comparison-2026-09-10/acceptance.py", line 75, in test_tuple_input_and_large_integers
+    self.assertEqual(m.earliest_slot(((n,n+2),),3,(n,n+5)),n+2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: None != 1000000000000000000000000000002
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.002s
+
+FAILED (failures=8, errors=1)

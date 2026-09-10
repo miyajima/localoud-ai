@@ -1,0 +1,25 @@
+{
+  "elapsed_seconds": 16.776934208000057,
+  "usage": {
+    "completion_tokens": 832,
+    "prompt_tokens": 403,
+    "total_tokens": 1235,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    }
+  },
+  "timings": {
+    "cache_n": 2,
+    "prompt_n": 401,
+    "prompt_ms": 206.373,
+    "prompt_per_token_ms": 0.514645885286783,
+    "prompt_per_second": 1943.0836398172241,
+    "predicted_n": 832,
+    "predicted_ms": 16558.339,
+    "predicted_per_token_ms": 19.92579903730445,
+    "predicted_per_second": 50.18619319244521
+  },
+  "requested_model": "minicpm5-2b-f16",
+  "response_model": "minicpm5-2b-f16",
+  "finish_reason": "stop"
+}

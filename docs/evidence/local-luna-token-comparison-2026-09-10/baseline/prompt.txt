@@ -1,0 +1,8 @@
+Implement module intervals.py using only Python standard library.
+Public functions: normalize(intervals), subtract(intervals, exclusions), earliest_slot(busy, duration, window).
+Intervals are half-open [start,end), represented by lists or tuples of exactly two integers. Booleans are NOT integers for this contract. Coordinates may be negative. Require start < end. Outer collections must be lists or tuples. Invalid inputs raise ValueError (not TypeError). Validate ALL inputs, including exclusions when intervals is empty and all busy entries outside the window. Never mutate inputs. Output intervals are tuples inside a list.
+normalize: return sorted disjoint union; merge overlapping AND touching intervals. Empty input yields [].
+subtract: return normalize(intervals) minus the union of exclusions; sorted nonempty disjoint intervals; touching exclusion boundaries remove no extra points. Empty input yields [] after full validation.
+earliest_slot: window is a valid single interval; duration is a positive integer excluding bool. Return the earliest integer start t such that [t,t+duration) lies inside window and does not overlap busy. Busy entries may extend outside window. Return None if no fit. Validate all arguments even if no fit is possible. Do not mutate inputs.
+Examples: normalize([(3,5),(1,3)]) == [(1,5)]; subtract([(0,10)],[(2,4),(6,20)]) == [(0,2),(4,6)]; earliest_slot([(1,3)],2,(0,5)) == 3.
+Return JSON with a single field "code" containing the complete module. No tools, file access, external sources, delegation, or prose. The caller writes and tests your returned code. Correctness and complete input validation matter.

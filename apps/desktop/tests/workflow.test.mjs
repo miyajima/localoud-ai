@@ -190,8 +190,10 @@ test('review handoff copies the exact target and waits for explicit result impor
   assert.equal(f.calls.filter(c=>c.command==='manifest_import_clipboard').length,before);
   assert.equal(f.document.querySelector('[aria-current="step"]').textContent,'4レビュー');
   assert.match(f.document.querySelector('[data-flow-action="review"]').textContent,/再コピー/);
+  assert.equal(f.document.querySelector('.flow-actions button').dataset.flowAction,'import');
   f.state.snapshot.artifact_version='version-two';await f.api.refreshAutonomous('root-session');
   assert.equal(f.document.querySelector('[data-flow-action="review"]').textContent,'レビュー依頼をコピー');
+  assert.equal(f.document.querySelector('.flow-actions button').dataset.flowAction,'review');
   assert.ok(!f.calls.some(c=>/chatgpt_send|send_turn/.test(c.command)));
  }finally{f.close();}
 });
@@ -307,3 +309,16 @@ test('archived session history cannot send until explicitly restored',async()=>{
   assert.equal(f.calls.filter(c=>c.command==='send_composed_turn').length,count);assert.match(f.document.querySelector('#error').textContent,/アーカイブを解除/);
  }finally{f.close();}
 });
+
+ test('explicit import shortcut selects overview and ignores repeats during execution',async()=>{
+ const f=await fixture();try{
+  f.api.choosePhase('autonomous');
+  const key=()=>f.document.dispatchEvent(new f.dom.window.KeyboardEvent('keydown',{key:'V',metaKey:true,shiftKey:true,bubbles:true,cancelable:true}));
+  key();await new Promise(r=>setTimeout(r,20));
+  assert.equal(f.calls.filter(c=>c.command==='manifest_import_clipboard').length,1);
+  assert.equal(f.api.activeId(),'root-session');
+  assert.match(f.document.querySelector('#content').textContent,/今回の依頼/);
+  key();await new Promise(r=>setTimeout(r,10));
+  assert.equal(f.calls.filter(c=>c.command==='manifest_import_clipboard').length,1);
+ }finally{f.close();}
+ });

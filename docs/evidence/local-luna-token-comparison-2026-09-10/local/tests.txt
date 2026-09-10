@@ -1,0 +1,51 @@
+.F..FF
+======================================================================
+FAIL: test_examples_and_boundaries (__main__.Acceptance.test_examples_and_boundaries)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/miyajimakazuhiro/projects/localoud/docs/evidence/local-luna-token-comparison-2026-09-10/acceptance.py", line 28, in test_examples_and_boundaries
+    self.assertEqual(m.subtract([(0,10)],[(2,4),(6,20)]),[(0,2),(4,6)])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [(0, 2)] != [(0, 2), (4, 6)]
+
+Second list contains 1 additional elements.
+First extra element 1:
+(4, 6)
+
+- [(0, 2)]
++ [(0, 2), (4, 6)]
+
+======================================================================
+FAIL: test_seeded_oracle_and_immutability (__main__.Acceptance.test_seeded_oracle_and_immutability)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/miyajimakazuhiro/projects/localoud/docs/evidence/local-luna-token-comparison-2026-09-10/acceptance.py", line 68, in test_seeded_oracle_and_immutability
+    self.assertEqual(m.earliest_slot(xs,d,(a,b)),expected)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: -3 != None
+
+======================================================================
+FAIL: test_tuple_input_and_large_integers (__main__.Acceptance.test_tuple_input_and_large_integers)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/miyajimakazuhiro/projects/localoud/docs/evidence/local-luna-token-comparison-2026-09-10/acceptance.py", line 74, in test_tuple_input_and_large_integers
+    self.assertEqual(m.subtract(((n,n+10),),((n+2,n+8),)),[(n,n+2),(n+8,n+10)])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [(100[57 chars]0002)] != [(100[57 chars]0002), (1000000000000000000000000000008, 10000[23 chars]010)]
+
+Second list contains 1 additional elements.
+First extra element 1:
+(1000000000000000000000000000008, 1000000000000000000000000000010)
+
+- [(1000000000000000000000000000000, 1000000000000000000000000000002)]
+?                                                                    ^
+
++ [(1000000000000000000000000000000, 1000000000000000000000000000002),
+?                                                                    ^
+
++  (1000000000000000000000000000008, 1000000000000000000000000000010)]
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.001s
+
+FAILED (failures=3)

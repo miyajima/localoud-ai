@@ -1,0 +1,13 @@
+{
+  "elapsed_seconds": 36.33237520900002,
+  "usage": {
+    "prompt_tokens": 417,
+    "completion_tokens": 1752,
+    "total_tokens": 2169,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    }
+  },
+  "model": "/Users/miyajimakazuhiro/.cache/huggingface/hub/models--abenzerps--Spark-X2.5-4B-MLX-8bit/snapshots/10d5396e7975f0647241da14d275113fa60116b3",
+  "requested_model": "/Users/miyajimakazuhiro/.cache/huggingface/hub/models--abenzerps--Spark-X2.5-4B-MLX-8bit/snapshots/10d5396e7975f0647241da14d275113fa60116b3"
+}

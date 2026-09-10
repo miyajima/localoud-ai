@@ -1,0 +1,14 @@
+{
+  "elapsed_seconds": 33.66943854200008,
+  "usage": {
+    "prompt_tokens": 392,
+    "completion_tokens": 1163,
+    "total_tokens": 1555,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    }
+  },
+  "requested_model": "mtplx-qwen38-27b-optimized-speed",
+  "response_model": "mtplx-qwen38-27b-optimized-speed",
+  "finish_reason": "stop"
+}

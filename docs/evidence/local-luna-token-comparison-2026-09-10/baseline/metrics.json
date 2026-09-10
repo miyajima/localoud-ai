@@ -1,0 +1,15 @@
+{
+  "elapsed_seconds": 124.5490430000001,
+  "returncode": 0,
+  "usage_events": [
+    {
+      "input_tokens": 14379,
+      "cached_input_tokens": 0,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 6645,
+      "reasoning_output_tokens": 5939
+    }
+  ],
+  "requested_model": "gpt-5.6-luna",
+  "reasoning": "max"
+}

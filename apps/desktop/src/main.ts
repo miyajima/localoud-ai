@@ -83,13 +83,13 @@ async function loadAutonomous(id:string){
 }
 async function sendAutonomous(){
   if(legacyThread()){error('旧ブラウザ方式の記録は閲覧専用です。新しいタスクを作成してください。');return;}
-  if(busy||!activeProject||selectedView()?.running)return;
+  if(busy||!activeProject||selectedView()?.running||archivedThread())return;
   busy=true;importingManifest=true;error('');notice('クリップボードからManifestを取り込み中…');render();
   try{
     const result=await invoke<{thread:Thread;imported:boolean}>('manifest_import_clipboard',{projectId:activeProject});
     const thread=result.thread;
     (document.querySelector('#task-mode') as HTMLSelectElement).value='autonomous';
-    delete ui.drafts![draftKey()];delete ui.planningRequests![activeProject!];activeThread=thread.id;
+    delete ui.drafts![draftKey()];delete ui.planningRequests![activeProject!];activeThread=thread.id;activeTab='Chat';
     threads=await invoke<Thread[]>('threads');threadModels[thread.id]='自動実行';
     document.querySelector<HTMLTextAreaElement>('#task-input')!.value='';composer?.clear();saveDraft();rememberSelection();browserWorkspace.showWorkspace();await refreshAutonomous(thread.id);
     if(result.imported)notice('Manifestを取り込みました。'+(threads.find(t=>t.id===thread.id)?.status==='completed'?'レビュー合格・タスク完了です。':'現在の状態: '+statusLabel(threads.find(t=>t.id===thread.id)?.status||thread.status)+'。'));
@@ -649,6 +649,7 @@ document.querySelector('#rename-cancel')!.addEventListener('click',()=> (documen
 document.querySelector('#rename-form')!.addEventListener('submit',async e=>{e.preventDefault();if(!activeThread||busy)return;const id=activeThread;busy=true;render();try{await invoke('rename_thread',{threadId:id,title:(document.querySelector('#task-name') as HTMLInputElement).value});await refreshThreads();(document.querySelector('#rename-dialog') as HTMLDialogElement).close();}catch(e){document.querySelector('#rename-error')!.textContent=String(e);}finally{busy=false;render();}});
 document.addEventListener('keydown',e=>{
   if(e.isComposing||!(e.metaKey||e.ctrlKey)||e.altKey||picking||document.querySelector('dialog[open]'))return;
+  if(e.shiftKey&&e.key.toLowerCase()==='v'&&autonomousMode()&&!archivedThread()){e.preventDefault();void sendAutonomous();return;}
   const action=({o:()=>void pickProject(),n:newTask,k:openCommands,',':()=>document.querySelector<HTMLButtonElement>('#settings')!.click(),b:toggleSidebar} as Record<string,()=>void>)[e.key.toLowerCase()];
   if(action&&!e.shiftKey){e.preventDefault();action();}
 });

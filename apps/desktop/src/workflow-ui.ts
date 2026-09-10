@@ -12,7 +12,7 @@ export function flowStage(f:Flow){
 export function flowMarkup(f:Flow){
  const index=flowStage(f),stages=f.kind==='direct'?['依頼','実行','完了']:['依頼','計画','実行','レビュー','完了'];
  const halted=['failed','interrupted','reconciliation_required'].includes(f.status);
- const action=(key:string,text:string,primary=false,disabled=false)=>`<button data-flow-action="${key}" class="${primary?'primary':''}" ${f.busy||disabled?'disabled':''}>${text}</button>`;
+ const action=(key:string,text:string,primary=false,disabled=false)=>`<button data-flow-action="${key}" ${key==='import'?'title="コピーした計画・レビューを取り込んで次へ（⌘⇧V / Ctrl+Shift+V）"':''} class="${primary?'primary':''}" ${f.busy||disabled?'disabled':''}>${text}</button>`;
  let next='',actions='';
  if(!f.project){next='プロジェクトを選ぶか、フォルダを登録して作業を始めます。';}
  else if(f.kind==='legacy'){next='旧方式の保存記録です。新しい依頼は新しいタスクで始めます。';}
@@ -27,7 +27,10 @@ export function flowMarkup(f:Flow){
  else if(index===2){next=f.status==='queued'?'計画を取り込みました。workerの開始を待っています。':f.status==='stopping'?'停止処理中です。実行状態の確定を待っています。':f.iteration&&f.iteration>1?'修正内容を実装・検証しています。完了すると再レビューへ進みます。':'計画に沿って実装・検証しています。完了するとレビューへ進みます。';actions=action('stop',f.stopping||f.status==='stopping'?'停止中…':'停止',false,f.stopping||f.status==='stopping');}
  else if(index===3){
   next=f.status==='review_rejected'?'レビューは未合格です。指摘をChatGPTで確認し、修正指示または追加レビューを受け取ります。':f.reviewRequested?'レビュー依頼をコピー済みです。ChatGPTへ貼り付け、返ってきたレビュー結果を取り込んでください。':'実装・検証が終わりました。ChatGPTへレビューを依頼し、返ってきた結果を取り込みます。';
-  actions=action('review',f.reviewRequested?'レビュー依頼を再コピー':'レビュー依頼をコピー',!f.reviewRequested,!f.version)+action('import',f.importing?'取り込み中…':'レビュー結果を取り込む',f.reviewRequested);
+  const review=action('review',f.reviewRequested?'レビュー依頼を再コピー':'レビュー依頼をコピー',!f.reviewRequested,!f.version);
+  const receive=action('import',f.importing?'取り込み中…':'結果を取り込んで次へ',f.reviewRequested);
+  actions=f.reviewRequested?receive+review:review+receive;
+  next+=' 修正指示は取り込み後に実行し、合格なら完了します。';
  }else{next='作業フォルダの成果物がレビューに合格しました。変更内容と保存先を確認できます。';actions=action('new','次のタスク',false);}
  return `<div class="flow-title"><span>${esc(f.project||'プロジェクト未選択')}${f.kind==='direct'?' · タスク':f.kind==='legacy'?' · 保存記録':''}</span><strong title="${esc(f.title)}">${esc(f.title||'新しいタスク')}</strong>${f.id?`<small title="${esc(f.id)}">ID ${esc(f.id.slice(0,8))}${f.iteration&&f.iteration>1?' · 実行 '+f.iteration+'回目':''}</small>`:''}</div><div class="flow-body">${f.iteration&&f.iteration>1?`<p class="flow-cycle">${f.iteration}回目の実行 · 実装とレビューを繰り返して確認</p>`:''}${index>=0?`<ol class="flow-stages" aria-label="作業の工程">${stages.map((stage,i)=>`<li class="${i<index||f.hasTask&&index===stages.length-1?'done':''} ${i===index?'current':''} ${i===index&&halted?'halted':''}" ${i===index?'aria-current="step"':''}><span>${i+1}</span>${stage}</li>`).join('')}</ol>`:''}<div class="flow-next"><p role="status">${esc(next)}</p><div class="flow-actions" aria-label="現在の工程の操作">${actions}</div></div></div>`;
 }

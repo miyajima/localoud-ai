@@ -1,0 +1,36 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "```python\nimport sys\n\ndef normalize(intervals):\n    if not isinstance(intervals, (list, tuple)):\n        raise ValueError(\"intervals must be a list or tuple\")\n    if len(intervals) != 0:\n        for iv in intervals:\n            if not (isinstance(iv, (list, tuple)) and len(iv) == 2):\n                raise ValueError(\"each interval must be a list or tuple of two integers\")\n            if not (isinstance(iv[0], int) and isinstance(iv[1], int)):\n                raise ValueError(\"interval bounds must be integers\")\n            if iv[0] >= iv[1]:\n                raise ValueError(\"interval start must be less than end\")\n    sorted_intervals = sorted(intervals, key=lambda x: x[0])\n    merged = []\n    for iv in sorted_intervals:\n        if not merged:\n            merged.append(iv)\n        else:\n            last = merged[-1]\n            if iv[0] <= last[1]:\n                merged[-1] = (last[0], max(last[1], iv[1]))\n            else:\n                merged.append(iv)\n    return merged\n\ndef subtract(intervals, exclusions):\n    if not isinstance(intervals, (list, tuple)):\n        raise ValueError(\"intervals must be a list or tuple\")\n    if not isinstance(exclusions, (list, tuple)):\n        raise ValueError(\"exclusions must be a list or tuple\")\n    if len(intervals) == 0:\n        if len(exclusions) == 0:\n            return []\n        else:\n            raise ValueError(\"exclusions cannot be non-empty when intervals is empty\")\n    if len(exclusions) == 0:\n        return normalize(intervals)\n    norm_intervals = normalize(intervals)\n    norm_exclusions = normalize(exclusions)\n    result = []\n    for iv in norm_intervals:\n        for ex in norm_exclusions:\n            if iv[0] < ex[1] and iv[1] > ex[0]:\n                if iv[0] < ex[0]:\n                    result.append((iv[0], ex[0]))\n                if ex[1] < iv[1]:\n                    result.append((ex[1], iv[1]))\n    return normalize(result)\n\ndef earliest_slot(busy, duration, window):\n    if not isinstance(busy, (list, tuple)):\n        raise ValueError(\"busy must be a list or tuple\")\n    if not isinstance(duration, int) or isinstance(duration, bool):\n        raise ValueError(\"duration must be an integer\")\n    if duration <= 0:\n        raise ValueError(\"duration must be positive\")\n    if not isinstance(window, (list, tuple)):\n        raise ValueError(\"window must be a list or tuple\")\n    if len(window) != 2:\n        raise ValueError(\"window must be a list or tuple of two integers\")\n    if not (isinstance(window[0], int) and isinstance(window[1], int)):\n        raise ValueError(\"window bounds must be integers\")\n    if window[0] >= window[1]:\n        raise ValueError(\"window start must be less than end\")\n    if not isinstance(busy, (list, tuple)):\n        raise ValueError(\"busy must be a list or tuple\")\n    if len(busy) == 0:\n        norm_busy = []\n    else:\n        norm_busy = normalize(busy)\n    if not norm_busy:\n        if window[0] + duration <= window[1]:\n            return window[0]\n        else:\n            return None\n    for t in range(window[0], window[1] - duration + 1):\n        slot = (t, t + duration)\n        overlap = False\n        for b in norm_busy:\n            if not (slot[1] <= b[0] or slot[0] >= b[1]):\n                overlap = True\n                break\n        if not overlap:\n            return t\n    return None\n```"
+      }
+    }
+  ],
+  "created": 1789011415,
+  "model": "minicpm5-2b-f16",
+  "system_fingerprint": "b10840-58670d128",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 832,
+    "prompt_tokens": 403,
+    "total_tokens": 1235,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    }
+  },
+  "id": "chatcmpl-sVOEPZ3jwLsWJKMIxyHeRgyQJ2dfguJI",
+  "timings": {
+    "cache_n": 2,
+    "prompt_n": 401,
+    "prompt_ms": 206.373,
+    "prompt_per_token_ms": 0.514645885286783,
+    "prompt_per_second": 1943.0836398172241,
+    "predicted_n": 832,
+    "predicted_ms": 16558.339,
+    "predicted_per_token_ms": 19.92579903730445,
+    "predicted_per_second": 50.18619319244521
+  }
+}
