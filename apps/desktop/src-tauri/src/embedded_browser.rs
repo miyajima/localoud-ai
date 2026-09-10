@@ -14,6 +14,8 @@ pub struct BrowserBounds {
     width: f64,
     height: f64,
     visible: bool,
+    #[serde(default)]
+    focus: bool,
     viewport_height: f64,
 }
 
@@ -97,9 +99,20 @@ pub async fn browser_layout(app: tauri::AppHandle, mut bounds: BrowserBounds) ->
             size: LogicalSize::new(bounds.width, bounds.height).into(),
         })
         .map_err(|e| e.to_string())?;
-        view.show().map_err(|e| e.to_string())
+        view.show().map_err(|e| e.to_string())?;
+        if bounds.focus {
+            view.set_focus().map_err(|e| e.to_string())?;
+        }
+        Ok(())
     } else {
-        view.hide().map_err(|e| e.to_string())
+        view.hide().map_err(|e| e.to_string())?;
+        if bounds.focus {
+            app.get_webview("main")
+                .ok_or("main webview missing")?
+                .set_focus()
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 }
 
@@ -122,6 +135,7 @@ mod tests {
             width: 500.0,
             height: 700.0,
             visible: true,
+            focus: false,
             viewport_height: 850.0,
         };
         assert!(valid_bounds(&b));

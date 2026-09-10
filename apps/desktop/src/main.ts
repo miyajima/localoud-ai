@@ -1,11 +1,12 @@
-import {reviewRequest,recordMarkup} from './task-focus';
-import {tabLabels,flowMarkup,executionOverview,executionPlan,executionContext,executionUsage} from './workflow-ui';
+import {planningRequest,reviewRequest,recordMarkup} from './task-focus';
+import {tabLabels,flowMarkup,welcomeMarkup,executionOverview,executionPlan,executionContext,executionUsage} from './workflow-ui';
 import type {ExecutionRecord} from './workflow-ui';
 import type {TaskFocus} from './task-focus';
 import {syncWorkers,applyWorkerEvent,mergeActivity,progressMarkup,changesMarkup} from './worker-progress';
 import type {Progress,Activity,WorkerStep} from './worker-progress';
 import './worker-progress.css';
 import {setupMcpSettings} from './mcp-settings';
+import {setupManifestReview} from './manifest-review';
 import {setupBrowserWorkspace} from './browser-workspace';
 import {setupChatGptUsage} from './chatgpt-usage';
 import type {CompletedTurn} from './chatgpt-usage';
@@ -52,14 +53,14 @@ function workflowThread(){return threads.find(t=>t.id===activeThread)?.provider=
 function choosePhase(phase:string){
   if(phase==='autonomous'){chooseAutonomous();return;}
   if(phase==='implement'){setComposerMode('implement');return;}
-  browserWorkspace.showBrowser();notice('計画・レビューは左側のChatGPTで依頼してください。');
+  browserWorkspace.showBrowser();notice('開いたChatGPTで計画・レビューを依頼してください。');
 }
 function legacyThread(){const t=threads.find(t=>t.id===activeThread);return !!t&&(t.status==='legacy_read_only'||t.provider==='chatgpt'||t.provider==='workflow');}
 function chooseAutonomous(){
-  if(busy||selectedView()?.running)return;
-  (document.querySelector('#task-mode') as HTMLSelectElement).value='autonomous';ui.defaultMode='autonomous';browserWorkspace.showBrowser();
-  pendingPreference=undefined;
-  composerReasoning=null;updateModelOptions('');saveDraft();render();focusComposer();
+  if(busy||activeThread)return;
+  (document.querySelector('#task-mode') as HTMLSelectElement).value='autonomous';ui.defaultMode='autonomous';
+  browserWorkspace.showWorkspace();
+  saveDraft();render();focusComposer();
 }
 const autonomousRefreshes=new Map<string,Promise<void>>();
 async function refreshAutonomous(id:string){
@@ -81,12 +82,13 @@ async function loadAutonomous(id:string){
   try{const includeChanges=activeThread===id&&activeTab==='Diff';const activity=await invoke<Activity>('autonomous_activity',{threadId:id,includeChanges});mergeActivity(v.progress,activity,includeChanges);}catch(e){v.progress.error=String(e);}
   if(activeThread===id)render();
 }
-async function sendAutonomous(){
+async function sendAutonomous(text:string,projectId:string){
   if(legacyThread()){error('旧ブラウザ方式の記録は閲覧専用です。新しいタスクを作成してください。');return;}
-  if(busy||!activeProject||selectedView()?.running||archivedThread())return;
-  busy=true;importingManifest=true;error('');notice('クリップボードからManifestを取り込み中…');render();
+  if(busy||!activeProject||selectedView()?.running||archivedThread())throw Error('現在は取り込めません。作業の状態を確認してください。');
+  if(projectId!==activeProject)throw Error('確認した計画と選択中のプロジェクトが一致しません。');
+  busy=true;importingManifest=true;error('');notice('確認した内容を取り込み中…');render();
   try{
-    const result=await invoke<{thread:Thread;imported:boolean}>('manifest_import_clipboard',{projectId:activeProject});
+    const result=await invoke<{thread:Thread;imported:boolean}>('manifest_import_text',{projectId,text});
     const thread=result.thread;
     (document.querySelector('#task-mode') as HTMLSelectElement).value='autonomous';
     delete ui.drafts![draftKey()];delete ui.planningRequests![activeProject!];activeThread=thread.id;activeTab='Chat';
@@ -94,7 +96,7 @@ async function sendAutonomous(){
     document.querySelector<HTMLTextAreaElement>('#task-input')!.value='';composer?.clear();saveDraft();rememberSelection();browserWorkspace.showWorkspace();await refreshAutonomous(thread.id);
     if(result.imported)notice('Manifestを取り込みました。'+(threads.find(t=>t.id===thread.id)?.status==='completed'?'レビュー合格・タスク完了です。':'現在の状態: '+statusLabel(threads.find(t=>t.id===thread.id)?.status||thread.status)+'。'));
     else notice('このManifestは取り込み済みのため再実行せず、保存済みタスクを開きました。変更された内容は適用していません。中断した作業は「再開・状態を確認」で再開できます。');
-  }catch(e){error(String(e));await refreshThreads();}
+  }catch(e){error(String(e));await refreshThreads();throw e;}
   finally{busy=false;importingManifest=false;render();}
 }
 async function refreshWorkflow(id:string,_resume=false){
@@ -126,11 +128,11 @@ function chatgptSelected(){return autonomousMode()||legacyThread();}
 function selectedModel(){return resolvedModel(modelChoices.find(m=>m.key===(document.querySelector('#preference') as HTMLSelectElement).value),(document.querySelector('#reasoning') as HTMLSelectElement).value||composerReasoning);}
 function planningMode(){return (document.querySelector('#task-mode') as HTMLSelectElement).value==='plan';}
 function composerMode(){return (document.querySelector('#task-mode') as HTMLSelectElement).value;}
-function cloudMode(){return composerMode()!=='implement';}
+function cloudMode(){return ['plan','codex-plan','goal'].includes(composerMode());}
 function setComposerMode(mode:string){
   const value=mode==='workflow'?'plan':mode==='plan'?'codex-plan':mode==='goal'?'goal':'implement';
-  if(activeThread&&(value==='plan'||threads.find(t=>t.id===activeThread)?.provider==='spark'||selectedView()?.running)){error('このタスクでは今モードを変更できません。新規タスクを作成するか、実行完了を待ってください。');return false;}
-  (document.querySelector('#task-mode') as HTMLSelectElement).value=value;ui.defaultMode=value;composerReasoning=null;pendingPreference=undefined;updateModelOptions();saveDraft();render();focusComposer();return true;
+  if(activeThread&&(autonomousThread()||legacyThread()||value==='plan'||threads.find(t=>t.id===activeThread)?.provider==='spark'||selectedView()?.running)){error('このタスクでは今モードを変更できません。新規タスクを作成するか、実行完了を待ってください。');return false;}
+  (document.querySelector('#task-mode') as HTMLSelectElement).value=value;ui.defaultMode=value;updateModelOptions();saveDraft();render();focusComposer();return true;
 }
 function updateModelOptions(preferred?:string){
   const select=document.querySelector<HTMLSelectElement>('#preference')!, previous=preferred??pendingPreference??select.value;pendingPreference=previous;
@@ -146,7 +148,10 @@ function updateModelOptions(preferred?:string){
 }
 function renderModelHint(){
   const m=selectedModel(), select=document.querySelector<HTMLSelectElement>('#preference')!;
-  document.querySelector('#model-hint')!.textContent=autonomousMode()?(selectedView()?.focus?.status==='completed'?'レビュー結果を取り込み済みです。新しい作業は「新しいタスク」から開始できます。':selectedView()?.focus?.status==='awaiting_review'?'ChatGPTのレビュー結果をコピーし、上のボタンで取り込みます。':'依頼文をコピーして、左のChatGPTへ貼り付けます。回答の計画は上のボタンで取り込みます。'):loadingModels?'モデル一覧を確認中…':activeThread?'このタスクのモデル: '+threadModelLabel(threads.find(t=>t.id===activeThread)):composerMode()==='codex-plan'?'まず計画を相談します。内容がよければ「この計画で実装」から進められます。':composerMode()==='goal'?'入力した目標をCodexのゴールに設定して実行します。':planningMode()?'Planタブ用の実行計画を作ります。実装は計画の確認後に開始します。':m?.local?'対象ファイルを1〜2件指定してください。':select.value==='auto'?'内容を確認して進めます。計画が必要な依頼は、まず計画を作ります。':m?'選択したモデルで実装します。':'接続設定を確認し、モデル一覧を更新してください。';
+  const hint=document.querySelector<HTMLElement>('#model-hint')!;
+  hint.textContent=autonomousMode()?'ChatGPT Web · 依頼をコピーして貼り付けます。計画の取り込み後に実行します。':loadingModels?'モデル一覧を確認中…':activeThread?'実行先: '+threadModelLabel(threads.find(t=>t.id===activeThread)):composerMode()==='codex-plan'?'Codexで計画を相談します。内容がよければ「この計画で実装」から進めます。':composerMode()==='goal'?'Codex · 入力した目標をゴールに設定して実行します。':planningMode()?'実行計画を作ります。実装は計画の確認後に開始します。':m?.local?'この端末で実行 · 対象ファイルを1〜2件、入力欄の下で指定してください。':select.value==='auto'?'おまかせ · 設定に沿って担当を選びます。大きな依頼は計画から始めます。':m?'Codexで実行 · '+m.label:'モデルを取得できません。接続設定で確認できます。';
+  const localFiles=document.querySelector<HTMLElement>('#local-scope');
+  if(localFiles)localFiles.hidden=!(m?.local&&!autonomousMode()||threads.find(t=>t.id===activeThread)?.provider==='spark'||document.querySelector<HTMLInputElement>('#known-files')?.value.trim());
 }
 function refreshModels():Promise<void>{
   if(modelRefresh)return modelRefresh;
@@ -155,7 +160,7 @@ function refreshModels():Promise<void>{
 }
 async function loadModels(){
   loadingModels=true;renderModelHint();
-  try{const result=await invoke<{models:ModelChoice[];warnings:string[]}>('available_models');modelChoices=result.models;modelWarnings=result.warnings;[threadModels,threadReasoning]=await Promise.all([invoke<Record<string,string>>('thread_models'),invoke<Record<string,string>>('thread_reasoning')]);updateModelOptions();if(modelWarnings.length)notice(modelWarnings.join('\n'));}
+  try{const result=await invoke<{models:ModelChoice[];warnings:string[]}>('available_models');modelChoices=result.models;modelWarnings=result.warnings;[threadModels,threadReasoning]=await Promise.all([invoke<Record<string,string>>('thread_models'),invoke<Record<string,string>>('thread_reasoning')]);updateModelOptions();}
   catch(e){error(String(e));}finally{loadingModels=false;render();}
 }
 type UiState = {project?:string|null;thread?:string|null;tab?:string;sidebarHidden?:boolean;defaultMode?:string;pins?:string[];drafts?:Record<string,Draft>;plans?:Record<string,string>;planningRequests?:Record<string,string>;reviewRequests?:Record<string,string>;expandedProjects?:string[];pinnedProjects?:string[]};
@@ -183,15 +188,21 @@ app.innerHTML = `<aside><div class="sidebar-heading"><div class="brand"><span cl
 document.body.insertAdjacentHTML('beforeend', `<dialog id="commands" aria-label="タスク・操作を検索"><label for="command-query">タスク・操作を検索</label><input id="command-query" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="タスク名、プロジェクト名、操作…" autocomplete="off"><div id="command-results"></div><small>↑↓ で選択 · Enter で開く · Esc で閉じる</small></dialog><dialog id="rename-dialog"><form id="rename-form"><h2>タスク名を変更</h2><label for="task-name">タスク名</label><input id="task-name" required maxlength="120"><p id="rename-error" role="alert"></p><div class="dialog-actions"><button type="button" id="rename-cancel">キャンセル</button><button type="submit" class="primary">保存</button></div></form></dialog>`);
 const more=document.createElement('details');more.id='compose-more';more.innerHTML='<summary aria-label="入力オプション" title="入力オプション">＋</summary><div class="compose-more-panel"></div>';
 document.querySelector('.executor-controls')!.prepend(more);
-more.querySelector('div')!.append(document.querySelector('#operation')!);
+document.querySelector('.compose')!.prepend(document.querySelector('#operation')!);
+document.querySelector('[data-operation="implement"]')!.textContent='実行する';
+document.querySelector('[data-operation="autonomous"]')!.textContent='ChatGPTで計画';
 more.querySelector('div')!.insertAdjacentHTML('beforeend','<label for="advanced-operation">追加の操作</label><select id="advanced-operation"><option value="">選択…</option><option value="implement">通常実行（選択モデル）</option><option value="codex-plan">Codexで相談</option><option value="goal">Codexでゴールを実行</option></select>');
 document.querySelectorAll<HTMLButtonElement>('[data-operation]').forEach(button=>button.addEventListener('click',()=>{if(button.getAttribute('aria-pressed')!=='true')choosePhase(button.dataset.operation!);}));
 document.querySelector('#advanced-operation')!.addEventListener('change',e=>{const mode=(e.target as HTMLSelectElement).value;if(!mode||busy||selectedView()?.running)return;(document.querySelector('#task-mode') as HTMLSelectElement).value=mode;pendingPreference=undefined;composerReasoning=null;updateModelOptions('');saveDraft();render();more.open=false;});
-for(const id of ['auto-settings-button','refresh-models','known-files'])more.querySelector('div')!.append(document.getElementById(id)!);
+for(const id of ['auto-settings-button','refresh-models'])more.querySelector('div')!.append(document.getElementById(id)!);
+const localScope=document.createElement('div');localScope.id='local-scope';localScope.hidden=true;
+localScope.innerHTML='<label for="known-files">対象ファイル</label>';
+localScope.append(document.getElementById('known-files')!);document.querySelector('.compose-controls')!.before(localScope);
 const implementPlan=document.createElement('button');implementPlan.id='implement-plan';implementPlan.type='button';implementPlan.textContent='この計画で実装';implementPlan.hidden=true;
 document.querySelector('#execution-source')!.after(implementPlan);
 implementPlan.onclick=()=>{if(busy||selectedView()?.running||selectedView()?.needsResume||!activeThread)return;if(!setComposerMode('implement'))return;const input=document.querySelector<HTMLTextAreaElement>('#task-input')!;if(!input.value.trim())input.value='この計画に沿って実装し、必要な検証を行ってください。';void send();};
-const browserWorkspace=setupBrowserWorkspace(invoke,visible=>{if(!visible&&!activeThread&&autonomousMode())setComposerMode('implement');});
+const browserWorkspace=setupBrowserWorkspace(invoke);
+const openManifestReview=setupManifestReview(invoke,sendAutonomous);
 const quota=document.querySelector<HTMLElement>('#chatgpt-usage')!;document.querySelector('#settings-form')!.append(quota);
 const recordChatGptTurn=setupChatGptUsage(quota);
 if(isTauri())void listen<CompletedTurn>('chatgpt-turn-completed',event=>recordChatGptTurn(event.payload));
@@ -199,6 +210,8 @@ document.querySelector('#settings-form')!.insertAdjacentHTML('beforeend','<secti
 const sidebarButton=document.querySelector('#sidebar-toggle')!;document.querySelector('.sidebar-heading')!.append(sidebarButton);
 const modelPicker=document.createElement('details');modelPicker.id='model-picker';modelPicker.innerHTML='<summary aria-label="モデルと思考量"><span id="model-picker-name"></span> <span id="model-picker-effort"></span><span class="model-chevron">⌄</span></summary><div class="model-picker-panel"></div>';document.querySelector('#preference')!.before(modelPicker);
 for(const id of ['preference','reasoning']){modelPicker.querySelector('div')!.append(document.querySelector(`label[for=${id}]`)!,document.getElementById(id)!);}
+const modelHealth=document.createElement('section');modelHealth.id='model-health';modelHealth.hidden=true;document.querySelector('#model-hint')!.after(modelHealth);
+modelPicker.querySelector('div')!.insertAdjacentHTML('beforeend','<p class="model-help">おまかせは依頼に応じて振り分けます。ローカルLLMは1〜2ファイルの小さな編集、Codexは調査・実装・検証に使えます。</p>');
 
 app.insertAdjacentHTML('beforeend','<dialog id="lifecycle-dialog" aria-label="プロジェクト・セッションの操作"><h2 id="lifecycle-title"></h2><p id="lifecycle-description"></p><div id="lifecycle-actions" class="dialog-actions"></div><p id="lifecycle-error" role="alert"></p><button id="lifecycle-close">閉じる</button></dialog>');
 const escape = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
@@ -218,6 +231,7 @@ function render() {
   document.querySelectorAll<HTMLButtonElement>('[data-thread]').forEach(b => b.onclick = () => void selectThread(b.dataset.thread!));
   const v = selectedView();
   const current = threads.find(t=>t.id===activeThread);
+  document.querySelector('main')!.classList.toggle('composing-task',!current&&activeTab==='Chat');
   const providerLabel = threadModelLabel(current);
   const modelSelect=document.querySelector<HTMLSelectElement>('#preference')!;
   modelSelect.disabled = (!!activeThread&&!autonomousMode()) || busy;
@@ -227,27 +241,29 @@ function render() {
   status.hidden=!status.textContent;
   if(!busy&&!v?.running&&!v?.needsResume&&v?.execution?.artifactPath){status.hidden=false;status.textContent='ワークツリー';status.setAttribute('title',v.execution.artifactPath);}
   const resume = document.querySelector<HTMLButtonElement>('#resume')!; resume.hidden = !activeThread || (autonomousThread()&&!v?.needsResume); resume.disabled = busy;
-  const send = document.querySelector<HTMLButtonElement>('#send')!; send.disabled = busy || !activeProject || !!v?.needsResume || !isTauri() || legacyThread(); send.textContent=importingManifest?'取り込み中…':autonomousMode()?'貼り付けて実行':'↑';send.setAttribute('aria-busy',String(importingManifest));send.setAttribute('aria-label',importingManifest?'Manifestを取り込み中':autonomousMode()?'貼り付けて実行':'送信');send.classList.toggle('manifest-send',autonomousMode());send.hidden=autonomousMode();send.title=send.getAttribute('aria-label')||'送信';
-  const stop = document.querySelector<HTMLButtonElement>('#stop')!; stop.hidden = !v?.running; stop.disabled = stopping || !!v?.needsResume;
-  const input = document.querySelector<HTMLTextAreaElement>('#task-input')!; input.hidden=autonomousMode()||legacyThread(); input.disabled = busy || !activeProject || !isTauri() || legacyThread(); input.placeholder = v?.running ? '実行中のタスクに追加の指示…' : 'やりたいこと、困っていることを入力…';
+  const send = document.querySelector<HTMLButtonElement>('#send')!;
+  const stop = document.querySelector<HTMLButtonElement>('#stop')!; stop.disabled=stopping||!!v?.needsResume;
+  const input = document.querySelector<HTMLTextAreaElement>('#task-input')!; input.hidden=autonomousMode()&&!!activeThread||legacyThread(); input.disabled = busy || !activeProject || !isTauri() || legacyThread(); input.placeholder = v?.running ? '実行中のタスクに追加の指示…' : 'やりたいこと、困っていることを入力…';
   (document.querySelector('#known-files') as HTMLInputElement).hidden=planningMode()&&!activeThread;
   (document.querySelector('#task-mode') as HTMLSelectElement).disabled=busy||!!v?.running||current?.provider==='spark';
   (document.querySelector('#task-mode option[value=plan]') as HTMLOptionElement).disabled=!!activeThread;
   (document.querySelector('#refresh-models') as HTMLButtonElement).disabled=busy||loadingModels;
-  send.setAttribute('aria-label',autonomousMode()?'貼り付けて実行':planningMode()&&!activeThread?'計画を作成':composerMode()==='codex-plan'?'プランを相談':composerMode()==='goal'?'ゴールを開始':'送信');
   refreshComposerReasoning();
   (document.querySelector('#auto-settings-button') as HTMLButtonElement).disabled=busy;
-  if(!autonomousMode()&&!activeThread && (planningMode() || (document.querySelector('#preference') as HTMLSelectElement).value!=='auto'))send.disabled ||= !readTarget(document.querySelector<HTMLSelectElement>('#preference')!,document.querySelector<HTMLSelectElement>('#reasoning')!,modelChoices);
   app.classList.toggle('manifest-mode',autonomousMode());
   const mode=composerMode();
   const operation=document.querySelector<HTMLElement>('#operation')!;
   operation.hidden=!!current;
-  operation.querySelectorAll<HTMLButtonElement>('[data-operation]').forEach(button=>{button.setAttribute('aria-pressed',String(button.dataset.operation===(autonomousMode()?'autonomous':'implement')));button.disabled=busy||!!v?.running||!!current;});
+  operation.querySelectorAll<HTMLButtonElement>('[data-operation]').forEach(button=>{const selected=button.dataset.operation===(autonomousMode()?'autonomous':'implement');button.setAttribute('aria-pressed',String(selected));button.classList.toggle('active',selected);button.disabled=busy||!!v?.running||!!current;});
   const advanced=document.querySelector<HTMLSelectElement>('#advanced-operation')!;advanced.value=mode;advanced.disabled=busy||!!v?.running||workflowThread()||current?.provider==='spark';
   document.querySelector('#execution-source')!.textContent=mode==='codex-plan'?'計画を相談中':mode==='goal'?'ゴールを実行':'';
   implementPlan.hidden=mode!=='codex-plan'||!current||busy||!!v?.running||!!v?.needsResume||!v?.messages.some(m=>m.role==='assistant');
   for(const id of ['preference','reasoning']){document.getElementById(id)!.hidden=autonomousMode();document.querySelector<HTMLLabelElement>(`label[for=${id}]`)!.hidden=autonomousMode();}
   renderModelHint();
+  modelHealth.hidden=autonomousMode()||!modelWarnings.length;
+  const healthMarkup=modelWarnings.length?`<div class="model-health-summary"><span>${modelWarnings.some(w=>w.startsWith('ローカルモデル:'))?'ローカルモデルは未接続':'モデルの接続を確認してください'}</span><button type="button" data-model-health="refresh">${loadingModels?'確認中…':'再確認'}</button><button type="button" data-model-health="settings">接続設定</button></div><details><summary>詳細</summary><pre>${escape(modelWarnings.join('\n'))}</pre></details>`:'';
+  if(modelHealth.innerHTML!==healthMarkup){modelHealth.innerHTML=healthMarkup;modelHealth.querySelector('[data-model-health="refresh"]')?.addEventListener('click',()=>void refreshModels());modelHealth.querySelector('[data-model-health="settings"]')?.addEventListener('click',()=>document.querySelector<HTMLButtonElement>('#settings')!.click());}
+  modelHealth.querySelectorAll<HTMLButtonElement>('button').forEach(b=>b.disabled=busy||loadingModels);
   modelPicker.hidden=autonomousMode();
   const pickerModel=activeThread?modelChoices.find(m=>m.model===threadModels[activeThread!]):selectedModel();
   document.querySelector('#model-picker-name')!.textContent=(modelSelect.selectedOptions[0]?.textContent||'モデルを選択').replace(/^(GPT-\d+(?:\.\d+)?)-([A-Za-z])/, '$1 $2');
@@ -255,27 +271,54 @@ function render() {
   document.querySelector('#model-picker-effort')!.textContent=pickerModel?.local||modelSelect.value==='auto'?'':({none:'なし',minimal:'最小',low:'軽',medium:'中',high:'高',xhigh:'最高',max:'最大',ultra:'最大'} as Record<string,string>)[effort]||effort;
   const focus=autonomousThread()?v?.focus:undefined;
   const planning=activeProject?ui.planningRequests![activeProject]:undefined;
-  browserWorkspace.setWorkflow(flowMarkup({project:project?.name||'',title:current?.title||planning||'新しいタスク',status:v?.needsResume?'reconciliation_required':current?.status||'draft',kind:legacyThread()?'legacy':autonomousMode()?'manifest':'direct',hasTask:!!current,planningRequested:!!planning,reviewRequested:!!focus?.artifactVersion&&ui.reviewRequests![focus.id]===focus.artifactVersion,id:current?.id,version:focus?.artifactVersion,iteration:v?.progress?.iteration,busy,importing:importingManifest,stopping,writing:activeTab==='Chat'}),handleFlowAction);
+  browserWorkspace.setWorkflow(flowMarkup({project:project?.name||'',title:current?.title||planning||'新しいタスク',status:v?.needsResume?'reconciliation_required':current?.status||'draft',kind:legacyThread()?'legacy':autonomousMode()?'manifest':'direct',hasTask:!!current,planningRequested:!!planning,reviewRequested:!!focus?.artifactVersion&&ui.reviewRequests![focus.id]===focus.artifactVersion,id:current?.id,version:focus?.artifactVersion,iteration:v?.progress?.iteration,busy,importing:importingManifest,stopping,running:!!v?.running,writing:activeTab==='Chat'}),handleFlowAction);
   resume.hidden=true;
   stop.hidden=autonomousMode()||!v?.running;
   stop.title=stopping?'停止中…':'実行を停止';
   stop.setAttribute('aria-label',stop.title);
   stop.setAttribute('aria-busy',String(stopping));
-  send.hidden=autonomousMode()||!!v?.running;
-  if(autonomousMode()&&!activeThread){send.textContent='依頼をコピー';send.setAttribute('aria-label','ChatGPTへの依頼をコピー');send.title='ChatGPTへの依頼をコピー';send.disabled=busy||!activeProject||!input.value.trim();input.hidden=false;input.placeholder='何を実現したいですか？ 条件や制約もここに書けます。';}
-  document.querySelector<HTMLElement>('main>footer')!.hidden=activeTab!=='Chat'||autonomousMode()||legacyThread()||archivedThread();
+  const planningDraft=autonomousMode()&&!activeThread;
+  const sendLabel=planningDraft?'ChatGPTへの依頼をコピー':planningMode()&&!activeThread?'計画を作成':mode==='codex-plan'?'プランを相談':mode==='goal'?'ゴールを開始':'送信';
+  send.textContent=planningDraft?'依頼をコピーしてChatGPTへ':!activeThread?(mode==='codex-plan'?'計画を相談':mode==='goal'?'ゴールを開始':modelSelect.value==='auto'?'おまかせで実行':'このモデルで実行'):'↑';
+  send.title=sendLabel;send.setAttribute('aria-label',sendLabel);send.setAttribute('aria-busy',String(busy));
+  send.classList.toggle('manifest-send',!activeThread);
+  send.hidden=autonomousMode()&&!!activeThread||!!v?.running;
+  send.disabled=busy||!activeProject||!!v?.needsResume||!isTauri()||legacyThread()||!input.value.trim();
+  if(!autonomousMode()&&!activeThread&&modelSelect.value!=='auto')send.disabled ||= !readTarget(modelSelect,document.querySelector<HTMLSelectElement>('#reasoning')!,modelChoices);
+  if(planningDraft)input.placeholder='何を実現したいですか？ 条件や制約もここに書けます。';
+  document.querySelector('.footnote>span:last-child')!.textContent=planningDraft?'⌘Enter でコピー · Enter で改行':'⌘Enter で送信 · Enter で改行';
+  document.querySelector<HTMLElement>('main>footer')!.hidden=activeTab!=='Chat'||autonomousMode()&&!!activeThread||legacyThread()||archivedThread();
   more.hidden=autonomousMode();
   renderContent();
 }
 function handleFlowAction(action:string){
+ if(action==='project'){openDialog();return;}
  if(action==='chat'){browserWorkspace.showBrowser();return;}
  if(action==='direct'){setComposerMode('implement');browserWorkspace.showWorkspace();return;}
  if(action==='write'){activeTab='Chat';rememberSelection();browserWorkspace.showWorkspace();render();focusComposer();return;}
- if(action==='import'){void sendAutonomous();return;}
+ if(action==='import'){void reviewManifest();return;}
  if(action==='resume'){document.querySelector<HTMLButtonElement>('#resume')!.click();return;}
  if(action==='stop'){document.querySelector<HTMLButtonElement>('#stop')!.click();return;}
  if(action==='new'){newTask();return;}
  if(action==='review')void copyReviewRequest();
+}
+async function reviewManifest(){
+ const project=projects.find(p=>p.id===activeProject);
+ if(!project||busy||selectedView()?.running||archivedThread()||legacyThread())return;
+ const returnToChat=browserWorkspace.isBrowserOpen();browserWorkspace.showWorkspace();
+ await openManifestReview(project,()=>{if(returnToChat)browserWorkspace.showBrowser();});
+}
+async function copyPlanningRequest(){
+ const project=projects.find(p=>p.id===activeProject);
+ const goal=document.querySelector<HTMLTextAreaElement>('#task-input')!.value.trim();
+ if(!project||!goal||busy||activeThread)return;
+ if(composer?.getMentions().some(m=>m.kind!=='file')){error('スキル・プラグイン・担当の指定は「実行する」で利用できます。ChatGPTへの依頼には、目的と対象ファイルを指定してください。');return;}
+ busy=true;error('');render();
+ try{
+  if(!await copyText(planningRequest(project,goal,knownFiles())))return;
+  ui.planningRequests![project.id]=goal;saveDraft();browserWorkspace.showBrowser();
+  notice('依頼をコピーしました。ChatGPTに貼り付けて送信してください。');
+ }finally{busy=false;render();}
 }
 async function copyReviewRequest(){
  const focus=selectedView()?.focus;if(!focus?.artifactVersion)return;
@@ -301,7 +344,7 @@ function renderContent() {
   else if(autonomousThread()&&v&&activeTab==='Terminal')content.innerHTML=progressMarkup(v.progress,statusLabel,true);
   else if(autonomousThread()&&v&&activeTab==='Diff')content.innerHTML=(v.progress?.error?`<p class="progress-error">差分の更新に失敗しました。前回の表示を維持しています。${escape(v.progress.error)}</p>`:'')+changesMarkup(v.progress?.changes||[],diffMarkup);
   else if (activeTab === 'Chat') {
-    if (!v?.messages.length) content.innerHTML = `<section class="read-panel welcome-flow"><h2>${activeProject?'実現したいことを教えてください':'プロジェクトを選んで始める'}</h2><p>${!activeProject?'左のプロジェクトを選ぶか、フォルダを登録してください。':autonomousMode()?'左のChatGPTに実現したいことを入力し、目的・条件・計画を相談してください。確定した計画を右のLocaloudで実行します。':'やりたいことを書いて送信してください。内容を確認し、実行または計画作成へ進みます。'}</p>${activeProject&&autonomousMode()?'<ol><li>左のChatGPTで計画を相談</li><li>計画JSONをコピーし、上から取り込んで実行</li><li>レビュー時は左に戻り、結果を取り込む</li></ol><div class="workflow-start-actions"><button id="welcome-chatgpt">ChatGPTを表示</button><button id="welcome-direct">ChatGPTを使わず通常の依頼</button></div>':''}</section>`;
+    if (!v?.messages.length) content.innerHTML=welcomeMarkup(!!activeProject,autonomousMode(),activeProject?ui.planningRequests![activeProject]:undefined);
     else if(autonomousThread())content.innerHTML=`<div class="conversation task-records"><details id="task-goal"><summary>依頼内容・合格条件を確認</summary><div class="message-text">${escape(v.focus?.goal||'')}${v.focus?.acceptance?.length?`<ul>${v.focus.acceptance.map(a=>`<li>${escape(a)}</li>`).join('')}</ul>`:''}</div></details>${v.focus?.manifestId?`<p class="handoff-receipt">実行依頼 · ID <code>${escape(v.focus.manifestId)}</code></p>`:''}${v.focus?.reviewId?`<p class="handoff-receipt">レビュー結果 · ${escape(v.focus.verdict||'')} · ID <code>${escape(v.focus.reviewId)}</code></p>`:''}<details id="task-records"><summary>作業記録・検証の詳細（${v.messages.filter(m=>m.role!=='user').length}件）</summary>${v.messages.map((m,index)=>m.role==='user'?'':recordMarkup(m.text,m.key,index,markdown)).join('')}</details></div>`;
     else content.innerHTML = `<div class="conversation">${v.route?(autonomousThread()?`<div class="route-note"><pre>${escape(v.route)}</pre></div>`:`<details class="route-note"><summary>${escape(v.route.split('\n')[0])}</summary><p>${escape(v.route)}</p></details>`):''}${v.messages.map((m,index) => `<article class="message ${m.role === 'user' ? 'user' : ''}"><div class="message-role">${m.role === 'user' ? 'あなた' : escape(m.label||label)}<button class="copy-message" data-copy-message="${index}" title="本文をコピー">コピー</button></div><div class="message-text ${m.role === 'user' ? '' : 'markdown'}">${m.role === 'user' ? escape(m.text) : markdown(m.text)}</div></article>`).join('')}${v.running ? `<div class="working">● ${escape(label)} が作業中</div>` : ''}</div>`;
     if(autonomousThread()&&v)content.insertAdjacentHTML('beforeend',progressMarkup(v.progress,statusLabel));
@@ -318,10 +361,11 @@ function renderContent() {
   else if(activeTab === 'Usage') content.innerHTML = usageMarkup(usage,activeThread?'このセッションの使用量':'セッションを選択してください');
   else content.innerHTML = `<div class="empty"><h2>${escape(activeTab)}</h2><p>${activeTab === 'Plan' ? '計画機能は Milestone F で接続します。' : 'プロバイダーの使用量はまだ集計していません。'}</p><span class="muted">未取得の数値はゼロとして扱いません。</span></div>`;
   content.querySelectorAll<HTMLButtonElement>('button').forEach(b=>b.disabled ||= busy);
+  content.querySelectorAll<HTMLButtonElement>('[data-flow-action]').forEach(b=>b.onclick=()=>handleFlowAction(b.dataset.flowAction!));
   disclosures.forEach(([id,open])=>{const d=document.getElementById(id);if(d instanceof HTMLDetailsElement)d.open=open;});
   for(const el of Array.from(content.querySelectorAll<HTMLElement>('[data-scroll-key]'))){const prior=innerScroll.find(([key])=>key===el.dataset.scrollKey);if(prior){el.scrollTop=prior[1];el.scrollLeft=prior[2];}}
   if(focusId){const next=document.getElementById(focusId);if(next instanceof HTMLInputElement || next instanceof HTMLTextAreaElement){next.focus({preventScroll:true});if(selection&&selection[0]!==null&&selection[1]!==null)next.setSelectionRange(selection[0],selection[1]);}}
-  content.scrollTop = activeTab==='Chat' && (follow||(!priorPane&&!autonomousThread())) ? content.scrollHeight : oldScroll;
+  content.scrollTop = activeTab==='Chat'&&!autonomousThread()&&!!v?.messages.length&&(follow||!priorPane) ? content.scrollHeight : oldScroll;
   content.querySelectorAll<HTMLAnchorElement>('a').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();if(a.dataset.externalUrl)void invoke('open_web_link',{url:a.dataset.externalUrl}).catch(e=>error(String(e)));}));
   content.querySelectorAll<HTMLButtonElement>('[data-copy-message]').forEach(b=>b.onclick=()=>void copyText(v?.messages[Number(b.dataset.copyMessage)]?.text || '',b));
   document.querySelector('#show-worker-changes')?.addEventListener('click',()=>{if(activeThread){activeTab='Diff';rememberSelection();render();void refreshDiff(activeThread);}});
@@ -338,8 +382,6 @@ function renderContent() {
   document.querySelector('#plan-json')?.addEventListener('input',e=>{planText=(e.target as HTMLTextAreaElement).value;if(activeProject){ui.plans![activeProject]=planText;saveUi();}const preview=document.getElementById('plan-preview-area');if(preview)preview.innerHTML=planPreview(planText);const run=document.querySelector<HTMLButtonElement>('#run-plan');if(run)run.disabled=busy||!activeProject||planText===defaultPlanText;});
   document.querySelector('#resume-plan')?.addEventListener('click',()=>void resumePlan());
   document.querySelector('#run-plan')?.addEventListener('click',()=>void runPlan());
-  document.querySelector('#welcome-chatgpt')?.addEventListener('click',()=>browserWorkspace.showBrowser());
-  document.querySelector('#welcome-direct')?.addEventListener('click',()=>{setComposerMode('implement');browserWorkspace.showWorkspace();});
   document.querySelector('#welcome-add')?.addEventListener('click', openDialog);
   document.querySelector('#summarize')?.addEventListener('click',()=>void localInsight('summarize_task'));
   document.querySelector('#first-review')?.addEventListener('click',()=>void localInsight('review_task'));
@@ -421,7 +463,7 @@ async function selectThread(id: string) {
 async function send(approvedRoute?:AutoPreview) {
   if(archivedThread()){error('アーカイブを解除してから送信してください。');return;}
   if(legacyThread()){error('旧ブラウザ方式の記録は閲覧専用です。新しいタスクで開始してください。');return;}
-  if(autonomousMode()){browserWorkspace.showBrowser();return;}
+  if(autonomousMode()){await copyPlanningRequest();return;}
   if(busy||preparingComposer)return;preparingComposer=true;
   try{if(!approvedRoute&&!chatgptSelected()&&composer&&!await composer.beforeSend())return;}catch(e){error(String(e));return;}finally{preparingComposer=false;}
   const input = document.querySelector<HTMLTextAreaElement>('#task-input')!, text = input.value.trim();
@@ -531,7 +573,7 @@ document.querySelector('#register form')!.addEventListener('submit', async e => 
 });
 document.querySelector('#browse-project')!.addEventListener('click',()=>{(document.querySelector('#register') as HTMLDialogElement).close();void pickProject();});
 document.querySelector('#browse-codex')!.addEventListener('click',async()=>{if(picking)return;picking=true;try{const path=await nativeInvoke<string|null>('choose_path',{kind:'codex_binary'});if(path)(document.querySelector('#codex-path') as HTMLInputElement).value=path;}catch(e){document.querySelector('#settings-error')!.textContent=String(e);}finally{picking=false;}});
-const openMcpSettings=setupMcpSettings(invoke,()=>projects);
+const openMcpSettings=setupMcpSettings(invoke,()=>projects,()=>notice('MCP公開設定を保存しました。'));
 document.getElementById('mcp-settings-button')!.addEventListener('click',()=>{document.querySelector<HTMLDialogElement>('#connection-settings')!.close();void openMcpSettings();});
 setupMemory(()=>activeProject,error);
 composer=setupComposer({call:invoke,localOnly:chatgptSelected,project:()=>activeProject,thread:()=>activeThread,busy:()=>busy,running:()=>!!selectedView()?.running,codex:()=>threads.find(t=>t.id===activeThread)?.provider==='codex',mode:composerMode,setMode:setComposerMode,models:()=>modelChoices,changed:()=>{saveDraft();render();},notice,error});
@@ -572,9 +614,8 @@ function restoreDraft() {
   (document.querySelector('#known-files') as HTMLInputElement).value=typeof draft?.files==='string'?draft.files:'';
   composerReasoning=draft?.reasoning||null;
   composer?.setMentions(Array.isArray(draft?.mentions)?draft.mentions:[]);
-  let mode=['autonomous','implement','codex-plan','goal'].includes(draft?.mode||'')?draft!.mode!:('implement');
-  const directStart=!activeThread&&!browserWorkspace.isBrowserOpen()&&mode==='autonomous';if(directStart)mode='implement';
-  (document.querySelector('#task-mode') as HTMLSelectElement).value=mode;updateModelOptions(directStart?'auto':draft?.preference||'auto');
+  const mode=['autonomous','implement','codex-plan','goal'].includes(draft?.mode||'')?draft!.mode!:('implement');
+  (document.querySelector('#task-mode') as HTMLSelectElement).value=mode;updateModelOptions(draft?.preference||'auto');
   document.querySelector('#draft-status')!.textContent=draft?.text?'保存した下書き':'';
 }
 function focusComposer() { document.querySelector<HTMLTextAreaElement>('#task-input')!.focus(); }
@@ -584,7 +625,7 @@ function switchProject(id:string, force=false) {
   if(activeTab==='Plan')void refreshGraph();focusComposer();
 }
 function newTask() {
-  if(busy)return;notice('');saveDraft();activeThread=null;activeTab='Chat';restoreDraft();if(!browserWorkspace.isBrowserOpen()&&autonomousMode()){(document.querySelector('#task-mode') as HTMLSelectElement).value='implement';updateModelOptions('auto');}rememberSelection();error('');render();focusComposer();
+  if(busy)return;notice('');saveDraft();activeThread=null;activeTab='Chat';restoreDraft();rememberSelection();error('');render();focusComposer();
   if(!activeProject)void pickProject();
 }
 function notice(message:string) { const el=document.querySelector<HTMLDivElement>('#notice')!;el.hidden=!message;el.textContent=message; }
@@ -649,7 +690,7 @@ document.querySelector('#rename-cancel')!.addEventListener('click',()=> (documen
 document.querySelector('#rename-form')!.addEventListener('submit',async e=>{e.preventDefault();if(!activeThread||busy)return;const id=activeThread;busy=true;render();try{await invoke('rename_thread',{threadId:id,title:(document.querySelector('#task-name') as HTMLInputElement).value});await refreshThreads();(document.querySelector('#rename-dialog') as HTMLDialogElement).close();}catch(e){document.querySelector('#rename-error')!.textContent=String(e);}finally{busy=false;render();}});
 document.addEventListener('keydown',e=>{
   if(e.isComposing||!(e.metaKey||e.ctrlKey)||e.altKey||picking||document.querySelector('dialog[open]'))return;
-  if(e.shiftKey&&e.key.toLowerCase()==='v'&&autonomousMode()&&!archivedThread()){e.preventDefault();void sendAutonomous();return;}
+  if(e.shiftKey&&e.key.toLowerCase()==='v'&&autonomousMode()&&!archivedThread()){e.preventDefault();void reviewManifest();return;}
   const action=({o:()=>void pickProject(),n:newTask,k:openCommands,',':()=>document.querySelector<HTMLButtonElement>('#settings')!.click(),b:toggleSidebar} as Record<string,()=>void>)[e.key.toLowerCase()];
   if(action&&!e.shiftKey){e.preventDefault();action();}
 });

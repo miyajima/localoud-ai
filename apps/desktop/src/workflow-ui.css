@@ -46,13 +46,36 @@ body.browser-open #app .brand{padding:0;font-size:clamp(12px,7cqi,16px)}.brand s
 .welcome-flow{padding-top:28px}.welcome-flow>p,.welcome-flow li{font-size:12px;color:var(--muted)}.welcome-flow ol{padding-left:18px}.welcome-flow li{margin:12px 0}
 .verification-record{font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding-top:7px}
 #workflow-shell{min-width:0;flex-shrink:0;background:var(--paper);border-bottom:1px solid var(--line)}
-#workflow-bar{padding:8px 14px;display:block;min-width:0}
-.flow-title{display:none}.flow-stages{margin-bottom:5px}.flow-stages li{font-size:10px;gap:4px}.flow-stages li>span{width:18px;height:18px;font-size:9px}.flow-stages li:not(:last-child)::after{margin:0 6px}
-.flow-next{gap:8px}.flow-next p{font-size:10px;line-height:1.4;min-width:0}.flow-actions{flex-wrap:wrap;justify-content:flex-end}.flow-actions button{font-size:10px;padding:5px 7px}.flow-cycle{font-size:10px;color:var(--muted);margin:0 0 5px}
+#workflow-bar{padding:16px 20px;display:block;min-width:0}
+.flow-title{display:flex;margin-bottom:12px}.flow-stages{margin-bottom:10px}.flow-stages li{font-size:12px;gap:5px}.flow-stages li>span{width:18px;height:18px;font-size:9px}.flow-stages li:not(:last-child)::after{margin:0 6px}
+.flow-next{gap:8px}.flow-next p{font-size:12px;line-height:1.65;min-width:0}.flow-actions{flex-wrap:wrap;justify-content:flex-end}.flow-actions button{font-size:12px;padding:7px 10px}.flow-cycle{font-size:10px;color:var(--muted);margin:0 0 5px}
 #workflow-shell #error:not([hidden]),#workflow-shell #notice:not([hidden]){padding:7px 14px;font-size:11px}
-#app .welcome-flow{padding-top:20px}.welcome-flow .workflow-start-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}.welcome-flow button{font-size:12px;border:1px solid var(--line)}
+#app .welcome-flow{padding:clamp(24px,5vh,52px) clamp(20px,4vw,42px);max-width:700px}.welcome-flow .workflow-start-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}.welcome-flow button{font-size:12px;border:1px solid var(--line)}
 
 .sidebar-heading{display:flex;align-items:center;gap:4px;margin:0 0 10px;min-height:32px}
 .sidebar-heading .brand{display:flex;align-items:center;gap:5px;min-width:0;white-space:nowrap;padding:0;font-size:16px;letter-spacing:-.6px}
 .sidebar-heading .mark{font-size:22px;line-height:1;margin:0;flex-shrink:0}
 .brand-wordmark{color:#315ecb}.brand-local{color:#95a5b9}.brand-ai{color:var(--ink)}
+
+.welcome-kicker{font:10px/1.5 Menlo,monospace;letter-spacing:1.5px;color:var(--muted)}
+#app .welcome-flow h2{font-size:clamp(24px,3.8cqw,36px);font-weight:600;letter-spacing:-.7px;line-height:1.45;margin:16px 0}
+#app .welcome-flow>p{font-size:13px;line-height:1.9;max-width:52ch}
+.route-guide{margin:26px 0 20px;border-top:1px solid var(--line)}
+.route-guide>div{display:grid;grid-template-columns:110px 1fr;gap:12px;padding:13px 0;border-bottom:1px solid var(--line)}
+.route-guide dt{font-size:12px;font-weight:600}.route-guide dd{margin:0;font-size:12px;color:var(--muted)}
+#app .welcome-flow .handoff-note{font-size:11px;color:var(--muted)}
+.flow-title small{font-variant-numeric:tabular-nums}
+#manifest-review{width:min(720px,calc(100vw - 40px));max-height:calc(100dvh - 48px);padding:24px 28px;border-radius:12px}
+#manifest-review .manifest-heading>span{font-size:12px;color:var(--muted)}
+#manifest-review h2{font-size:23px;margin:8px 0 18px}
+#manifest-preview{font-size:13px;line-height:1.7}
+#manifest-preview .manifest-goal{font-size:15px;white-space:pre-wrap;font-weight:500}
+#manifest-preview h3{font-size:13px;margin:22px 0 8px}
+#manifest-preview ol{padding-left:22px}#manifest-preview li{margin:7px 0;overflow-wrap:anywhere}
+#manifest-preview ol>li{margin:14px 0;border-bottom:1px solid var(--line);padding-bottom:12px}
+#manifest-preview p{margin:7px 0}#manifest-preview small,#manifest-preview summary{color:var(--muted);font-size:11px}
+#manifest-preview pre{font:11px/1.7 Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}
+#manifest-error{color:#a54d37;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+#manifest-review .dialog-actions{padding-top:16px;border-top:1px solid var(--line);gap:12px}
+#app>main>nav button{font-size:12px}
+#app #content{min-height:0}

@@ -621,6 +621,8 @@ fn main() {
             read_mcp::mcp_copy_token,
             read_mcp::manifest_format,
             manifest::manifest_import_clipboard,
+            manifest::manifest_preview_clipboard,
+            manifest::manifest_import_text,
             embedded_browser::browser_layout,
             embedded_browser::browser_reload,
             autonomous::autonomous_snapshot,

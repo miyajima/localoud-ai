@@ -167,15 +167,45 @@ pub async fn manifest_import_clipboard(
     state: tauri::State<'_, AppState>,
 ) -> Result<ImportOutcome, String> {
     let text = app.clipboard().read_text().map_err(|e| format!("クリップボードを読めません: {e}"))?;
-    let manifest = parse(&text)?;
-    let _lock = state.workflow_lock.lock().await;
-    let (manifest_id, target_project) = match &manifest {
-        Manifest::Task(m) => (&m.manifest_id, &m.project_id),
-        Manifest::Review(m) => (&m.manifest_id, &m.project_id),
+    manifest_import_text(project_id, text, app, state).await
+}
+
+fn parse_for_project(text: &str, project_id: &str) -> Result<Manifest, String> {
+    let manifest = parse(text)?;
+    let target = match &manifest {
+        Manifest::Task(m) => &m.project_id,
+        Manifest::Review(m) => &m.project_id,
     };
-    if target_project != &project_id {
+    if target != project_id {
         return Err("選択中のプロジェクトとManifestが一致しません".into());
     }
+    Ok(manifest)
+}
+
+/// Preview only: reading and parsing does not create a receipt or run workers.
+#[tauri::command]
+pub fn manifest_preview_clipboard(
+    project_id: String,
+    app: tauri::AppHandle,
+) -> Result<Manifest, String> {
+    let text = app.clipboard().read_text().map_err(|e| format!("クリップボードを読めません: {e}"))?;
+    parse_for_project(&text, &project_id)
+}
+
+/// Import the exact payload that was displayed, even if the clipboard changed.
+#[tauri::command]
+pub async fn manifest_import_text(
+    project_id: String,
+    text: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<ImportOutcome, String> {
+    let manifest = parse_for_project(&text, &project_id)?;
+    let _lock = state.workflow_lock.lock().await;
+    let manifest_id = match &manifest {
+        Manifest::Task(m) => &m.manifest_id,
+        Manifest::Review(m) => &m.manifest_id,
+    };
     {
         let store = state.store.lock().map_err(|e| e.to_string())?;
         if let Some(thread) = existing_task(&store, manifest_id, &project_id)? {
@@ -223,6 +253,16 @@ mod tests {
         assert!(parse(&v.to_string()).is_err());
         v["scope"] = json!(["../escape"]);
         assert!(parse(&v.to_string()).is_err());
+    }
+    #[test]
+    fn preview_and_import_bind_the_payload_to_the_selected_project() {
+        let v = task();
+        let project = v["project_id"].as_str().unwrap();
+        let preview = parse_for_project(&v.to_string(), project).unwrap();
+        let captured = serde_json::to_string(&preview).unwrap();
+        assert!(parse_for_project(&captured, project).is_ok());
+        assert!(parse_for_project(&captured, &hub_core::ProjectId::default().to_string()).is_err());
+        assert!(parse_for_project("not a plan", project).is_err());
     }
     #[test]
     fn rejects_contradictory_review_and_invalid_ids() {

@@ -1,8 +1,11 @@
 export type TaskFocus = {id:string;projectId:string;title:string;goal:string;status:string;artifactVersion?:string|null;manifestId?:string;reviewId?:string;verdict?:string;acceptance?:string[]};
+export function planningRequest(project:{id:string;name:string},goal:string,files:string[]=[]){
+ return `Localoudで実行する計画を相談したいです。\nProject: ${project.name}\nProject ID: ${project.id}\n依頼: ${goal.trim()}${files.length?'\n対象ファイル: '+files.join(', '):''}\n\nLocaloud MCPのproject_getで対象と現在の版を確認し、handoff_schemaを参照してください。必要な箇所だけ取得し、目的・変更範囲・完了条件を短く整理してください。不明点があれば相談し、実行できる計画が固まったらTaskManifestを1つのJSONコードブロックで返してください。MCPに接続できない場合はその旨を伝え、IDや版を推測しないでください。`;
+}
 const esc=(s:string)=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 export function nextAction(status:string){
  if(status==='completed')return 'レビュー合格。変更ファイルと結果を確認できます。';
- if(status==='awaiting_review')return '次はChatGPTでレビュー。依頼文をコピーして右の会話へ貼り付けてください。';
+ if(status==='awaiting_review')return '次はChatGPTでレビュー。依頼文をコピーしてChatGPTの会話へ貼り付けてください。';
  if(status==='review_rejected')return 'レビューは未合格です。指摘を確認し、ChatGPTで修正レビューを作成してください。';
  if(['interrupted','failed','reconciliation_required'].includes(status))return '作業が中断しています。「再開・状態を確認」で状態を確認してください。';
  if(status==='queued')return '実行を受け付けました。workerの開始を待っています。';

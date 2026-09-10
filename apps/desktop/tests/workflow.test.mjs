@@ -1,5 +1,5 @@
-import {tabLabels,flowMarkup,executionOverview,executionPlan,executionContext,executionUsage} from '../src/workflow-ui.ts';
-import {focusMarkup,reviewRequest,recordMarkup} from '../src/task-focus.ts';
+import {tabLabels,flowMarkup,welcomeMarkup,executionOverview,executionPlan,executionContext,executionUsage} from '../src/workflow-ui.ts';
+import {focusMarkup,planningRequest,reviewRequest,recordMarkup} from '../src/task-focus.ts';
 import {syncWorkers,applyWorkerEvent,mergeActivity,progressMarkup,changesMarkup} from '../src/worker-progress.ts';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,18 +10,19 @@ import ts from 'typescript';
 import {appendModelOptions,fillReasoningSelect,readTarget,resolvedModel,modelForTarget} from '../src/model-controls.ts';
 const source=(await readFile(new URL('../src/main.ts',import.meta.url),'utf8')).replace(/^import .*;\s*$/gm,'');
 const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText.replace(/export\s*\{\s*\};?/g,'');
+const reviewJs=ts.transpileModule((await readFile(new URL('../src/manifest-review.ts',import.meta.url),'utf8')).replace('export function','function'),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 async function fixture({saved,existing=false,connected=true,duplicate=false,importStatus,importGate,importError,multipleProjects=false,browserOpen=true,autoPreview,planTarget,routeError}={}){
  const dom=new JSDOM('<div id="app"></div>',{url:'https://workflow.fixture'});
  if(saved)dom.window.localStorage.setItem('astra-ui-v1',saved);
  dom.window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};dom.window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new dom.window.Event('close'));};
- const calls=[];const clipboard=[];const navigator={clipboard:{writeText:async text=>{clipboard.push(text);}}};
+ const calls=[];const clipboard=[];const navigator={clipboard:{writeText:async text=>{if(state.copyError)throw Error(state.copyError);clipboard.push(text);}}};
  const project={id:'project',name:'Fixture',root:'/fixture'};
  const root={id:'root-session',project_id:project.id,provider:'workflow',provider_thread_id:'workflow:root',title:'入力を保持する',status:'idle'};
  const state={projects:multipleProjects?[project,{id:'other',name:'別プロジェクト',root:'/other'}]:[project],threads:existing?[root]:[],running:false,failReview:false,messages:existing?[{role:'user',text:'保存済みの依頼',key:'old-user'},{role:'assistant',text:'保存済みのプラン',key:'old-plan',label:'プラン · ChatGPT'}]:[],targets:existing?{plan:{model:'gpt-6-astra',reasoning:'high',chatgpt:true},review:{model:'gpt-6-astra',reasoning:'high',chatgpt:true},implement:{model:'codex-implementation',reasoning:'high',chatgpt:false}}:{},phase:'plan',model:'gpt-6-astra'};
  const invoke=async(command,args)=>{
   calls.push({command,args});
   switch(command){
-   case 'available_models':return {models:[{key:'codex:gpt-6-astra',label:'Astra on Codex',model:'gpt-6-astra',local:false,reasoning:['high'],default_reasoning:null},{key:'codex:codex-implementation',label:'Implementation',model:'codex-implementation',local:false,reasoning:['high','low'],default_reasoning:null}],warnings:[]};
+   case 'available_models':return {models:[{key:'local:fixture',label:'Local fixture',model:'local-fixture',local:true,reasoning:[],default_reasoning:null},{key:'codex:gpt-6-astra',label:'Astra on Codex',model:'gpt-6-astra',local:false,reasoning:['high'],default_reasoning:null},{key:'codex:codex-implementation',label:'Implementation',model:'codex-implementation',local:false,reasoning:['high','low'],default_reasoning:null}],warnings:[]};
    case 'preview_auto_route':return autoPreview||{id:'route-1',revision:0,target:{provider:'codex',model:'codex-implementation',reasoning:'high'},reason:'routine',needs_plan:false,blocked:null,confirm_before_run:false};
    case 'auto_settings':return {levels:[{level:5,target:planTarget||{provider:'codex',model:'gpt-6-astra',reasoning:'high'}}]};
    case 'create_routed_task':{if(routeError)throw Error(routeError);const thread={id:'direct-task',project_id:project.id,provider:'codex',provider_thread_id:'provider-direct',title:args.request.text,status:'idle'};state.threads.push(thread);return {thread,target:{model:'codex-implementation',reasoning:'high'},route:{decision:{executor:'codex',reason:'explicit'}}};}
@@ -40,7 +41,8 @@ async function fixture({saved,existing=false,connected=true,duplicate=false,impo
    case 'workflow_snapshot':return {status:'legacy_read_only',running:state.running,messages:state.messages,phase:state.phase,model:state.model,targets:state.targets,handoff:state.phase==='review'?'要件・プラン・実装結果・作業差分':'これまでの会話'};
    case 'workflow_stop':state.running=false;return;
    case 'workflow_role_settings':return {plan:{model:'planner',reasoning:'medium'},review:{model:'reviewer',reasoning:'pro'}};
-   case 'manifest_import_clipboard':if(importGate)await importGate;if(importError)throw Error(importError);state.threads=[{...root,provider:'autonomous',status:importStatus||(duplicate?'interrupted':'queued')}];state.running=!duplicate;return {thread:state.threads[0],imported:!duplicate};
+   case 'manifest_preview_clipboard':return state.preview||{kind:'task',project_id:'project',request:'確認する依頼',scope:['src/example.ts'],acceptance:['検証が通る'],steps:[{title:'変更する',goal:'内容を修正する',owned_paths:['src/example.ts'],acceptance:['検証が通る']}]};
+   case 'manifest_import_text':if(importGate)await importGate;if(importError)throw Error(importError);state.threads=[{...root,provider:'autonomous',status:importStatus||(duplicate?'interrupted':'queued')}];state.running=!duplicate;return {thread:state.threads[0],imported:!duplicate};
    case 'autonomous_snapshot':return {thread:state.threads.find(t=>t.id===args.threadId)||state.threads[0],messages:[{role:'user',text:'依頼だけ'}],steps:state.steps||[],children:state.children||[],final_diff:null,artifact:null,...state.snapshot};
    case 'autonomous_activity':if(state.activityError)throw Error(state.activityError);return state.activity||{workers:[],changes:[]};
    case 'autonomous_stop':state.running=false;state.threads[0].status='interrupted';return;
@@ -48,8 +50,9 @@ async function fixture({saved,existing=false,connected=true,duplicate=false,impo
   }
  };
  const noop=()=>{};
- const context={tabLabels,flowMarkup,executionOverview,executionPlan,executionContext,executionUsage,focusMarkup,reviewRequest,recordMarkup,syncWorkers,applyWorkerEvent,mergeActivity,progressMarkup,changesMarkup,navigator,window:dom.window,document:dom.window.document,localStorage:dom.window.localStorage,console,Option:dom.window.Option,setTimeout,clearTimeout,setInterval:()=>0,clearInterval:noop,nativeInvoke:invoke,isTauri:()=>true,listen:async()=>noop,appendModelOptions,fillReasoningSelect,readTarget,resolvedModel,modelForTarget,markdown:s=>s,diffMarkup:s=>s,statusLabel:s=>s,planPreview:()=>'',setupMcpSettings:()=>noop,setupChatGptUsage:noop,setupBrowserWorkspace:()=>{const bar=dom.window.document.createElement('section');bar.id='workflow-bar';dom.window.document.body.append(bar);return {showBrowser:noop,showWorkspace:noop,isBrowserOpen:()=>browserOpen,setSidebarHidden:noop,setWorkflow:(html,action)=>{bar.innerHTML=html;bar.querySelectorAll('[data-flow-action]').forEach(b=>b.onclick=()=>action(b.dataset.flowAction));}}},setupMemory:noop,memoryPanel:()=>'',bindMemory:noop,setupAutoRouting:noop,showAutoPreview:preview=>calls.push({command:'showAutoPreview',args:preview}),openAutoSettings:noop,setupComposer:()=>({syncContext:noop,getMentions:()=>[],setMentions:noop,clear:noop,refreshThread:async()=>{},seedHistory:async()=>{},remember:async()=>{},beforeSend:async()=>true})};
+ const context={tabLabels,flowMarkup,welcomeMarkup,executionOverview,executionPlan,executionContext,executionUsage,focusMarkup,planningRequest,reviewRequest,recordMarkup,syncWorkers,applyWorkerEvent,mergeActivity,progressMarkup,changesMarkup,navigator,window:dom.window,document:dom.window.document,localStorage:dom.window.localStorage,console,Option:dom.window.Option,setTimeout,clearTimeout,setInterval:()=>0,clearInterval:noop,nativeInvoke:invoke,isTauri:()=>true,listen:async()=>noop,appendModelOptions,fillReasoningSelect,readTarget,resolvedModel,modelForTarget,markdown:s=>s,diffMarkup:s=>s,statusLabel:s=>s,planPreview:()=>'',setupManifestReview:()=>noop,setupMcpSettings:()=>noop,setupChatGptUsage:noop,setupBrowserWorkspace:()=>{const bar=dom.window.document.createElement('section');bar.id='workflow-bar';dom.window.document.body.append(bar);return {showBrowser:noop,showWorkspace:noop,isBrowserOpen:()=>browserOpen,setSidebarHidden:noop,setWorkflow:(html,action)=>{bar.innerHTML=html;bar.querySelectorAll('[data-flow-action]').forEach(b=>b.onclick=()=>action(b.dataset.flowAction));}}},setupMemory:noop,memoryPanel:()=>'',bindMemory:noop,setupAutoRouting:noop,showAutoPreview:preview=>calls.push({command:'showAutoPreview',args:preview}),openAutoSettings:noop,setupComposer:()=>({syncContext:noop,getMentions:()=>[],setMentions:noop,clear:noop,refreshThread:async()=>{},seedHistory:async()=>{},remember:async()=>{},beforeSend:async()=>true})};
  for(const name of ['HTMLElement','HTMLButtonElement','HTMLSelectElement','HTMLInputElement','HTMLTextAreaElement','HTMLDialogElement','HTMLDetailsElement','HTMLAnchorElement','HTMLOptionElement'])context[name]=dom.window[name];
+ context.setupManifestReview=vm.runInNewContext(reviewJs+';setupManifestReview',context);
  const api=await vm.runInNewContext(`(async()=>{${js}\nawait refreshModels();return {render,newTask,choosePhase,send,sendAutonomous,selectThread,refreshWorkflow,refreshAutonomous,refreshDiff,refreshThreads,applyEvent,selectedView,activeId:()=>activeThread};})()`,context);
  return {dom,calls,clipboard,state,api,select:dom.window.document.querySelector('#preference'),input:dom.window.document.querySelector('#task-input'),document:dom.window.document,close:()=>dom.window.close()};
 }
@@ -57,24 +60,24 @@ test('startup never reads clipboard or invokes the retired browser transport',as
  const f=await fixture();try{assert.ok(!f.calls.some(c=>/chatgpt|workflow_run|manifest_import/.test(c.command)));assert.equal(f.document.querySelector('#chatgpt-dialog'),null);}finally{f.close();}
 });
 test('explicit paste button imports a Manifest once and tracks worker state',async()=>{
- const f=await fixture();try{f.api.choosePhase('autonomous');await f.api.sendAutonomous();const calls=f.calls.filter(c=>c.command==='manifest_import_clipboard');assert.equal(calls.length,1);assert.equal(calls[0].args.projectId,'project');assert.equal(f.api.selectedView().running,true);assert.equal(f.input.hidden,true);}finally{f.close();}
+ const f=await fixture();try{f.api.choosePhase('autonomous');await f.api.sendAutonomous('captured-plan','project');const calls=f.calls.filter(c=>c.command==='manifest_import_text');assert.equal(calls.length,1);assert.equal(calls[0].args.projectId,'project');assert.equal(f.api.selectedView().running,true);assert.equal(f.input.hidden,true);}finally{f.close();}
 });
 test('legacy records are readable but cannot be resent by changing composer mode',async()=>{
- const f=await fixture({existing:true});try{await f.api.selectThread('root-session');f.api.choosePhase('autonomous');await f.api.sendAutonomous();assert.ok(f.calls.some(c=>c.command==='workflow_snapshot'));assert.ok(!f.calls.some(c=>/manifest_import|workflow_run|send_turn|chatgpt_send/.test(c.command)));assert.match(f.document.querySelector('#error').textContent,/閲覧専用/);}finally{f.close();}
+ const f=await fixture({existing:true});try{await f.api.selectThread('root-session');f.api.choosePhase('autonomous');await f.api.sendAutonomous('captured-plan','project');assert.ok(f.calls.some(c=>c.command==='workflow_snapshot'));assert.ok(!f.calls.some(c=>/manifest_import|workflow_run|send_turn|chatgpt_send/.test(c.command)));assert.match(f.document.querySelector('#error').textContent,/閲覧専用/);}finally{f.close();}
 });
 
 test('duplicate paste opens the interrupted task with resume visible and no new execution',async()=>{
- const f=await fixture({duplicate:true});try{f.api.choosePhase('autonomous');await f.api.sendAutonomous();assert.equal(f.api.activeId(),'root-session');assert.equal(f.api.selectedView().running,false);assert.equal(f.api.selectedView().needsResume,true);assert.ok(f.document.querySelector('[data-flow-action="resume"]'));assert.match(f.document.querySelector('#notice').textContent,/保存済みタスクを開きました/);assert.ok(!f.calls.some(c=>/autonomous_resume|send_turn/.test(c.command)));}finally{f.close();}
+ const f=await fixture({duplicate:true});try{f.api.choosePhase('autonomous');await f.api.sendAutonomous('captured-plan','project');assert.equal(f.api.activeId(),'root-session');assert.equal(f.api.selectedView().running,false);assert.equal(f.api.selectedView().needsResume,true);assert.ok(f.document.querySelector('#workflow-bar [data-flow-action="resume"]'));assert.match(f.document.querySelector('#notice').textContent,/保存済みタスクを開きました/);assert.ok(!f.calls.some(c=>/autonomous_resume|send_turn/.test(c.command)));}finally{f.close();}
 });
 
 test('paste immediately signals progress, prevents duplicate clicks and confirms review completion',async()=>{
  let release;const gate=new Promise(resolve=>{release=resolve;});
  const f=await fixture({importStatus:'completed',importGate:gate});try{
-  f.api.choosePhase('autonomous');const pending=f.api.sendAutonomous();
-  assert.match(f.document.querySelector('[data-flow-action="import"]').textContent,/取り込み中/);
-  assert.equal(f.document.querySelector('[data-flow-action="import"]').disabled,true);
+  f.api.choosePhase('autonomous');const pending=f.api.sendAutonomous('captured-plan','project');
+  assert.match(f.document.querySelector('#workflow-bar [data-flow-action="import"]').textContent,/取り込み中/);
+  assert.equal(f.document.querySelector('#workflow-bar [data-flow-action="import"]').disabled,true);
   assert.match(f.document.querySelector('#notice').textContent,/取り込み中/);
-  await f.api.sendAutonomous();assert.equal(f.calls.filter(c=>c.command==='manifest_import_clipboard').length,1);
+  await assert.rejects(f.api.sendAutonomous('captured-plan','project'),/現在は取り込めません/);assert.equal(f.calls.filter(c=>c.command==='manifest_import_text').length,1);
   release();await pending;
   assert.match(f.document.querySelector('#notice').textContent,/レビュー合格・タスク完了/);
   assert.equal(f.document.querySelector('#status').textContent,'completed');
@@ -83,11 +86,11 @@ test('paste immediately signals progress, prevents duplicate clicks and confirms
 });
 test('failed import replaces progress with error and enables retry',async()=>{
  const f=await fixture({importError:'ManifestのJSON形式が不正です'});try{
-  f.api.choosePhase('autonomous');await f.api.sendAutonomous();
+  f.api.choosePhase('autonomous');await assert.rejects(f.api.sendAutonomous('captured-plan','project'),/JSON形式が不正/);
   assert.match(f.document.querySelector('#error').textContent,/JSON形式が不正/);
   assert.equal(f.document.querySelector('#notice').hidden,true);
-  assert.equal(f.document.querySelector('[data-flow-action="import"]').disabled,false);
-  assert.equal(f.document.querySelector('[data-flow-action="import"]').textContent,'計画を取り込んで実行');
+  assert.equal(f.document.querySelector('#workflow-bar [data-flow-action="import"]').disabled,false);
+  assert.equal(f.document.querySelector('#workflow-bar [data-flow-action="import"]').textContent,'コピーした計画を確認');
  }finally{f.close();}
 });
 
@@ -96,7 +99,7 @@ test('worker progress survives snapshots, streams child events and reads actual 
   f.state.steps=[{step:{key:'one',title:'実装担当',level:2,owned_paths:['new.txt']},status:'running',target:{model:'worker',reasoning:'high'},child_id:'child',verification:[]}];
   f.state.children=[{id:'child',provider_thread:{id:'provider-child'},turn:{id:'turn'}}];
   f.state.activity={workers:[{child_id:'child',events:[{sequence:1,event:{thread_id:'provider-child',turn_id:'turn',item_id:'cmd',kind:'item_started',text:'ファイルを確認',details:{type:'command',command:'cat new.txt'}}}]}],changes:[{key:'one',title:'実装担当',path:'/fixture/worktree',diff:'diff --git a/new.txt b/new.txt\n+++ b/new.txt\n+hello',error:null}]};
-  f.api.choosePhase('autonomous');await f.api.sendAutonomous();
+  f.api.choosePhase('autonomous');await f.api.sendAutonomous('captured-plan','project');
   assert.match(f.document.querySelector('#content').textContent,/ファイルを確認/);
   f.api.applyEvent({sequence:2,event:{thread_id:'provider-child',turn_id:'turn',item_id:'message',kind:'message_delta',text:'これから変更します'}});
   assert.match(f.document.querySelector('#content').textContent,/これから変更します/);
@@ -118,7 +121,7 @@ test('task purpose stays outside the scroller and logs keep closed state and out
   f.state.snapshot={artifact_version:'version-123',manifest:{manifest_id:'manifest-123',request:'目的を忘れずに修正する'},review:{manifest_id:'review-123',verdict:'inconclusive'},messages:[{role:'user',text:'目的を忘れずに修正する'},{role:'assistant',text:'{"kind":"review","manifest_id":"review-123","private_payload":"long-data"}'}]};
   f.state.steps=[{step:{key:'one',title:'実装担当',level:2},status:'completed',target:{model:'worker'},child_id:'child',verification:[]}];
   f.state.activity={workers:[{child_id:'child',events:[{sequence:1,event:{kind:'item_completed',text:'long output',details:{type:'command',command:'cat file',exit_code:0}}}]}],changes:[]};
-  f.api.choosePhase('autonomous');await f.api.sendAutonomous();
+  f.api.choosePhase('autonomous');await f.api.sendAutonomous('captured-plan','project');
   const focus=f.document.querySelector('#workflow-bar');assert.equal(f.document.querySelector('#content').contains(focus),false);
   assert.ok(focus.querySelector('[data-flow-action="review"]'));assert.equal(f.document.querySelector('#overview-ids').open,false);
   assert.ok(!focus.textContent.includes('private_payload'));
@@ -137,21 +140,61 @@ test('task purpose stays outside the scroller and logs keep closed state and out
  }finally{f.close();}
 });
 
-test('ChatGPT planning starts in its pane and the Localoud composer stays hidden',async()=>{
+test('planning keeps the editor and hands off only the request and selected paths',async()=>{
  const f=await fixture();try{
+  const content=f.document.querySelector('#content');
+  Object.defineProperty(content,'scrollHeight',{get:()=>content.querySelector('#pending-planning-request')?900:0});
+  Object.defineProperty(content,'clientHeight',{value:200});
+  f.input.value='入力を保持する';f.document.querySelector('#known-files').value='src/search.ts';
   f.api.choosePhase('autonomous');
-  assert.equal(f.document.querySelector('main>footer').hidden,true);
-  assert.match(f.document.querySelector('#content').textContent,/左のChatGPT/);
-  assert.ok(f.document.querySelector('[data-flow-action="import"]'));
-  await f.api.send();assert.equal(f.clipboard.length,0);
-  assert.ok(!f.calls.some(c=>/manifest_import|chatgpt_send|send_turn/.test(c.command)));
+  assert.equal(f.document.querySelector('main>footer').hidden,false);
+  assert.equal(f.document.querySelector('#send').hidden,false);
+  assert.equal(f.document.querySelector('#local-scope').hidden,false);
+  assert.match(f.document.querySelector('.footnote').textContent,/コピー/);
+  assert.ok(!f.document.querySelector('#compose-more').contains(f.document.querySelector('#operation')));
+  await f.api.send();
+  assert.equal(f.clipboard.length,1);
+  assert.equal(content.scrollTop,0,'planning must not inherit conversation auto-scroll');
+  assert.match(f.clipboard[0],/Project ID: project/);
+  assert.match(f.clipboard[0],/依頼: 入力を保持する/);
+  assert.match(f.clipboard[0],/対象ファイル: src\/search.ts/);
+  assert.match(f.clipboard[0],/project_get.*handoff_schema/);
+  assert.ok(!f.clipboard[0].includes('/fixture'));
+  assert.equal(f.input.value,'入力を保持する');
+  assert.equal(f.document.querySelector('[aria-current="step"]').textContent,'2計画');
+  assert.match(f.document.querySelector('#notice').textContent,/貼り付けて送信/);
+  assert.ok(!f.calls.some(c=>/manifest_import|chatgpt_send|send_turn|preview_auto_route|create_routed_task/.test(c.command)));
  }finally{f.close();}
+});
+test('copy failure leaves the planning request editable without advancing the handoff',async()=>{
+ const f=await fixture();try{
+  f.api.choosePhase('autonomous');f.input.value='保存する依頼';f.state.copyError='clipboard denied';
+  await f.api.send();
+  assert.equal(f.clipboard.length,0);assert.equal(f.input.value,'保存する依頼');
+  assert.equal(f.document.querySelector('[aria-current="step"]').textContent,'1依頼');
+  assert.match(f.document.querySelector('#error').textContent,/コピーできません/);
+  assert.equal(f.document.querySelector('#send').disabled,false);
+ }finally{f.close();}
+});
+test('switching to ChatGPT and back retains explicit local or Codex selection and scope',async()=>{
+ for(const key of ['local:fixture','codex:codex-implementation']){
+  const f=await fixture();try{
+   f.select.value=key;f.select.dispatchEvent(new f.dom.window.Event('change'));
+   const reasoning=f.document.querySelector('#reasoning');if(!reasoning.disabled){reasoning.value='low';reasoning.dispatchEvent(new f.dom.window.Event('change'));}
+   const effort=reasoning.value;f.input.value='依頼の下書き';f.document.querySelector('#known-files').value='src/file.ts';
+   f.api.choosePhase('autonomous');f.api.choosePhase('implement');
+   assert.equal(f.select.value,key);assert.equal(reasoning.value,effort);
+   assert.equal(f.input.value,'依頼の下書き');assert.equal(f.document.querySelector('#known-files').value,'src/file.ts');
+   assert.equal(f.document.querySelector('#local-scope').hidden,false);
+   assert.ok(!f.calls.some(c=>/preview_auto_route|create_routed_task/.test(c.command)));
+  }finally{f.close();}
+ }
 });
 test('every Manifest tab is read-only and shows task-specific plan, context and usage',async()=>{
  const f=await fixture({importStatus:'awaiting_review'});try{
   f.state.steps=[{step:{key:'one',title:'検索を改善',goal:'入力を保持する',level:2,owned_paths:['search.ts'],dependencies:[],acceptance:['入力が残る']},status:'completed',target:{model:'worker'},capsule:JSON.stringify({task:{goal:'入力を保持する'},instructions:'他の作業には変更しない'}),usage:[{usage:{prompt_tokens:17,completion_tokens:9}}],verification:[]}];
   f.state.snapshot={artifact_version:'rev',manifest:{manifest_id:'m1',request:'検索画面',acceptance:['受け入れ条件']}};
-  await f.api.sendAutonomous();
+  await f.api.sendAutonomous('captured-plan','project');
   for(const tab of ['Chat','Plan','Diff','Agents','Terminal','Context','Usage']){
    f.document.querySelector(`[data-tab="${tab}"]`).click();await new Promise(r=>setTimeout(r,10));
    assert.equal(f.document.querySelectorAll('#content button,#content textarea,#content select,#content input').length,0,tab+' has an operation');
@@ -184,15 +227,15 @@ test('project tree nests sessions under their owner and search can reveal anothe
 test('review handoff copies the exact target and waits for explicit result import',async()=>{
  const f=await fixture({importStatus:'awaiting_review'});try{
   f.state.snapshot={artifact_version:'version-one',manifest:{manifest_id:'m',request:'検索画面を改善'}};
-  await f.api.sendAutonomous();const before=f.calls.filter(c=>c.command==='manifest_import_clipboard').length;
-  f.document.querySelector('[data-flow-action="review"]').click();await new Promise(r=>setTimeout(r,10));
+  await f.api.sendAutonomous('captured-plan','project');const before=f.calls.filter(c=>c.command==='manifest_import_text').length;
+  f.document.querySelector('#workflow-bar [data-flow-action="review"]').click();await new Promise(r=>setTimeout(r,10));
   assert.match(f.clipboard.at(-1),/Task ID: root-session/);assert.match(f.clipboard.at(-1),/Artifact version: version-one/);
-  assert.equal(f.calls.filter(c=>c.command==='manifest_import_clipboard').length,before);
+  assert.equal(f.calls.filter(c=>c.command==='manifest_import_text').length,before);
   assert.equal(f.document.querySelector('[aria-current="step"]').textContent,'4レビュー');
-  assert.match(f.document.querySelector('[data-flow-action="review"]').textContent,/再コピー/);
+  assert.match(f.document.querySelector('#workflow-bar [data-flow-action="review"]').textContent,/再コピー/);
   assert.equal(f.document.querySelector('.flow-actions button').dataset.flowAction,'import');
   f.state.snapshot.artifact_version='version-two';await f.api.refreshAutonomous('root-session');
-  assert.equal(f.document.querySelector('[data-flow-action="review"]').textContent,'レビュー依頼をコピー');
+  assert.equal(f.document.querySelector('#workflow-bar [data-flow-action="review"]').textContent,'レビュー依頼をコピー');
   assert.equal(f.document.querySelector('.flow-actions button').dataset.flowAction,'review');
   assert.ok(!f.calls.some(c=>/chatgpt_send|send_turn/.test(c.command)));
  }finally{f.close();}
@@ -220,12 +263,12 @@ test('direct tasks send, accept steering and keep direct mode on the next task',
  }finally{f.close();}
 });
 
-test('a hidden ChatGPT pane cannot strand a saved planning draft without an editor',async()=>{
- const f=await fixture({browserOpen:false,saved:JSON.stringify({project:'project',drafts:{'project:new':{text:'Keep my draft',mode:'autonomous'}}})});try{
-  assert.equal(f.document.querySelector('#operation [aria-pressed="true"]').dataset.operation,'implement');
+test('a hidden ChatGPT pane restores the planning draft without changing its execution choice',async()=>{
+ const f=await fixture({browserOpen:false,saved:JSON.stringify({project:'project',drafts:{'new:project':{text:'Keep my draft',mode:'autonomous',preference:'local:fixture'}}})});try{
+  assert.equal(f.document.querySelector('#operation [aria-pressed="true"]').dataset.operation,'autonomous');
   assert.equal(f.document.querySelector('main>footer').hidden,false);
+  assert.equal(f.input.value,'Keep my draft');assert.equal(f.select.value,'local:fixture');
   assert.equal(f.document.querySelector('[aria-current="step"]').textContent,'1依頼');
-  assert.equal(f.select.value,'auto');
  }finally{f.close();}
 });
 
@@ -254,7 +297,7 @@ test('usage tab requests only selected session and settings requests global hist
 test('new request defaults to automatic routing even while the browser is open',async()=>{
  const f=await fixture();try{
   assert.equal(f.document.querySelector('#task-mode').value,'implement');assert.equal(f.select.value,'auto');assert.equal(f.input.hidden,false);
-  assert.equal(f.document.querySelector('#operation').closest('details').id,'compose-more');
+  assert.equal(f.document.querySelector('#operation').closest('details'),null);
   f.input.value='修正をお願いします';await f.api.send();
   assert.equal(f.calls.filter(c=>c.command==='preview_auto_route').length,1);
   assert.equal(f.calls.find(c=>c.command==='create_routed_task').args.request.autoRouteId,'route-1');
@@ -315,10 +358,13 @@ test('archived session history cannot send until explicitly restored',async()=>{
   f.api.choosePhase('autonomous');
   const key=()=>f.document.dispatchEvent(new f.dom.window.KeyboardEvent('keydown',{key:'V',metaKey:true,shiftKey:true,bubbles:true,cancelable:true}));
   key();await new Promise(r=>setTimeout(r,20));
-  assert.equal(f.calls.filter(c=>c.command==='manifest_import_clipboard').length,1);
+  assert.equal(f.calls.filter(c=>c.command==='manifest_import_text').length,0);
+  assert.equal(f.document.querySelector('#manifest-review').open,true);
+  f.document.querySelector('#manifest-confirm').click();await new Promise(r=>setTimeout(r,20));
+  assert.equal(f.calls.filter(c=>c.command==='manifest_import_text').length,1);
   assert.equal(f.api.activeId(),'root-session');
   assert.match(f.document.querySelector('#content').textContent,/今回の依頼/);
   key();await new Promise(r=>setTimeout(r,10));
-  assert.equal(f.calls.filter(c=>c.command==='manifest_import_clipboard').length,1);
+  assert.equal(f.calls.filter(c=>c.command==='manifest_import_text').length,1);
  }finally{f.close();}
  });

@@ -3,7 +3,7 @@ type Config = { enabled: boolean; project_ids: string[]; connection: { kind: 'un
 type Status = { config: Config; running: boolean; error: string | null; local_endpoint: string };
 type Invoke = <T = unknown>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
-export function setupMcpSettings(call: Invoke, projects: () => Project[]) {
+export function setupMcpSettings(call: Invoke, projects: () => Project[], saved?: () => void) {
   const dialog = document.createElement('dialog');
   dialog.id = 'mcp-settings'; dialog.setAttribute('aria-label', 'MCP公開設定');
   dialog.innerHTML = `<form><h2>MCP公開設定</h2><p>ChatGPTに読ませるプロジェクトを選びます。MCPから実行・変更はできません。</p>
@@ -14,7 +14,7 @@ export function setupMcpSettings(call: Invoke, projects: () => Project[]) {
     <label for="mcp-address" id="mcp-address-label">接続先</label><input id="mcp-address" spellcheck="false" autocomplete="off">
     <p>この画面は接続情報を保存します。トンネルや公開サーバーは作成しません。localhostのURLだけではChatGPTから接続できません。接続キーはトンネル／プロキシのローカル接続に設定し、ChatGPTの会話には貼らないでください。</p>
     <p id="mcp-error" role="alert"></p><div class="dialog-actions"><button type="button" id="mcp-close">閉じる</button><button type="submit" class="primary">保存する</button></div></form>`;
-  document.querySelector('#app')!.append(dialog);
+  document.body.append(dialog);
   const enabled = dialog.querySelector<HTMLInputElement>('#mcp-enabled')!;
   const route = dialog.querySelector<HTMLSelectElement>('#mcp-route')!;
   const address = dialog.querySelector<HTMLInputElement>('#mcp-address')!;
@@ -38,7 +38,7 @@ export function setupMcpSettings(call: Invoke, projects: () => Project[]) {
     const button = dialog.querySelector<HTMLButtonElement>('button[type=submit]')!; button.disabled = true;
     const connection: Config['connection'] = route.value === 'secure_tunnel' ? { kind: 'secure_tunnel', tunnel_id: address.value.trim() } : route.value === 'https_proxy' ? { kind: 'https_proxy', url: address.value.trim() } : { kind: 'unconfigured' };
     const config: Config = { enabled: enabled.checked, project_ids: Array.from(dialog.querySelectorAll<HTMLInputElement>('#mcp-projects input:checked')).map(e => e.value), connection };
-    try { showStatus(await call<Status>('set_mcp_settings', { config })); }
+    try { const status = await call<Status>('set_mcp_settings', { config }); showStatus(status); if (!status.error) { dialog.close(); saved?.(); } }
     catch (e) { error.textContent = String(e); }
     finally { saving = false; button.disabled = false; }
   });
