@@ -1,0 +1,648 @@
+/* Localoud native desktop layer. Feature CSS stays separate; this file owns the window language. */
+:root {
+  color-scheme: light dark;
+  --ui-canvas: #f5f5f7;
+  --ui-surface: #ffffff;
+  --ui-sidebar: #f1f1f4;
+  --ui-sidebar-active: #e5efff;
+  --ui-text: #1d1d1f;
+  --ui-muted: #62626a;
+  --ui-line: #d8d8dc;
+  /* The light primary is deliberately the darker system-blue variant so
+   * normal-sized white labels clear the 4.5:1 contrast threshold. */
+  --ui-accent: #0067d9;
+  --ui-accent-strong: #0052a3;
+  --ui-on-accent: #ffffff;
+  --ui-success: #1f7a35;
+  --ui-warning: #9a6700;
+  --ui-danger: #d70015;
+  --ui-surface-subtle: #f5f7fa;
+  --ui-surface-muted: #edf2fb;
+  --ui-danger-surface: #fff0ec;
+  --ui-success-surface: #edf6f0;
+  --ui-warning-surface: #fff7eb;
+  --ui-overlay: rgba(29, 29, 31, .28);
+  --ui-border-strong: #81818a;
+  --ui-scrollbar-thumb: #b4bcc7;
+  --ui-radius-sm: 6px;
+  --ui-radius-md: 9px;
+  --ui-radius-lg: 12px;
+  --ui-shadow: 0 12px 32px rgba(0, 0, 0, .12);
+  --ui-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --ui-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --ink: var(--ui-text);
+  --muted: var(--ui-muted);
+  --line: var(--ui-line);
+  --blue: var(--ui-accent);
+  --paper: var(--ui-surface);
+  --side: var(--ui-sidebar);
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { min-width: 320px; min-height: 100%; }
+body {
+  margin: 0;
+  background: var(--ui-canvas);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button, input, select, textarea { font: inherit; }
+button, summary { -webkit-tap-highlight-color: transparent; }
+button {
+  cursor: pointer;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--ui-radius-sm);
+  color: inherit;
+  background: transparent;
+  padding: 5px 9px;
+  transition: background-color .14s ease, color .14s ease, box-shadow .14s ease, opacity .14s ease;
+}
+button:hover { background: rgba(118, 118, 128, .12); }
+button:active:not(:disabled) { filter: brightness(.97); }
+button:disabled { cursor: not-allowed; opacity: .46; }
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
+#content:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -3px; }
+svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.round-send svg { width: 17px; height: 17px; }
+code, pre, kbd, .eyebrow, .welcome-kicker, .badge, .project-path, .message-role, .diff, .summary, table { font-family: var(--ui-mono); }
+kbd { border: 0; border-radius: 4px; color: var(--ui-muted); font-size: 0.75rem; padding: 1px 4px; white-space: nowrap; }
+
+#app {
+  display: grid;
+  grid-template-columns: var(--sidebar-width, 234px) 6px minmax(0, 1fr);
+  height: 100dvh;
+  min-width: 0;
+  background: var(--ui-canvas);
+}
+#app > aside {
+  grid-column: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 9px 8px 8px;
+  border-right: 0;
+  background: color-mix(in srgb, var(--ui-sidebar) 88%, transparent);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#app > main {
+  grid-column: 3;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ui-surface);
+}
+#sidebar-divider { background: var(--ui-line); opacity: .72; transition: background-color .14s ease; }
+#sidebar-divider:hover, #sidebar-divider:focus-visible { background: var(--ui-accent); }
+
+.sidebar-heading {
+  min-height: 32px;
+  margin: 0 0 6px;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sidebar-heading .brand {
+  min-width: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ui-text);
+  font-size: 0.875rem;
+  font-weight: 650;
+  letter-spacing: -.35px;
+  white-space: nowrap;
+}
+.sidebar-heading .mark { flex: 0 0 auto; margin: 0; color: var(--ui-accent); font-size: 1.125rem; line-height: 1; }
+.brand-wordmark { color: var(--ui-accent); }
+.brand-local { color: var(--ui-muted); }
+.brand-ai { color: var(--ui-text); }
+#app .sidebar-heading > #sidebar-toggle { flex: 0 0 28px; margin-left: auto; padding: 3px; color: var(--ui-muted); font-size: 0.8125rem; line-height: 20px; }
+
+#app .new {
+  width: 100%;
+  min-height: 30px;
+  margin: 0 0 6px;
+  padding: 5px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 28%, var(--ui-line));
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-accent-strong);
+  background: color-mix(in srgb, var(--ui-accent) 8%, var(--ui-surface));
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: left;
+}
+#app .new:hover { background: color-mix(in srgb, var(--ui-accent) 14%, var(--ui-surface)); }
+#app .command-trigger {
+  width: 100%;
+  min-height: 28px;
+  margin: 0 0 9px;
+  padding: 4px 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-muted);
+  background: color-mix(in srgb, var(--ui-surface) 58%, transparent);
+  font-size: 0.75rem;
+  text-align: left;
+}
+.section-title { min-height: 24px; padding: 4px 3px; display: flex; align-items: center; justify-content: space-between; color: var(--ui-muted); font-size: 0.75rem; font-weight: 600; letter-spacing: .02em; }
+.section-title button { min-height: 24px; padding: 1px 5px; color: var(--ui-muted); font-size: 1rem; }
+.tree-filter { gap: 5px; align-items: stretch; }
+.tree-filter > button { align-self: flex-end; min-height: 22px; padding: 2px 6px; color: var(--ui-muted); font-size: 0.75rem; }
+#task-filter { width: 100%; min-height: 28px; margin: 0 0 8px; padding: 4px 8px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); color: var(--ui-text); background: color-mix(in srgb, var(--ui-surface) 66%, transparent); font-size: 0.75rem; }
+#projects { min-height: 0; }
+.project-group { margin: 0 0 3px; }
+.project-group .project-row { min-height: 29px; border-radius: var(--ui-radius-sm); }
+.project-group.active-project > .project-row { background: var(--ui-sidebar-active); }
+.project-group .project-toggle { flex: 0 0 22px; min-height: 28px; padding: 3px 2px; color: var(--ui-muted); font-size: 0.8125rem; }
+.project-group .project { min-width: 0; min-height: 28px; margin: 0; padding: 5px 3px; display: flex; align-items: center; gap: 5px; color: var(--ui-text); font-size: 0.75rem; font-weight: 600; }
+.project-group .project small { color: var(--ui-muted); font-size: 0.75rem; font-weight: 500; }
+.project-group .project-more { flex: 0 0 25px; min-height: 26px; padding: 3px 5px; color: var(--ui-muted); font-size: 0.9375rem; }
+.project-tasks { margin: 1px 0 6px 10px; padding-left: 7px; border-left: 1px solid color-mix(in srgb, var(--ui-accent) 30%, var(--ui-line)); }
+.project-tasks .thread-row { min-height: 27px; }
+.project-tasks .thread { min-height: 27px; padding: 4px 21px 4px 7px; border-radius: var(--ui-radius-sm); color: var(--ui-text); font-size: 0.75rem; }
+.project-tasks .thread span { line-height: 1.35; }
+.project-tasks .thread small { margin-top: 2px; font-size: 0.75rem; }
+.project-tasks .thread-row:hover .thread { background: rgba(118, 118, 128, .10); }
+.project-tasks .thread-row.selected .thread, .project-tasks .thread.selected { color: var(--ui-accent-strong); background: var(--ui-sidebar-active); }
+.pin-thread { min-height: 24px; padding: 2px 5px; color: var(--ui-muted); }
+.thread .state-running, .thread .state-inProgress { color: var(--ui-accent-strong); }
+.thread .state-completed { color: var(--ui-success); }
+.thread .state-failed { color: var(--ui-danger); }
+#app .settings { min-height: 28px; margin: auto 0 0; padding: 5px 7px; color: var(--ui-muted); font-size: 0.75rem; text-align: left; }
+
+/* Toolbar and tab rail. */
+#app > main > header { min-height: 54px; height: 54px; padding: 0 18px; gap: 12px; border-bottom: 1px solid var(--ui-line); background: color-mix(in srgb, var(--ui-surface) 92%, var(--ui-canvas)); }
+.project-heading { min-width: 0; flex: 1; }
+.project-heading .eyebrow { display: none; }
+.project-heading h1, #project-title { min-width: 0; margin: 0; overflow: hidden; color: var(--ui-text); font-size: 0.875rem; font-weight: 600; letter-spacing: -.1px; text-overflow: ellipsis; white-space: nowrap; }
+.project-path { display: block; max-width: min(48vw, 520px); min-height: 16px; margin: 0; padding: 0; overflow: hidden; color: var(--ui-muted); font-size: 0.75rem; line-height: 1.35; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.project-path:hover { color: var(--ui-accent-strong); background: transparent; }
+#app .header-actions { flex: 0 0 auto; gap: 4px; }
+#app .header-actions button { min-height: 28px; padding: 4px 7px; border: 0; font-size: 0.75rem; }
+#app #browser-toggle { min-height: 28px; padding: 4px 9px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); color: var(--ui-accent-strong); background: var(--ui-surface); font-size: 0.75rem; }
+.badge { max-width: 180px; min-height: 22px; overflow: hidden; padding: 3px 7px; border: 1px solid var(--ui-line); border-radius: 999px; color: var(--ui-muted); font-size: 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
+#app > main > nav { min-height: 36px; padding: 4px 18px; gap: 3px; border-bottom: 1px solid var(--ui-line); background: var(--ui-surface); overflow-x: auto; scrollbar-width: none; }
+#app > main > nav::-webkit-scrollbar { display: none; }
+#app > main > nav button { min-height: 27px; padding: 4px 9px; border-radius: var(--ui-radius-sm); color: var(--ui-muted); font-size: 0.75rem; white-space: nowrap; }
+#app > main > nav button:hover { background: rgba(118, 118, 128, .10); }
+#app > main > nav button.active { color: var(--ui-text); background: rgba(118, 118, 128, .14); box-shadow: none; font-weight: 600; }
+
+/* Keyboard users can skip the persistent sidebar and toolbar. */
+.skip-link {
+  position: fixed;
+  z-index: 1000;
+  top: 8px;
+  left: 8px;
+  transform: translateY(-160%);
+  padding: 7px 10px;
+  border: 1px solid var(--ui-accent);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-on-accent);
+  background: var(--ui-accent);
+  box-shadow: var(--ui-shadow);
+  transition: transform .14s ease;
+}
+.skip-link:focus { transform: translateY(0); }
+
+/* Status rail and feedback. */
+#workflow-shell { border-bottom: 1px solid var(--ui-line); background: var(--ui-surface); }
+#workflow-bar { padding: 10px 18px; }
+.flow-title { gap: 2px; margin-bottom: 6px; }
+.flow-title > span { color: var(--ui-muted); font-size: 0.75rem; }
+.flow-title > strong { color: var(--ui-text); font-size: 0.8125rem; line-height: 1.3; }
+.flow-title > small { color: var(--ui-muted); font-size: 0.75rem; }
+.flow-stages { margin: 0 0 6px; }
+.flow-stages li { gap: 4px; color: var(--ui-muted); font-size: 0.75rem; }
+.flow-stages li:not(:last-child)::after { margin: 0 7px; background: var(--ui-line); }
+.flow-stages li > span { width: 17px; height: 17px; border-color: var(--ui-line); font-size: 0.75rem; }
+.flow-stages .done { color: var(--ui-success); }
+.flow-stages .done > span { border-color: color-mix(in srgb, var(--ui-success) 30%, var(--ui-line)); background: color-mix(in srgb, var(--ui-success) 10%, var(--ui-surface)); }
+.flow-stages .current { color: var(--ui-accent-strong); }
+.flow-stages .current > span { border-color: var(--ui-accent); color: var(--ui-on-accent); background: var(--ui-accent); }
+.flow-next { gap: 12px; }
+.flow-next p { color: var(--ui-muted); font-size: 0.75rem; line-height: 1.4; }
+.flow-actions { gap: 4px; }
+.flow-actions button { min-height: 27px; padding: 4px 8px; border: 1px solid var(--ui-line); font-size: 0.75rem; }
+.flow-actions .primary { border-color: var(--ui-accent); }
+.flow-cycle { margin: 0 0 4px; color: var(--ui-muted); font-size: 0.75rem; }
+#error:not([hidden]), #notice:not([hidden]) { min-height: 30px; padding: 6px 18px; border-bottom: 1px solid var(--ui-line); font-size: 0.75rem; }
+#error { color: var(--ui-danger); background: color-mix(in srgb, var(--ui-danger) 8%, var(--ui-surface)); }
+#notice { color: var(--ui-success); background: color-mix(in srgb, var(--ui-success) 8%, var(--ui-surface)); }
+#error > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+#error .error-actions { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+#error #retry-error { border: 1px solid color-mix(in srgb, var(--ui-danger) 38%, var(--ui-line)); color: var(--ui-danger); background: transparent; }
+#error button { min-width: 28px; min-height: 28px; padding: 1px 6px; color: inherit; }
+
+/* Reading surfaces: dense enough for a work log, calm enough to scan. */
+#content { min-height: 0; background: var(--ui-surface); overscroll-behavior: contain; scrollbar-gutter: stable; }
+.read-panel, .conversation, .event-list, .inspector { max-width: 820px; margin: 0 auto; padding: 20px 24px; color: var(--ui-text); }
+.read-panel { font-size: 0.8125rem; line-height: 1.55; }
+.read-panel h2, .inspector h2 { margin: 0 0 12px; color: var(--ui-text); font-size: 1.0625rem; font-weight: 650; letter-spacing: -.2px; }
+.read-panel h3 { margin: 17px 0 6px; font-size: 0.8125rem; font-weight: 650; }
+.read-panel h4 { font-size: 0.75rem; }
+.read-panel p { margin: 6px 0; }
+.read-panel .muted, .read-panel > p.muted, .inspector p { color: var(--ui-muted); font-size: 0.75rem; }
+.read-panel li { overflow-wrap: anywhere; }
+.read-row { gap: 12px; }
+.read-row > span { color: var(--ui-muted); font-size: 0.75rem; }
+.read-card, .plan-steps > li, .progress-summary > li { padding: 11px 0; border-bottom: 1px solid var(--ui-line); }
+.read-panel details { margin: 7px 0; }
+.read-panel summary { padding: 4px 0; color: var(--ui-muted); font-size: 0.75rem; }
+.read-output { border-color: var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-canvas); font: 0.75rem/1.55 var(--ui-mono); }
+.welcome-flow { padding-top: clamp(26px, 7vh, 64px); }
+.welcome-kicker { color: var(--ui-muted); font-size: 0.75rem; letter-spacing: .08em; }
+#app .welcome-flow h2 { margin: 9px 0 7px; font-size: 1.5625rem; line-height: 1.2; letter-spacing: -.6px; }
+#app .welcome-flow > p { max-width: 56ch; margin: 0; color: var(--ui-muted); font-size: 0.8125rem; line-height: 1.55; }
+.welcome-flow button { min-height: 29px; margin-top: 14px; padding: 5px 10px; border: 1px solid var(--ui-line); font-size: 0.75rem; }
+.welcome-flow .primary { border-color: var(--ui-accent); }
+.planning-receipt { margin-top: 14px; }
+.route-guide { margin: 18px 0 14px; border-top-color: var(--ui-line); }
+.route-guide > div { padding: 9px 0; border-bottom-color: var(--ui-line); }
+.route-guide dt, .route-guide dd { font-size: 0.75rem; }
+.conversation { padding-top: 14px; padding-bottom: 18px; }
+.message { padding: 13px 0; border-bottom: 1px solid var(--ui-line); }
+.message-role { margin-bottom: 5px; color: var(--ui-accent-strong); font-size: 0.75rem; letter-spacing: .02em; }
+.message-text { color: var(--ui-text); font-size: 0.8125rem; line-height: 1.55; }
+.message.user { margin: 4px 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--ui-accent) 18%, var(--ui-line)); border-radius: var(--ui-radius-md); background: color-mix(in srgb, var(--ui-accent) 7%, var(--ui-surface)); }
+.working { padding: 12px 0; color: var(--ui-accent-strong); font-size: 0.75rem; }
+.copy-message { color: var(--ui-muted); }
+.markdown { line-height: 1.6; }
+.markdown p { margin: 0 0 9px; }
+.markdown h1, .markdown h2, .markdown h3 { margin: 16px 0 7px; font-size: 1rem; }
+.markdown pre { padding: 10px; border-color: var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-canvas); font: 0.75rem/1.55 var(--ui-mono); }
+.markdown code { background: color-mix(in srgb, var(--ui-line) 45%, var(--ui-surface)); font-size: 0.75rem; }
+.markdown blockquote { border-left-color: var(--ui-accent); padding-left: 11px; }
+.diff-toolbar { min-height: 38px; padding: 6px 18px; border-bottom-color: var(--ui-line); }
+.diff-stats { gap: 9px; padding: 9px 18px; font-size: 0.75rem; }
+.diff { padding: 0 18px 24px !important; font: 0.75rem/1.55 var(--ui-mono); }
+.diff-line { min-height: 1.55em; padding: 0 6px; }
+.diff-add { background: color-mix(in srgb, var(--ui-success) 10%, var(--ui-surface)); color: var(--ui-success); }
+.diff-remove { background: color-mix(in srgb, var(--ui-danger) 8%, var(--ui-surface)); color: var(--ui-danger); }
+.diff-hunk { color: var(--ui-accent-strong); background: color-mix(in srgb, var(--ui-accent) 9%, var(--ui-surface)); }
+.worker-progress, .worker-changes { max-width: 820px; padding: 16px 18px; }
+.progress-heading h2, .worker-changes h2 { margin: 0 0 8px; font-size: 1rem; }
+.worker-card { margin: 9px 0; padding: 11px 12px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface); }
+.worker-card > header { min-height: 0; height: auto; padding: 0; }
+.worker-card pre, .patch-scroll { border-color: var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-canvas); font-size: 0.75rem; }
+.worker-event summary { padding: 5px 0; font-size: 0.75rem; }
+.review-summary { border-color: color-mix(in srgb, var(--ui-success) 30%, var(--ui-line)); border-radius: var(--ui-radius-md); background: color-mix(in srgb, var(--ui-success) 8%, var(--ui-surface)); }
+.review-summary.review-attention { border-color: color-mix(in srgb, var(--ui-warning) 35%, var(--ui-line)); background: color-mix(in srgb, var(--ui-warning) 8%, var(--ui-surface)); }
+
+/* Composer: the request is primary; routing is a quiet secondary layer. */
+#app > main > footer { flex: 0 0 auto; padding: 10px 18px 11px; background: var(--ui-surface); }
+#app .compose { padding: 10px 11px 8px; border: 1px solid var(--ui-border-strong); border-radius: var(--ui-radius-lg); background: var(--ui-surface); box-shadow: 0 2px 10px rgba(0, 0, 0, .06); }
+#app .compose:focus-within { border-color: var(--ui-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent) 18%, transparent); }
+#app #task-input { min-height: 66px; max-height: 220px; padding: 2px 2px 7px; color: var(--ui-text); font-size: 0.8125rem; line-height: 1.5; }
+#app #task-input::placeholder { color: color-mix(in srgb, var(--ui-muted) 86%, transparent); }
+#app .compose > #operation { margin: 0 0 7px; padding: 2px; border-radius: var(--ui-radius-sm); background: color-mix(in srgb, var(--ui-line) 32%, transparent); }
+#app #operation button { min-height: 25px; padding: 3px 8px; font-size: 0.75rem; }
+#app #operation button.active { color: var(--ui-on-accent); background: var(--ui-accent); }
+#app .compose-controls { gap: 7px; align-items: center; }
+#app .executor-controls { gap: 4px; }
+#app .executor-controls > select, #app .executor-controls #model-picker > summary { min-height: 26px; padding: 3px 7px; border-radius: var(--ui-radius-sm); color: var(--ui-muted); font-size: 0.75rem; }
+#app .executor-controls > select:hover, #app .executor-controls #model-picker > summary:hover { background: rgba(118, 118, 128, .10); }
+#app #model-picker { min-width: 0; }
+#app #model-picker > summary { color: var(--ui-text); }
+#app .model-picker-panel { width: 260px; padding: 10px; border-color: var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface); box-shadow: var(--ui-shadow); }
+#app .model-picker-panel select { min-height: 28px; padding: 4px 6px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-surface); color: var(--ui-text); }
+#app #known-files { min-width: 120px; max-width: 210px; min-height: 26px; padding: 4px 7px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-surface); font-size: 0.75rem; }
+#app .round-send { width: 32px !important; height: 32px; min-height: 32px; font-size: 1.25rem; }
+#app #send { color: var(--ui-on-accent); background: var(--ui-accent); }
+#app #send:hover { background: var(--ui-accent-strong); }
+#app #stop { color: var(--ui-surface); background: var(--ui-text); }
+#app #implement-plan { min-height: 26px; padding: 3px 8px; border-color: var(--ui-line); border-radius: var(--ui-radius-sm); font-size: 0.75rem; }
+#app .model-hint { display: none; }
+#app #model-health { margin: 6px 0 0; padding-top: 6px; border-top-color: var(--ui-line); font-size: 0.75rem; }
+#app .footnote { margin-top: 5px; color: var(--ui-muted); font-size: 0.75rem; line-height: 1.3; }
+#app .composer-chip { border-color: var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-canvas); font-size: 0.75rem; }
+#app #compose-more > summary { width: 26px; height: 26px; font-size: 1.1875rem; }
+#app .compose-more-panel { bottom: 35px; width: 230px; padding: 6px; border-color: var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface); box-shadow: var(--ui-shadow); }
+#app .compose-more-panel button { min-height: 27px; padding: 5px 7px; font-size: 0.75rem; }
+
+/* Native-ish dialogs and the embedded ChatGPT sheet. */
+dialog {
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 20px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  box-shadow: var(--ui-shadow);
+}
+dialog::backdrop { background: rgba(29, 29, 31, .28); }
+dialog h2 { margin: 0 0 8px; font-size: 1.125rem; font-weight: 650; }
+dialog p { margin: 7px 0; color: var(--ui-muted); font-size: 0.75rem; line-height: 1.55; }
+dialog label { margin: 14px 0 5px; color: var(--ui-text); font-size: 0.75rem; font-weight: 600; }
+dialog input, dialog select { min-height: 30px; padding: 5px 7px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-surface); color: var(--ui-text); font-size: 0.75rem; }
+dialog fieldset { border-color: var(--ui-line) !important; border-radius: var(--ui-radius-md) !important; }
+.dialog-actions { gap: 6px; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--ui-line); }
+.dialog-actions button { min-height: 29px; padding: 5px 10px; font-size: 0.75rem; }
+.dialog-actions .primary, .primary { color: var(--ui-on-accent); background: var(--ui-accent); }
+.dialog-actions .primary:hover, .primary:hover { background: var(--ui-accent-strong); }
+#browser-overlay { background: rgba(29, 29, 31, .28); }
+#browser-panel { width: min(1120px, calc(100vw - 40px)); height: calc(100dvh - 40px); border-color: var(--ui-line); border-radius: var(--ui-radius-lg); background: var(--ui-surface); box-shadow: var(--ui-shadow); }
+.browser-toolbar { min-height: 46px; padding: 0 14px; gap: 8px; border-bottom-color: var(--ui-line); }
+.browser-toolbar > div { gap: 8px; }
+.browser-toolbar strong { font-size: 0.8125rem; }
+.browser-toolbar span { color: var(--ui-muted); font-size: 0.75rem; }
+.browser-toolbar button { min-height: 27px; padding: 4px 8px; font-size: 0.75rem; }
+.browser-toolbar #browser-close { border-color: var(--ui-line); }
+#browser-handoff { padding: 11px 14px; border-top-color: var(--ui-line); background: var(--ui-canvas); }
+#browser-handoff .flow-title > strong { font-size: 0.75rem; }
+#chatgpt-usage { border-bottom-color: var(--ui-line); background: var(--ui-canvas); }
+
+/* Dark macOS appearance uses the same semantic hierarchy. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ui-canvas: #1c1c1e;
+    --ui-surface: #242426;
+    --ui-sidebar: #202023;
+    --ui-sidebar-active: #263c5c;
+    --ui-text: #f5f5f7;
+    --ui-muted: #a1a1a6;
+    --ui-line: #3a3a3c;
+    --ui-accent: #409cff;
+    --ui-accent-strong: #64b5ff;
+    --ui-on-accent: #1c1c1e;
+    --ui-success: #30d158;
+    --ui-warning: #ffd60a;
+    --ui-danger: #ff6961;
+    --ui-surface-subtle: #2c2c2e;
+    --ui-surface-muted: #263c5c;
+    --ui-danger-surface: #3a2424;
+    --ui-success-surface: #20382a;
+    --ui-warning-surface: #3b321d;
+    --ui-overlay: rgba(0, 0, 0, .48);
+    --ui-border-strong: #636366;
+    --ui-scrollbar-thumb: #636366;
+    --ui-shadow: 0 12px 32px rgba(0, 0, 0, .38);
+  }
+  #app > aside { background: color-mix(in srgb, var(--ui-sidebar) 92%, transparent); }
+  #app > main > header { background: color-mix(in srgb, var(--ui-surface) 94%, var(--ui-canvas)); }
+  #app .compose { border-color: var(--ui-border-strong); }
+  #app #task-filter, #app #known-files, dialog input, dialog select { background: var(--ui-surface-subtle); }
+  .message.user { background: color-mix(in srgb, var(--ui-accent) 14%, var(--ui-surface)); }
+  .diff-add { background: color-mix(in srgb, var(--ui-success) 13%, var(--ui-surface)); }
+  .diff-remove { background: color-mix(in srgb, var(--ui-danger) 13%, var(--ui-surface)); }
+}
+
+/* Keep feature styles on the same semantic surfaces as the native layer. */
+#app .agent-card,
+#app .plan-preview > li,
+#app .worker-card { background: var(--ui-surface); }
+#app .worker-event,
+#app .worker-card pre,
+#app .patch-scroll,
+#app .read-output,
+#app .markdown pre,
+#app .markdown code,
+#app #plan-json { background: var(--ui-surface-subtle); }
+#app .worker-changes summary { background: var(--ui-surface-muted); }
+#app .progress-error { color: var(--ui-danger); background: var(--ui-danger-surface); }
+#app .review-summary { background: var(--ui-success-surface); }
+#app .review-summary.review-attention { background: var(--ui-warning-surface); }
+#app .composer-chip,
+#app #composer-suffix,
+#app #composer-menu,
+#app .compose-more-panel { background: var(--ui-surface); }
+#app .composer-chip,
+#app #composer-menu,
+#app #composer-suffix { border-color: var(--ui-line); }
+#app .project-group.active-project > .project-row,
+#app .project-tasks .thread-row.selected .thread,
+#app .project-tasks .thread.selected { background: var(--ui-sidebar-active); }
+#app .project-group .project-toggle,
+#app .project-group .project-more,
+#app .pin-thread,
+#app #compose-more > summary { min-width: 28px; min-height: 28px; }
+#app #compose-more > summary { width: 30px; height: 30px; }
+#content, #projects, .read-output, .worker-card pre, .patch-scroll { scrollbar-color: var(--ui-scrollbar-thumb) transparent; }
+
+@media (max-width: 900px) {
+  #app > main > header { padding: 0 12px; }
+  #app > main > nav { padding-inline: 12px; }
+  #app > main > footer { padding-inline: 12px; }
+  .read-panel, .conversation, .event-list, .inspector { padding-inline: 16px; }
+  .project-path { max-width: 34vw; }
+}
+
+@media (max-width: 650px) {
+  body.browser-open #app { grid-template-columns: 1fr; }
+  body.browser-open #app > aside, body.browser-open #sidebar-divider { display: none; }
+  #app > main { grid-column: 1; }
+  #app .header-actions #browser-toggle { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #app .compose-controls { align-items: flex-end; }
+  #app button, #app input, #app select, #app summary { min-height: 36px; }
+  #app .round-send { width: 40px !important; height: 40px; min-height: 40px; }
+  #app .dialog-actions button, #app .flow-actions button { min-height: 40px; }
+  #app .executor-controls { min-width: 0; }
+  #app .executor-controls #model-picker { max-width: 125px; }
+  #app #known-files { max-width: 145px; }
+  .flow-next { align-items: flex-start; flex-direction: column; }
+  .flow-actions { width: 100%; justify-content: flex-start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}
+
+/* The welcome composer has an older, intentionally roomy variant. Keep the
+ * same compact rhythm on the first screen as on an active task. */
+#app > main.composing-task > #content { padding-top: clamp(18px, 4vh, 42px); }
+#app .composing-task .welcome-flow h2 { margin: 8px 0 6px; font-size: 1.5625rem; line-height: 1.2; }
+#app .composing-task .welcome-flow > p { line-height: 1.55; }
+#app.composing-task .compose { padding: 10px 11px 8px; }
+#app > main.composing-task #task-input { min-height: 66px; line-height: 1.5; }
+
+/* Readable density and keyboard-safe layouts. These shared rules deliberately
+ * win over the older feature-specific compact variants. */
+:root { --ui-control: 2rem; --ui-touch-control: 44px; }
+html { font-size: 100%; }
+kbd, #app .new kbd { font-size: .75rem; opacity: 1; }
+#app button, #app summary, dialog button { touch-action: manipulation; }
+#app .sidebar-heading .brand { font-size: 1rem; }
+#app > aside > :not(#projects) { flex-shrink: 0; }
+#app > main > header { height: auto; min-height: 4rem; padding-block: .5rem; }
+#app #sidebar-toggle { flex: 0 0 auto; min-width: var(--ui-control); min-height: var(--ui-control); display: grid; place-items: center; }
+#app .project-heading > #project-path:not([hidden]) { display: block; max-width: min(45vw, 34rem); min-height: 1.5rem; font-size: .75rem; }
+#app .project-heading > h1 { font-size: 1rem; }
+#app .header-actions { flex-wrap: wrap; justify-content: flex-end; }
+#app .header-actions .badge { display: inline-flex; font-size: .75rem; max-width: 13rem; }
+#app > main > nav { min-height: 2.75rem; gap: .25rem; padding-block: .375rem; scroll-padding-inline: .5rem; }
+#app > main > nav button { min-height: var(--ui-control); font-size: .8125rem; }
+#app > main > nav button.active { color: var(--ui-accent-strong); box-shadow: inset 0 -2px var(--ui-accent); background: var(--ui-sidebar-active); }
+#app .section-title { font-size: .75rem; letter-spacing: .02em; }
+#app .command-trigger, #app #task-filter, #app .project-group .project, #app .project-tasks .thread, #app .settings { font-size: .8125rem; min-height: var(--ui-control); }
+#app .project-tasks .thread small, #app .project-tasks .side-empty { font-size: .75rem; }
+#app .thread-row .pin-thread { position: static; opacity: 1; flex: 0 0 auto; }
+#app .thread-row .thread { padding-right: .375rem; }
+#app .copy-message { opacity: 1; min-height: 1.5rem; }
+#app .flow-title > strong { font-size: 1rem; line-height: 1.5; }
+#app .flow-title > :is(span,small), #app .flow-stages li, #app .flow-next p, #app .flow-actions button { font-size: .8125rem; }
+#app .flow-title > strong, #app .flow-title > span, #app .latest-progress { display: block; white-space: normal; overflow-wrap: anywhere; }
+#app .flow-stages { flex-wrap: wrap; gap: .5rem; }
+#app .flow-stages li { flex: 1 1 auto; white-space: nowrap; }
+#app .flow-stages li:last-child { flex: 0 0 auto; }
+#app .flow-stages li > span { flex: 0 0 1.5rem; width: 1.5rem; height: 1.5rem; font-size: .75rem; }
+#app .flow-next { flex-wrap: wrap; }
+#app .flow-actions { max-width: 100%; gap: .5rem; }
+#app .flow-actions button { white-space: normal; min-height: var(--ui-control); }
+#app .flow-stages .halted { color: var(--ui-danger); }
+#app .flow-stages .halted > span { background: var(--ui-danger); color: var(--ui-surface); border-color: var(--ui-danger); }
+#app .read-panel, #app .message-text, #app .empty p, #app .inspector p { font-size: .875rem; line-height: 1.6; }
+#app .read-panel h2, #app .inspector h2 { font-size: 1.25rem; line-height: 1.4; text-wrap: balance; }
+#app .read-panel h3 { font-size: 1rem; }
+#app .message-role, #app .read-panel :is(summary,small), #app .inspector :is(small,table) { font-size: .8125rem; }
+#app .read-row, #app .context-row { flex-wrap: wrap; gap: .5rem; }
+#app .read-row > :first-child, #app .context-row > :first-child { min-width: 0; overflow-wrap: anywhere; }
+#app .read-row > span { white-space: normal; }
+#app :is(.read-panel,.inspector,.message-text) :is(p,code,li) { overflow-wrap: anywhere; }
+#app .usage { overflow-x: auto; }
+#app .usage table { font-size: .8125rem; }
+#app .usage td:first-child { overflow-wrap: anywhere; }
+#app .pane-feedback { margin: .75rem 1rem; padding: .75rem 1rem; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-md); background: var(--ui-surface-subtle); }
+#app .pane-feedback[role="alert"] { color: var(--ui-danger); background: var(--ui-danger-surface); }
+#app .pane-feedback p { margin: 0 0 .5rem; color: inherit; }
+#app .pane-feedback button { border: 1px solid currentColor; min-height: var(--ui-control); }
+#app .pane-feedback pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+#app #workflow-shell :is(#error,#notice) { font-size: .8125rem; max-height: 8rem; }
+#app .welcome-flow > p, #app .composing-task .welcome-flow > p { font-size: .9375rem; line-height: 1.6; }
+#app .composing-task .welcome-flow h2 { font-size: 1.875rem; line-height: 1.4; text-wrap: balance; }
+#app .compose, #app .composing-task .compose { padding: .875rem; }
+#app #task-input, #app.manifest-mode #task-input, #app:not(.manifest-mode) #task-input, #app .composing-task #task-input { min-height: 4.5rem; max-height: 30dvh; font-size: .9375rem; line-height: 1.55; }
+#app #task-input::placeholder { color: var(--ui-muted); opacity: 1; }
+#app #operation button { min-height: var(--ui-control); font-size: .8125rem; white-space: normal; }
+#app #operation button.active, #app .compose-controls #send { color: var(--ui-on-accent); background: var(--ui-accent); }
+#app .compose-controls #send:hover { color: var(--ui-on-accent); background: var(--ui-accent-strong); }
+#app #send, #app button.manifest-send { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; width: auto !important; height: auto; min-width: 5rem; min-height: 2.25rem; padding: .5rem .75rem !important; font-size: .875rem; border-radius: var(--ui-radius-md) !important; white-space: normal; }
+#app #send[hidden] { display: none; }
+#app .round-send > svg { flex: 0 0 auto; }
+#app #model-picker > summary { min-height: var(--ui-control); font-size: .8125rem; white-space: normal; }
+#app #model-picker-name, #app #model-picker-effort { max-width: none; overflow-wrap: anywhere; color: var(--ui-text); }
+#app #compose-more > summary { width: var(--ui-control); height: var(--ui-control); display: grid; place-items: center; }
+#app .model-picker-panel, #app .compose-more-panel { width: min(20rem, calc(100cqw - 3rem)); max-height: 60dvh; overflow-y: auto; }
+#app .compose-more-panel button { min-height: var(--ui-control); font-size: .8125rem; }
+#app #composer-menu { max-width: 100%; }
+#app #composer-menu .selected, #app #composer-menu button:hover { color: var(--ui-text); background: var(--ui-sidebar-active); }
+#app #composer-suffix { color: var(--ui-text); }
+#app .composer-chip { color: var(--ui-text); }
+#app .model-hint { display: block; margin: .5rem 0 0; font-size: .8125rem; }
+#app .footnote { font-size: .75rem; line-height: 1.5; flex-wrap: wrap; }
+#app #model-health { color: var(--ui-warning); font-size: .8125rem; }
+#app .added, #app .safe { color: var(--ui-success); }
+#app .removed { color: var(--ui-danger); }
+#app .diff-add { color: var(--ui-success); background: var(--ui-success-surface); }
+#app .diff-remove { color: var(--ui-danger); background: var(--ui-danger-surface); }
+#app .model-chevron { color: var(--ui-muted); }
+dialog, #browser-panel { color: var(--ui-text); background: var(--ui-surface); }
+dialog::backdrop, #browser-overlay { background: var(--ui-overlay); }
+dialog :is(input,select,textarea), dialog button { min-height: 2.25rem; font-size: .875rem; }
+dialog :is(input,select,textarea) { max-width: 100%; }
+dialog select { width: 100%; }
+dialog fieldset { min-width: 0; }
+dialog :is(input,select,textarea), #app #task-filter { border-color: var(--ui-border-strong); }
+dialog small { font-size: .75rem !important; }
+dialog label, dialog p, dialog legend { font-size: .875rem; }
+dialog .dialog-actions { position: static; flex-wrap: wrap; background: var(--ui-surface); }
+dialog :is(p[role="alert"],.field-error), #browser-error { color: var(--ui-danger); }
+#settings-error, #form-error, #rename-error, #manifest-error, #completion-error, #lifecycle-error, .auto-dialog [role="alert"] { color: var(--ui-danger); }
+dialog [aria-invalid="true"] { border: 2px solid var(--ui-danger); }
+dialog button.danger { border: 1px solid var(--ui-danger); color: var(--ui-danger); background: var(--ui-danger-surface); }
+dialog .error-summary { padding: .75rem; border: 1px solid var(--ui-danger); border-radius: var(--ui-radius-sm); }
+dialog .error-summary:empty { padding: 0; border: 0; }
+dialog .error-summary a { display: block; color: var(--ui-danger); padding-block: .25rem; }
+dialog .field-error { margin: .25rem 0; font-size: .8125rem; }
+dialog .field-error:empty { display: none; }
+#project-context-menu { background: var(--ui-surface); color: var(--ui-text); border-color: var(--ui-line); }
+#project-context-menu button:hover { background: var(--ui-sidebar-active); }
+#project-context-menu button:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -2px; background: var(--ui-sidebar-active); }
+#chatgpt-usage .quota-summary > strong { color: var(--ui-success); }
+#browser-panel .browser-toolbar { flex-wrap: wrap; padding-block: .5rem; }
+#browser-panel .browser-toolbar button { min-height: var(--ui-control); font-size: .8125rem; }
+#sidebar-backdrop[hidden], #sidebar-close[hidden] { display: none; }
+body.browser-open #app.sidebar-hidden { grid-template-columns: 0 0 minmax(0,1fr); }
+body.browser-open #app.sidebar-hidden > aside { display: none; }
+
+@media (max-width: 650px) {
+  body.browser-open #app, body.browser-open #app.sidebar-hidden { grid-template-columns: minmax(0,1fr); }
+  body.browser-open #app > aside, body.browser-open #app.sidebar-hidden > aside, body.browser-open #sidebar-divider { display: none; }
+  #app > main > header { display: grid; grid-template-columns: auto minmax(0,1fr); gap: .5rem; padding-inline: .75rem; }
+  #app > main > header .header-actions { grid-column: 2; grid-row: 3; justify-content: flex-start; }
+  #app .header-actions:not(:has(> :not([hidden]))) { display: none; }
+  #app #browser-toggle { grid-column: 2; grid-row: 2; justify-self: start; font-size: .75rem; }
+  #app .project-heading > h1 { white-space: normal; overflow-wrap: anywhere; }
+  #app .project-heading > #project-path:not([hidden]) { max-width: 100%; }
+  #app > main > nav { scrollbar-width: thin; }
+  #app > main > nav::-webkit-scrollbar { display: block; height: 3px; }
+  body.browser-open #app.mobile-sidebar-open > aside { display: flex; position: fixed; z-index: 110; inset: 0 auto 0 0; width: min(22rem, 100vw); padding: .75rem; background: var(--ui-sidebar); box-shadow: var(--ui-shadow); overflow-y: auto; }
+  body.browser-open #app.mobile-sidebar-open .sidebar-heading .brand { display: flex; }
+  #app.mobile-sidebar-open #projects { display: block !important; flex: 1; overflow-y: auto; min-height: 5rem; }
+  #sidebar-close { margin-left: auto; }
+  #sidebar-backdrop:not([hidden]) { position: fixed; inset: 0; z-index: 100; background: var(--ui-overlay); }
+  #app .flow-next { align-items: stretch; }
+  #app .flow-actions { justify-content: flex-start; }
+  #app .executor-controls #model-picker { max-width: none; flex: 1; }
+  #app .compose-controls { flex-wrap: wrap; }
+  #app #known-files { max-width: none; }
+  #app .read-panel, #app .message-text, #app .inspector p { font-size: 1rem; }
+  #app #task-input, #app .composing-task #task-input { font-size: 1rem; }
+  #app .composing-task .welcome-flow h2 { font-size: 1.625rem; }
+  #app > main > footer { padding-bottom: max(.75rem, env(safe-area-inset-bottom)); }
+  .route-guide > div { grid-template-columns: 1fr; gap: .25rem; }
+  #app .usage :is(th,td) { padding: .5rem .25rem; }
+  #browser-panel { width: calc(100vw - 1rem); height: calc(100dvh - 1rem); }
+}
+
+@media (pointer: coarse), (max-width: 650px) {
+  #app :is(button,input,select,summary), dialog :is(button,input,select,summary), #browser-panel button { min-height: var(--ui-touch-control) !important; min-width: var(--ui-touch-control); }
+  #app :is(.project-toggle,.project-more,.pin-thread,#sidebar-toggle,#compose-more>summary,.round-send), #browser-reload { min-width: var(--ui-touch-control); min-height: var(--ui-touch-control); }
+  #app .project-group .project-toggle, #app .project-group .project-more { flex-basis: var(--ui-touch-control); }
+  #app input, #app select, dialog input, dialog select { font-size: 1rem; }
+  #app .flow-actions, #app .compose-controls, #app .executor-controls, .dialog-actions { gap: .5rem; }
+}
+
+@container (max-width: 32rem) {
+  #app > main > header { display: grid; grid-template-columns: auto minmax(0,1fr); gap: .5rem; }
+  #app > main > header .header-actions { grid-column: 2; grid-row: 3; justify-content: flex-start; }
+  #app #browser-toggle { grid-column: 2; grid-row: 2; justify-self: start; }
+  #app .project-heading > h1 { white-space: normal; overflow-wrap: anywhere; }
+  #app .project-heading > #project-path:not([hidden]) { max-width: 100%; }
+}
+
+@media (max-height: 600px) {
+  #app > main { overflow-y: auto; }
+  #app > main > #content { flex: 1 0 auto; min-height: 10rem; overflow: visible; }
+  #app > main > footer { flex: 0 0 auto; }
+  #app .welcome-flow { padding-top: 1rem; }
+  #app > aside { overflow-y: auto; }
+  #projects { flex: 1 0 6rem; }
+}
+
+@media (forced-colors: active) {
+  button, input, select, textarea, .compose { border: 1px solid ButtonText; }
+  #app > main > nav button.active { outline: 2px solid Highlight; }
+}

@@ -11,7 +11,7 @@ import {appendModelOptions,fillReasoningSelect,readTarget,resolvedModel,modelFor
 const source=(await readFile(new URL('../src/main.ts',import.meta.url),'utf8')).replace(/^import .*;\s*$/gm,'');
 const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText.replace(/export\s*\{\s*\};?/g,'');
 const reviewJs=ts.transpileModule((await readFile(new URL('../src/manifest-review.ts',import.meta.url),'utf8')).replace('export function','function'),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
-async function fixture({saved,existing=false,connected=true,duplicate=false,importStatus,importGate,importError,multipleProjects=false,browserOpen=true,autoPreview,planTarget,routeError}={}){
+async function fixture({saved,existing=false,connected=true,duplicate=false,importStatus,importGate,importError,multipleProjects=false,browserOpen=true,autoPreview,planTarget,routeError,startupError}={}){
  const dom=new JSDOM('<div id="app"></div>',{url:'https://workflow.fixture'});
  if(saved)dom.window.localStorage.setItem('astra-ui-v1',saved);
  dom.window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};dom.window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new dom.window.Event('close'));};
@@ -19,8 +19,12 @@ async function fixture({saved,existing=false,connected=true,duplicate=false,impo
  const project={id:'project',name:'Fixture',root:'/fixture'};
  const root={id:'root-session',project_id:project.id,provider:'workflow',provider_thread_id:'workflow:root',title:'入力を保持する',status:'idle'};
  const state={projects:multipleProjects?[project,{id:'other',name:'別プロジェクト',root:'/other'}]:[project],threads:existing?[root]:[],running:false,failReview:false,messages:existing?[{role:'user',text:'保存済みの依頼',key:'old-user'},{role:'assistant',text:'保存済みのプラン',key:'old-plan',label:'プラン · ChatGPT'}]:[],targets:existing?{plan:{model:'gpt-6-astra',reasoning:'high',chatgpt:true},review:{model:'gpt-6-astra',reasoning:'high',chatgpt:true},implement:{model:'codex-implementation',reasoning:'high',chatgpt:false}}:{},phase:'plan',model:'gpt-6-astra'};
+ if(startupError)state.fail={projects:startupError};
  const invoke=async(command,args)=>{
   calls.push({command,args});
+  if(state.gates?.[command])await state.gates[command];
+  if(state.fail?.[command])throw Error(state.fail[command]);
+  if(state.responses&&Object.hasOwn(state.responses,command))return state.responses[command];
   switch(command){
    case 'available_models':return {models:[{key:'local:fixture',label:'Local fixture',model:'local-fixture',local:true,reasoning:[],default_reasoning:null},{key:'codex:gpt-6-astra',label:'Astra on Codex',model:'gpt-6-astra',local:false,reasoning:['high'],default_reasoning:null},{key:'codex:codex-implementation',label:'Implementation',model:'codex-implementation',local:false,reasoning:['high','low'],default_reasoning:null}],warnings:[]};
    case 'preview_auto_route':return autoPreview||{id:'route-1',revision:0,target:{provider:'codex',model:'codex-implementation',reasoning:'high'},reason:'routine',needs_plan:false,blocked:null,confirm_before_run:false};
@@ -32,6 +36,13 @@ async function fixture({saved,existing=false,connected=true,duplicate=false,impo
    case 'model_usage':return args?.threadId?[{model:'session-model',prompt_tokens:1,latency_ms:1000}]:[{model:'global-model',prompt_tokens:99,latency_ms:2000}];
    case 'manage_project':return null;
    case 'worker_insights':return {review:null,recovery:null};
+   case 'repo_diff':return '';
+   case 'inspect_context':return null;
+   case 'memory_candidates':return {candidates:[]};
+   case 'local_model_settings':return {display_name:'Local fixture',model_id:'fixture',endpoint:'http://127.0.0.1:9999',quantization_bits:4};
+   case 'codex_binary':return '/usr/local/bin/codex';
+   case 'astra_settings':return {mode:'disabled',model:'gpt-6-astra',reasoning:null};
+   case 'set_astra_settings':return null;
    case 'projects':return state.projects||[project];
    case 'threads':return state.threads;
    case 'sync_archived_sessions':return [];
@@ -51,11 +62,126 @@ async function fixture({saved,existing=false,connected=true,duplicate=false,impo
  };
  const noop=()=>{};
  const context={tabLabels,flowMarkup,welcomeMarkup,executionOverview,executionPlan,executionContext,executionUsage,focusMarkup,planningRequest,reviewRequest,recordMarkup,syncWorkers,applyWorkerEvent,mergeActivity,progressMarkup,changesMarkup,navigator,window:dom.window,document:dom.window.document,localStorage:dom.window.localStorage,console,Option:dom.window.Option,setTimeout,clearTimeout,setInterval:()=>0,clearInterval:noop,nativeInvoke:invoke,isTauri:()=>true,listen:async()=>noop,appendModelOptions,fillReasoningSelect,readTarget,resolvedModel,modelForTarget,markdown:s=>s,diffMarkup:s=>s,statusLabel:s=>s,planPreview:()=>'',setupManifestReview:()=>noop,setupMcpSettings:()=>noop,setupChatGptUsage:noop,setupBrowserWorkspace:()=>{const bar=dom.window.document.createElement('section');bar.id='workflow-bar';dom.window.document.body.append(bar);return {showBrowser:noop,showWorkspace:noop,isBrowserOpen:()=>browserOpen,setSidebarHidden:noop,setWorkflow:(html,action)=>{bar.innerHTML=html;bar.querySelectorAll('[data-flow-action]').forEach(b=>b.onclick=()=>action(b.dataset.flowAction));}}},setupMemory:noop,memoryPanel:()=>'',bindMemory:noop,setupAutoRouting:noop,showAutoPreview:preview=>calls.push({command:'showAutoPreview',args:preview}),openAutoSettings:noop,setupComposer:()=>({syncContext:noop,getMentions:()=>[],setMentions:noop,clear:noop,refreshThread:async()=>{},seedHistory:async()=>{},remember:async()=>{},beforeSend:async()=>true})};
- for(const name of ['HTMLElement','HTMLButtonElement','HTMLSelectElement','HTMLInputElement','HTMLTextAreaElement','HTMLDialogElement','HTMLDetailsElement','HTMLAnchorElement','HTMLOptionElement'])context[name]=dom.window[name];
+ for(const name of ['HTMLElement','HTMLButtonElement','HTMLSelectElement','HTMLInputElement','HTMLTextAreaElement','HTMLDialogElement','HTMLDetailsElement','HTMLAnchorElement','HTMLOptionElement','URL'])context[name]=dom.window[name];
  context.setupManifestReview=vm.runInNewContext(reviewJs+';setupManifestReview',context);
- const api=await vm.runInNewContext(`(async()=>{${js}\nawait refreshModels();return {render,newTask,choosePhase,send,sendAutonomous,selectThread,refreshWorkflow,refreshAutonomous,refreshDiff,refreshThreads,applyEvent,selectedView,activeId:()=>activeThread};})()`,context);
+ const api=await vm.runInNewContext(`(async()=>{${js}\nawait refreshModels();return {render,newTask,choosePhase,send,sendAutonomous,selectThread,refreshWorkflow,refreshAutonomous,refreshDiff,refreshUsage,refreshContext,refreshThreads,applyEvent,selectedView,activeId:()=>activeThread};})()`,context);
  return {dom,calls,clipboard,state,api,select:dom.window.document.querySelector('#preference'),input:dom.window.document.querySelector('#task-input'),document:dom.window.document,close:()=>dom.window.close()};
 }
+test('failed startup exposes a read-only retry without repeating archive synchronization',async()=>{
+ const f=await fixture({startupError:'接続エラー'});try{
+  assert.match(f.document.querySelector('#error').textContent,/一覧を読み込めません/);
+  delete f.state.fail.projects;f.document.querySelector('#retry-error').click();await new Promise(r=>setTimeout(r,0));
+  assert.equal(f.document.querySelector('#project-title').textContent,'Fixture');
+  assert.equal(f.calls.filter(c=>c.command==='sync_archived_sessions').length,1);
+ }finally{f.close();}
+});
+test('typing and clearing a direct request updates send availability immediately',async()=>{
+ const f=await fixture();try{
+  const send=f.document.querySelector('#send');assert.equal(send.disabled,true);
+  f.input.value='検索を改善する';f.input.dispatchEvent(new f.dom.window.Event('input',{bubbles:true}));assert.equal(send.disabled,false);
+  f.input.value='  ';f.input.dispatchEvent(new f.dom.window.Event('input',{bubbles:true}));assert.equal(send.disabled,true);
+ }finally{f.close();}
+});
+test('manual tab navigation keeps focus in the tab rail until activation',async()=>{
+ const f=await fixture();try{
+  assert.equal(f.document.querySelector('#app').firstElementChild.id,'skip-to-content');
+  const first=f.document.querySelector('[data-tab="Chat"]');first.focus();
+  for(let i=0;i<2;i++)f.document.activeElement.dispatchEvent(new f.dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
+  assert.equal(f.document.activeElement.dataset.tab,'Diff');
+  assert.equal(first.getAttribute('aria-selected'),'true');
+  f.document.activeElement.click();
+  assert.equal(f.document.activeElement.dataset.tab,'Diff');
+  assert.equal(f.document.querySelector('#content').getAttribute('aria-labelledby'),'tab-Diff');
+  assert.equal(f.document.querySelector('#content').hasAttribute('aria-live'),false);
+ }finally{f.close();}
+});
+async function directFixture(){const f=await fixture();f.state.threads=[{id:'direct-task',project_id:'project',provider:'codex',provider_thread_id:'provider-direct',title:'検証する',status:'completed'}];await f.api.refreshThreads();await f.api.selectThread('direct-task');return f;}
+test('a read distinguishes loading from empty and preserves previous data on failure',async()=>{
+ const f=await directFixture();let release;try{
+  f.state.gates={model_usage:new Promise(r=>release=r)};
+  f.document.querySelector('[data-tab="Usage"]').click();
+  assert.equal(f.document.querySelector('#content').getAttribute('aria-busy'),'true');
+  assert.match(f.document.querySelector('#content').textContent,/読み込み中/);
+  assert.doesNotMatch(f.document.querySelector('#content').textContent,/0件/);
+  release();await f.api.refreshUsage();
+  assert.match(f.document.querySelector('#content').textContent,/session-model/);
+  f.state.fail={model_usage:'一時的な接続エラー'};await f.api.refreshUsage();
+  assert.match(f.document.querySelector('#content').textContent,/前回の表示を残しています/);
+  assert.match(f.document.querySelector('#content').textContent,/session-model/);
+  assert.ok(f.document.querySelector('#retry-pane'));
+  delete f.state.fail.model_usage;await f.api.refreshUsage();
+  assert.equal(f.document.querySelector('#retry-pane'),null);
+ }finally{release?.();f.close();}
+});
+test('a late failed read cannot replace or attach an error to a different task',async()=>{
+ const f=await directFixture();let release;try{
+  f.state.gates={repo_diff:new Promise(r=>release=r)};f.state.fail={repo_diff:'古いタスクの読み取り失敗'};
+  f.document.querySelector('[data-tab="Diff"]').click();const pending=f.api.refreshDiff('direct-task');
+  f.api.newTask();const before=f.document.querySelector('#content').textContent;
+  release();await pending;
+  assert.equal(f.document.querySelector('#content').textContent,before);
+  assert.equal(f.document.querySelector('#error').hidden,true);
+ }finally{release?.();f.close();}
+});
+test('saved execution plans expose a scoped retry when snapshot refresh fails',async()=>{
+ const f=await fixture();try{
+  f.state.steps=[{step:{key:'check',title:'検証用の保存済み工程',level:2},status:'completed',target:{model:'fixture'},verification:[]}];
+  await f.api.sendAutonomous('fixture-only-plan','project');f.state.fail={autonomous_snapshot:'一時的な読み取りエラー'};
+  f.document.querySelector('[data-tab="Plan"]').click();await new Promise(r=>setTimeout(r,0));
+  assert.ok(f.document.querySelector('#retry-pane'));assert.match(f.document.querySelector('#content').textContent,/計画を読み込めません/);
+  assert.match(f.document.querySelector('#content').textContent,/検証用の保存済み工程/);
+  delete f.state.fail.autonomous_snapshot;f.document.querySelector('#retry-pane').click();await new Promise(r=>setTimeout(r,0));
+  assert.equal(f.document.querySelector('#retry-pane'),null);
+ }finally{f.close();}
+});
+test('rerender retains focus on a message action without announcing the entire transcript',async()=>{
+ const f=await directFixture();try{
+  f.api.selectedView().messages=[{role:'assistant',key:'reply',text:'作業結果'}];f.api.render();
+  f.document.querySelector('[data-copy-message="0"]').focus();f.api.render();
+  assert.equal(f.document.activeElement.dataset.copyMessage,'0');
+  assert.equal(f.document.querySelector('#content').hasAttribute('aria-live'),false);
+ }finally{f.close();}
+});
+test('project disclosure retains focus and unchanged task trees are not replaced',async()=>{
+ const f=await fixture();try{
+  const button=f.document.querySelector('[data-project-toggle]');button.focus();button.click();
+  assert.equal(f.document.activeElement.dataset.projectToggle,'project');
+  const current=f.document.activeElement;f.api.render();assert.equal(f.document.activeElement,current);
+ }finally{f.close();}
+});
+test('deleting history requires a task-specific second confirmation and closing cancels it',async()=>{
+ const f=await directFixture();try{
+  const open=()=>f.document.querySelector('#session-actions').click();
+  const remove=()=>Array.from(f.document.querySelectorAll('#lifecycle-actions button')).find(b=>b.textContent.includes('履歴を削除'));
+  open();remove().click();assert.equal(f.calls.filter(c=>c.command==='manage_session').length,0);
+  assert.match(f.document.querySelector('#lifecycle-description').textContent,/検証する/);
+  f.document.querySelector('#lifecycle-close').click();open();
+  assert.equal(remove().dataset.confirmed,undefined);remove().click();
+  f.state.responses={manage_session:null};f.state.threads=[];remove().click();await new Promise(r=>setTimeout(r,0));
+  assert.equal(f.calls.filter(c=>c.command==='manage_session').length,1);
+  assert.equal(f.calls.find(c=>c.command==='manage_session').args.threadId,'direct-task');
+  assert.equal(f.calls.find(c=>c.command==='manage_session').args.action,'delete');
+ }finally{f.close();}
+});
+test('settings errors are linked to fields and repeated submit cannot duplicate a save',async()=>{
+ const f=await fixture();let release;try{
+  f.document.querySelector('#settings').click();await new Promise(r=>setTimeout(r,0));
+  const form=f.document.querySelector('#settings-form'),name=f.document.querySelector('#local-name'),endpoint=f.document.querySelector('#local-endpoint');
+  name.value='';endpoint.value='invalid';form.dispatchEvent(new f.dom.window.Event('submit',{bubbles:true,cancelable:true}));
+  assert.equal(name.getAttribute('aria-invalid'),'true');assert.equal(endpoint.getAttribute('aria-invalid'),'true');
+  assert.equal(f.document.activeElement.id,'settings-error');assert.equal(f.document.querySelectorAll('#settings-error a').length,2);
+  assert.ok(!f.calls.some(c=>c.command.startsWith('set_')));
+  f.document.querySelector('#settings-cancel').click();f.document.querySelector('#settings').click();await new Promise(r=>setTimeout(r,0));
+  assert.equal(name.getAttribute('aria-invalid'),null);assert.equal(f.document.querySelector('#local-endpoint-error').textContent,'');
+  name.value='Local fixture';endpoint.value='http://127.0.0.1:9999';
+  f.state.gates={set_astra_settings:new Promise(r=>release=r)};
+  form.dispatchEvent(new f.dom.window.Event('submit',{bubbles:true,cancelable:true}));
+  form.dispatchEvent(new f.dom.window.Event('submit',{bubbles:true,cancelable:true}));
+  await new Promise(r=>setTimeout(r,0));
+  assert.equal(form.getAttribute('aria-busy'),'true');assert.equal(f.calls.filter(c=>c.command==='set_astra_settings').length,1);
+  release();await new Promise(r=>setTimeout(r,0));assert.equal(form.getAttribute('aria-busy'),'false');
+ }finally{release?.();f.close();}
+});
 test('startup never reads clipboard or invokes the retired browser transport',async()=>{
  const f=await fixture();try{assert.ok(!f.calls.some(c=>/chatgpt|workflow_run|manifest_import/.test(c.command)));assert.equal(f.document.querySelector('#chatgpt-dialog'),null);}finally{f.close();}
 });
@@ -112,6 +238,7 @@ test('worker progress survives snapshots, streams child events and reads actual 
   f.state.activityError='一時的な読み取り失敗';await f.api.refreshAutonomous('root-session');
   assert.equal(f.api.selectedView().running,true);
   assert.match(f.api.selectedView().progress.error,/一時的/);
+  assert.ok(f.document.querySelector('#retry-activity'));
   delete f.state.activityError;await f.api.refreshAutonomous('root-session');assert.equal(f.api.selectedView().progress.error,undefined);
  }finally{f.close();}
 });

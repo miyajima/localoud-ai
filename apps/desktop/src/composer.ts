@@ -9,13 +9,14 @@ type Candidate={label:string;detail:string;choose:()=>void};
 type Question={request_id:string;questions:{id:string;header:string;question:string;isSecret?:boolean;options?:{label:string;description:string}[]|null}[]};
 export function setupComposer(deps:Dependencies){
   const input=document.querySelector<HTMLTextAreaElement>('#task-input')!;
+  input.setAttribute('aria-autocomplete','list');
   const assist=document.createElement('div');assist.id='composer-assist';input.after(assist);
   assist.innerHTML='<div id="composer-chips"></div><div id="composer-suffix" role="status" aria-live="polite" hidden></div><div class="composer-tools"><button type="button" id="composer-slash">/ コマンド</button><button type="button" id="composer-at">@ 参照</button><button type="button" id="composer-history">入力履歴</button><button type="button" id="composer-ai">AI補完</button><button type="button" id="composer-settings">補完設定</button><span id="composer-hint" role="status" aria-live="polite"></span></div><div id="composer-menu" role="listbox" aria-label="入力候補" hidden></div>';
   const tools=assist.querySelector('.composer-tools')!;
   const panel=document.querySelector('#compose-more .compose-more-panel');
   if(panel){for(const button of Array.from(tools.querySelectorAll('button')))panel.append(button);}
   const interactions=document.createElement('div');interactions.id='composer-interactions';interactions.hidden=true;document.querySelector('#content')!.before(interactions);
-  const settings=document.createElement('dialog');settings.id='completion-settings-dialog';settings.innerHTML='<form><h2>入力補完</h2><p>このプロジェクトの入力履歴から、続きの候補を表示します。候補を採用するまで入力は変わりません。</p><label><input type="checkbox" id="completion-enabled"> 履歴で補えない場合はAI補完を使う</label><p>入力履歴を優先し、一致する候補がなければ設定済みのローカルLLMで補完します。ローカルが未接続・未対応・生成失敗の場合はLunaを使います。</p><p>補完に使うのは現在の入力と、このプロジェクトの直近の入力履歴です。Lunaへ切り替える場合はそれらを送信します。リポジトリ本文は送信しません。</p><p>候補が表示されたらTabで採用、Escで閉じます。候補のないTabは入力欄に留まります。Shift+Tab、またはEscのあとTabで次の項目へ移動できます。</p><p id="completion-error" role="alert"></p><div class="dialog-actions"><button type="button" id="completion-close">閉じる</button><button type="submit" class="primary">保存</button></div></form>';document.body.append(settings);
+  const settings=document.createElement('dialog');settings.id='completion-settings-dialog';settings.innerHTML='<form><h2>入力補完</h2><p>このプロジェクトの入力履歴から、続きの候補を表示します。候補を採用するまで入力は変わりません。</p><label><input type="checkbox" id="completion-enabled"> 履歴で補えない場合はAI補完を使う</label><p>入力履歴を優先し、一致する候補がなければ設定済みのローカルLLMで補完します。ローカルが未接続・未対応・生成失敗の場合はLunaを使います。</p><p>補完に使うのは現在の入力と、このプロジェクトの直近の入力履歴です。Lunaへ切り替える場合はそれらを送信します。リポジトリ本文は送信しません。</p><p>候補が表示されたらTabで採用、Escで閉じます。候補がないときはTabで次の項目へ移動します。Shift+Tabで前の項目へ戻れます。</p><p id="completion-error" role="alert"></p><div class="dialog-actions"><button type="button" id="completion-close">閉じる</button><button type="submit" class="primary">保存</button></div></form>';document.body.append(settings);
   const menu=assist.querySelector<HTMLDivElement>('#composer-menu')!,suffixPanel=assist.querySelector<HTMLDivElement>('#composer-suffix')!;
   const chips=assist.querySelector<HTMLDivElement>('#composer-chips')!,hint=assist.querySelector<HTMLSpanElement>('#composer-hint')!;
   const byId=<T extends HTMLElement=HTMLElement>(id:string)=>document.getElementById(id) as T;
@@ -25,7 +26,7 @@ export function setupComposer(deps:Dependencies){
   let timer:ReturnType<typeof setTimeout>|undefined,config:CompletionConfig={enabled:true,model:'local-first',reasoning:'low'},interactionVersion=0,lastInteraction='';
   function key(){return `${deps.project()||''}:${deps.thread()||''}`;}
   function args(){return {projectId:deps.project(),threadId:deps.thread()};}
-  function hideMenu(){menu.hidden=true;input.removeAttribute('aria-activedescendant');input.setAttribute('aria-expanded','false');candidates=[];}
+  function hideMenu(){menu.hidden=true;input.removeAttribute('aria-activedescendant');candidates=[];}
   function hideSuffix(){suffix='';suffixPanel.hidden=true;suffixPanel.replaceChildren();hint.textContent='';hint.title='';hint.classList.remove('pending');}
   function sourceName(source:string){return source.startsWith('Luna')?'Luna':source==='入力履歴'?'履歴':'ローカルLLM';}
   function changed(){deps.changed();}
@@ -41,7 +42,7 @@ export function setupComposer(deps:Dependencies){
     const expected=key();catalogPromise=deps.call<Catalog>('composer_catalog',args()).then(value=>{if(key()===expected){catalog=value;if(value.warnings.length)deps.notice(value.warnings.join('\n'));}return value;}).finally(()=>{if(key()===expected)catalogPromise=null;});return catalogPromise;
   }
   function paint(){
-    menu.replaceChildren();input.setAttribute('aria-controls','composer-menu');input.setAttribute('aria-expanded','true');
+    menu.replaceChildren();input.setAttribute('aria-controls','composer-menu');
     candidates.forEach((candidate,index)=>{const button=document.createElement('button');button.type='button';button.id=`composer-candidate-${index}`;button.setAttribute('role','option');button.setAttribute('aria-selected',String(index===selected));button.className=index===selected?'selected':'';const title=document.createElement('strong');title.textContent=candidate.label;const detail=document.createElement('small');detail.textContent=candidate.detail;button.append(title,detail);button.onmousedown=e=>e.preventDefault();button.onclick=()=>candidate.choose();menu.append(button);});
     if(!candidates.length){const empty=document.createElement('p');empty.textContent='該当する候補はありません。';menu.append(empty);}
     menu.hidden=false;if(candidates[selected]){input.setAttribute('aria-activedescendant',`composer-candidate-${selected}`);menu.children[selected]?.scrollIntoView({block:'nearest'});}
@@ -128,7 +129,7 @@ export function setupComposer(deps:Dependencies){
     if(e.ctrlKey&&e.code==='Space'){take();void complete(true);return;}
     if(!menu.hidden&&['ArrowDown','ArrowUp'].includes(e.key)){take();selected=(selected+(e.key==='ArrowDown'?1:-1)+Math.max(1,candidates.length))%Math.max(1,candidates.length);paint();return;}
     if(!menu.hidden&&((e.key==='Enter'&&!e.metaKey&&!e.ctrlKey)||e.key==='Tab')&&candidates[selected]){take();candidates[selected].choose();return;}
-    if(e.key==='Tab'){take();if(suffix)acceptSuffix();else{hint.textContent=aiBusy?'補完中…':'候補はまだありません';hint.title='入力を続けてください。Shift+Tab、またはEsc → Tabで入力欄から移動できます。';}}
+    if(e.key==='Tab'&&suffix){take();acceptSuffix();}
   },true);
   const checkCaret=()=>{if(input.selectionStart!==input.value.length||input.selectionStart!==input.selectionEnd)hideSuffix();};
   input.addEventListener('click',checkCaret);input.addEventListener('keyup',checkCaret);input.addEventListener('select',checkCaret);

@@ -14,28 +14,28 @@ export function flowMarkup(f:Flow){
  const halted=['failed','interrupted','reconciliation_required'].includes(f.status);
  const action=(key:string,text:string,primary=false,disabled=false)=>`<button data-flow-action="${key}" ${key==='import'?'title="コピーした計画・レビューを取り込んで次へ（⌘⇧V / Ctrl+Shift+V）"':''} class="${primary?'primary':''}" ${f.busy||disabled?'disabled':''}>${text}</button>`;
  let next='',actions='';
- if(!f.project){next='作業するプロジェクトを選んで始めます。';actions=action('project','フォルダを開く',true);}
+ if(!f.project){next='プロジェクトを選択してください。';actions=action('project','フォルダを開く',true);}
  else if(f.kind==='legacy'){next='旧方式の保存記録です。新しい依頼は新しいタスクで始めます。';}
  else if(f.kind==='direct'){
-  next=!f.hasTask?'依頼先を選び、やりたいことを書いて送信。おまかせなら内容に応じて担当を決めます。':halted?'作業が中断しています。状態を確認して再開してください。':index===2?'実行が終了しました。変更と結果を確認し、続きの指示を入力できます。':f.running===false?'続きの指示を入力できます。':'依頼した内容を実行しています。進捗は概要、詳細はログで確認できます。';
+  next=!f.hasTask?'依頼先を選び、内容を入力して送信。':halted?'作業が中断しています。状態を確認して再開してください。':index===2?'実行が終了しました。変更と結果を確認できます。':f.running===false?'続きの指示を入力できます。':'実行中です。進捗は概要、詳細はログで確認できます。';
   if(halted)actions=action('resume','再開・状態を確認',true);
   else if(f.hasTask&&index===1&&f.running!==false)actions=action('stop',f.stopping?'停止中…':'停止',false,f.stopping);
  }else if(!f.hasTask){
-  next=f.planningRequested?'依頼をコピーしました。ChatGPTの入力欄に貼り付けて相談し、返ってきた計画をコピーしてください。':'作業画面で依頼を準備すると、対象プロジェクトの情報も一緒にコピーできます。';
+  next=f.planningRequested?'依頼をコピーしました。ChatGPTで相談し、計画をコピーしてください。':'依頼を書いて、ChatGPTで計画を作ります。';
   actions=action('write',f.planningRequested?'依頼を編集':'依頼を書く',!f.planningRequested)+action('import',f.importing?'取り込み中…':'コピーした計画を確認',f.planningRequested);
- }else if(halted){next='実行が中断しています。記録を確認し、状態を確認して再開してください。';actions=action('resume','再開・状態を確認',true);}
- else if(index===2){next=f.status==='queued'?'計画を取り込みました。workerの開始を待っています。':f.status==='stopping'?'停止処理中です。実行状態の確定を待っています。':f.iteration&&f.iteration>1?'修正内容を実装・検証しています。完了すると再レビューへ進みます。':'計画に沿って実装・検証しています。完了するとレビューへ進みます。';actions=action('stop',f.stopping||f.status==='stopping'?'停止中…':'停止',false,f.stopping||f.status==='stopping');}
+ }else if(halted){next='実行が中断しています。状態を確認して再開してください。';actions=action('resume','再開・状態を確認',true);}
+ else if(index===2){next=f.status==='queued'?'計画を取り込みました。開始を待っています。':f.status==='stopping'?'停止処理中です。確定を待っています。':f.iteration&&f.iteration>1?'修正内容を実装・検証しています。完了すると再レビューへ進みます。':'計画に沿って実装・検証しています。完了するとレビューへ進みます。';actions=action('stop',f.stopping||f.status==='stopping'?'停止中…':'停止',false,f.stopping||f.status==='stopping');}
  else if(index===3){
-  next=f.status==='review_rejected'?'レビューは未合格です。指摘をChatGPTで確認し、修正指示または追加レビューを受け取ります。':f.reviewRequested?'レビュー依頼をコピー済みです。ChatGPTへ貼り付け、返ってきたレビュー結果を取り込んでください。':'実装・検証が終わりました。ChatGPTへレビューを依頼し、返ってきた結果を取り込みます。';
+  next=f.status==='review_rejected'?'レビューは未合格です。指摘を確認し、修正指示を取り込みます。':f.reviewRequested?'レビュー依頼をコピー済みです。結果を取り込んでください。':'実装・検証が終わりました。レビューを依頼してください。';
   const review=action('review',f.reviewRequested?'レビュー依頼を再コピー':'レビュー依頼をコピー',!f.reviewRequested,!f.version);
   const receive=action('import',f.importing?'取り込み中…':'コピーした結果を確認',f.reviewRequested);
   actions=f.reviewRequested?receive+review:review+receive;
-  next+=' 内容を確認し、修正の実行または完了へ進めます。';
- }else{next='作業フォルダの成果物がレビューに合格しました。変更内容と保存先を確認できます。';actions=action('new','次のタスク',false);}
- return `<div class="flow-title" data-flow-kind="${f.kind}"><span>${esc(f.project||'プロジェクト未選択')}${f.kind==='direct'?' · タスク':f.kind==='legacy'?' · 保存記録':''}</span><strong title="${esc(f.title)}">${esc(f.title||'新しいタスク')}</strong>${f.id?`<small title="${esc(f.id)}">ID ${esc(f.id.slice(0,8))}${f.iteration&&f.iteration>1?' · 実行 '+f.iteration+'回目':''}</small>`:''}</div><div class="flow-body">${f.iteration&&f.iteration>1?`<p class="flow-cycle">${f.iteration}回目の実行 · 実装とレビューを繰り返して確認</p>`:''}${index>=0?`<ol class="flow-stages" aria-label="作業の工程">${stages.map((stage,i)=>`<li class="${i<index||f.hasTask&&index===stages.length-1?'done':''} ${i===index?'current':''} ${i===index&&halted?'halted':''}" ${i===index?'aria-current="step"':''}><span>${i+1}</span>${stage}</li>`).join('')}</ol>`:''}<div class="flow-next"><p role="status">${esc(next)}</p><div class="flow-actions" aria-label="現在の工程の操作">${actions}</div></div></div>`;
+  next+=' 結果を確認して次へ進みます。';
+ }else{next='レビューに合格しました。変更内容と保存先を確認できます。';actions=action('new','次のタスク',false);}
+ return `<div class="flow-title" data-flow-kind="${f.kind}"><span>${esc(f.project||'プロジェクト未選択')}${f.kind==='direct'?' · タスク':f.kind==='legacy'?' · 保存記録':''}</span><strong title="${esc(f.title)}">${esc(f.title||'新しいタスク')}</strong>${f.id?`<small title="${esc(f.id)}">ID ${esc(f.id.slice(0,8))}${f.iteration&&f.iteration>1?' · 実行 '+f.iteration+'回目':''}</small>`:''}</div><div class="flow-body">${f.iteration&&f.iteration>1?`<p class="flow-cycle">${f.iteration}回目の実行 · 実装とレビューを繰り返して確認</p>`:''}${index>=0?`<ol class="flow-stages" aria-label="作業の工程">${stages.map((stage,i)=>`<li class="${i<index||f.hasTask&&index===stages.length-1?'done':''} ${i===index?'current':''} ${i===index&&halted?'halted':''}" ${i===index?'aria-current="step"':''}><span>${i+1}</span>${stage}</li>`).join('')}</ol>`:''}<div class="flow-next"><p role="status">${esc(next)}</p><div class="flow-actions" role="group" aria-label="現在の工程の操作">${actions}</div></div></div>`;
 }
 export function welcomeMarkup(hasProject:boolean,planning:boolean,request?:string){
- return `<section class="read-panel welcome-flow"><span class="welcome-kicker">${planning?'PLAN WITH CHATGPT':'NEW TASK'}</span><h2>${!hasProject?'作業するフォルダを開く':planning?'まず、進め方を相談する。':'何を進めますか？'}</h2><p>${!hasProject?'プロジェクトを選んだら、やりたいことを書くだけで始められます。':planning?'依頼を準備してChatGPTへ。返ってきた計画を確認してから、実行へ進みます。':'小さな修正も、調査が必要な依頼も。やりたいことをそのまま書いてください。'}</p>${!hasProject?'<button id="welcome-add" class="primary">フォルダを開く</button>':planning?`<div class="planning-receipt">${request?`<details id="pending-planning-request"><summary>前回コピーした依頼</summary><p class="request-goal">${esc(request)}</p></details><button data-flow-action="chat">ChatGPTで続きを相談</button>`:''}<button data-flow-action="import">${request?'コピーした計画を確認':'すでに計画がある場合は取り込む'}</button></div>`:''}</section>`;
+ return `<section class="read-panel welcome-flow"><span class="welcome-kicker">${planning?'PLAN WITH CHATGPT':'NEW TASK'}</span><h2>${!hasProject?'作業するフォルダを開く':planning?'まず、進め方を相談する。':'何を進めますか？'}</h2><p>${!hasProject?'プロジェクトを選び、依頼を書いて始めます。':planning?'ChatGPTで計画を確認してから実行します。':'依頼を書いて、そのまま進めます。'}</p>${!hasProject?'<button id="welcome-add" class="primary">フォルダを開く</button>':planning?`<div class="planning-receipt">${request?`<details id="pending-planning-request"><summary>前回コピーした依頼</summary><p class="request-goal">${esc(request)}</p></details><button data-flow-action="chat">ChatGPTで続きを相談</button>`:''}<button data-flow-action="import">${request?'コピーした計画を確認':'計画を取り込む'}</button></div>`:''}</section>`;
 }
 export type ExecutionRecord = {focus:TaskFocus;steps:WorkerStep[];artifactPath?:string;review?:{summary:string;findings:string[];verdict:string};scope?:string[]};
 const list=(items:string[]|undefined)=>items?.length?`<ul>${items.map(s=>`<li>${esc(s)}</li>`).join('')}</ul>`:'<p class="muted">記録されていません。</p>';

@@ -42,21 +42,21 @@ test('late AI completion cannot cross project or replace edited input',async()=>
  input.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));assert.equal(input.value,'別の依頼を確認して');dom.window.close();
 });
 
-test('Tab stays in the editor while waiting, accepts only ready suggestions, and retains keyboard exits',async()=>{
+test('Tab moves on while waiting and only accepts a ready suggestion',async()=>{
  const dom=new JSDOM('<section id="content"></section><textarea id="task-input"></textarea>',{url:'https://fixture.local'});
  globalThis.document=dom.window.document;dom.window.HTMLElement.prototype.scrollIntoView=function(){};
  let resolve;const c=setupComposer({call:async command=>{if(command==='completion_settings')return {enabled:true,model:'local-first',reasoning:'low'};if(command==='complete_prompt')return new Promise(r=>{resolve=r;});return [];},project:()=> 'p',thread:()=>null,busy:()=>false,running:()=>false,codex:()=>false,mode:()=> 'implement',setMode:()=>true,models:()=>[],changed:()=>{},notice:()=>{},error:()=>{}});
  c.syncContext();await new Promise(r=>setImmediate(r));
  const input=document.querySelector('#task-input');input.value='戻り値の型を';input.focus();input.setSelectionRange(input.value.length,input.value.length);
  const key=(key,extra={})=>{const e=new dom.window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true,...extra});input.dispatchEvent(e);return e;};
- assert.equal(key('Tab').defaultPrevented,true);assert.equal(document.activeElement,input);assert.equal(input.value,'戻り値の型を');
+ assert.equal(key('Tab').defaultPrevented,false);assert.equal(input.value,'戻り値の型を');
  key(' ',{ctrlKey:true,code:'Space'});await new Promise(r=>setImmediate(r));assert.match(document.querySelector('#composer-hint').textContent,/補完中/);
- assert.equal(key('Tab').defaultPrevented,true);assert.equal(input.value,'戻り値の型を');
+ assert.equal(key('Tab').defaultPrevented,false);assert.equal(input.value,'戻り値の型を');
  resolve({suffix:'確認してください。',source:'ローカル · vendor/long-model-8bit',fallback_reason:null});await new Promise(r=>setImmediate(r));
  assert.equal(document.querySelector('#composer-suffix small').textContent,'ローカルLLM');assert.equal(document.querySelector('#composer-hint').textContent,'');assert.match(document.querySelector('.completion-accept').textContent,/Tab.*採用/);
  assert.equal(key('Tab').defaultPrevented,true);assert.equal(input.value,'戻り値の型を確認してください。');assert.equal(document.activeElement,input);assert.equal(document.querySelector('#composer-suffix').hidden,true);
  assert.equal(key('Tab',{shiftKey:true}).defaultPrevented,false);
- key('Escape');assert.equal(key('Tab').defaultPrevented,false);assert.equal(key('Tab').defaultPrevented,true);
+ key('Escape');assert.equal(key('Tab').defaultPrevented,false);assert.equal(key('Tab').defaultPrevented,false);
  dom.window.close();
 });
 test('moving the caret or leaving the editor invalidates the visible Tab suggestion',async()=>{

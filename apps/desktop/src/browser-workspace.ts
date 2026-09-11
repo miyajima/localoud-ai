@@ -18,8 +18,8 @@ export function setupBrowserWorkspace(invoke: Invoke) {
   toggle.textContent = 'ChatGPTで相談'; toggle.title = 'ChatGPTを開く ⌘⇧B';
   toggle.setAttribute('aria-controls', 'browser-panel'); toggle.setAttribute('aria-haspopup', 'dialog'); header.append(toggle);
   const overlay = document.createElement('div'); overlay.id = 'browser-overlay'; overlay.hidden = true;
-  const panel = document.createElement('section'); panel.id = 'browser-panel'; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-labelledby', 'browser-title');
-  panel.innerHTML = '<div class="browser-toolbar"><div><strong id="browser-title">ChatGPT Web</strong><span>計画・相談・レビュー</span></div><button id="browser-reload" type="button" aria-label="ChatGPTを再読み込み" title="再読み込み">↻</button><button id="browser-close" type="button">作業に戻る <span aria-hidden="true">×</span></button></div><div id="chatgpt-usage"></div><div id="browser-surface"><p id="browser-error" role="status"></p></div><section id="browser-handoff" aria-label="Localoudとの受け渡し" hidden></section>';
+  const panel = document.createElement('section'); panel.id = 'browser-panel'; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-labelledby', 'browser-title');
+  panel.innerHTML = '<div class="browser-toolbar"><div><strong id="browser-title">ChatGPT Web</strong><span>計画・相談・レビュー</span></div><button id="browser-reload" type="button" aria-label="ChatGPTを再読み込み" title="再読み込み"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M13 6A5 5 0 1 0 14 9"/><path d="M13 3v3h-3"/></svg></button><button id="browser-close" type="button">作業に戻る <span aria-hidden="true">×</span></button></div><div id="chatgpt-usage"></div><div id="browser-surface"><p id="browser-error" role="alert" aria-live="assertive"></p></div><section id="browser-handoff" aria-label="Localoudとの受け渡し" hidden></section>';
   overlay.append(panel); document.body.append(overlay);
   const divider = document.createElement('div'); divider.id = 'sidebar-divider'; divider.tabIndex = 0;
   divider.setAttribute('role', 'separator'); divider.setAttribute('aria-label', 'プロジェクト一覧の幅'); divider.setAttribute('aria-orientation', 'vertical'); main.before(divider);
@@ -75,7 +75,14 @@ export function setupBrowserWorkspace(invoke: Invoke) {
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
     }
   });
-  panel.querySelector('#browser-reload')!.addEventListener('click', () => { void invoke('browser_reload').catch(e => { panel.querySelector('#browser-error')!.textContent = String(e); }); });
+  const reload=panel.querySelector<HTMLButtonElement>('#browser-reload')!;
+  panel.querySelector('#browser-error')!.removeAttribute('aria-live');
+  reload.addEventListener('click', async () => {
+    if(reload.disabled)return;reload.disabled=true;reload.setAttribute('aria-busy','true');
+    try{await invoke('browser_reload');panel.querySelector('#browser-error')!.textContent='';}
+    catch(e){panel.querySelector('#browser-error')!.textContent=`再読み込みに失敗しました。接続を確認して、もう一度お試しください。 ${String(e)}`;}
+    finally{reload.disabled=false;reload.setAttribute('aria-busy','false');}
+  });
   window.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyB') { e.preventDefault(); overlay.hidden ? showBrowser() : closeBrowser(); } });
   divider.addEventListener('pointerdown', e => {
     divider.setPointerCapture(e.pointerId);

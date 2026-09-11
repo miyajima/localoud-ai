@@ -19,6 +19,7 @@ import './style.css';
 import './auto-routing.css';
 import './composer.css';
 import './workflow-ui.css';
+import './native-ui.css';
 import {setupComposer} from './composer';
 import type {Mention} from './composer-model';
 let composer:ReturnType<typeof setupComposer>|undefined;
@@ -43,6 +44,7 @@ type ChatMessage = { role: string; text: string; key: string; label?:string };
 type Snapshot = { active_turn: { id: string } | null; messages: { role: string; text: string }[] };
 type View = { messages: ChatMessage[]; events: JournalEvent[]; diff: string; running: boolean; needsResume: boolean; sequence: number; route?: string; summary?: string; review?: string; finalReview?: {verdict:string;findings:string[];rework_instruction:string|null}; recovery?:{action:string;reason:string;instruction:string;replacement:unknown|null}; activeTurn?:string; completedTurns?:Set<string>; capture?:Capture; context?: ContextInspection|null; progress?:Progress; focus?:TaskFocus;execution?:ExecutionRecord };
 let projects: Project[] = [], threads: Thread[] = [], activeProject: string | null = null, activeThread: string | null = null;
+let loadingWorkspace=false;
 const views = new Map<string, View>();
 const tabs = ['Chat', 'Plan', 'Diff', 'Agents', 'Terminal', 'Context', 'Usage'];
 let taskFilter = '';
@@ -149,6 +151,7 @@ function updateModelOptions(preferred?:string){
 function renderModelHint(){
   const m=selectedModel(), select=document.querySelector<HTMLSelectElement>('#preference')!;
   const hint=document.querySelector<HTMLElement>('#model-hint')!;
+  hint.hidden=!!activeThread&&!loadingModels;
   hint.textContent=autonomousMode()?'ChatGPT Web · 依頼をコピーして貼り付けます。計画の取り込み後に実行します。':loadingModels?'モデル一覧を確認中…':activeThread?'実行先: '+threadModelLabel(threads.find(t=>t.id===activeThread)):composerMode()==='codex-plan'?'Codexで計画を相談します。内容がよければ「この計画で実装」から進めます。':composerMode()==='goal'?'Codex · 入力した目標をゴールに設定して実行します。':planningMode()?'実行計画を作ります。実装は計画の確認後に開始します。':m?.local?'この端末で実行 · 対象ファイルを1〜2件、入力欄の下で指定してください。':select.value==='auto'?'おまかせ · 設定に沿って担当を選びます。大きな依頼は計画から始めます。':m?'Codexで実行 · '+m.label:'モデルを取得できません。接続設定で確認できます。';
   const localFiles=document.querySelector<HTMLElement>('#local-scope');
   if(localFiles)localFiles.hidden=!(m?.local&&!autonomousMode()||threads.find(t=>t.id===activeThread)?.provider==='spark'||document.querySelector<HTMLInputElement>('#known-files')?.value.trim());
@@ -161,7 +164,7 @@ function refreshModels():Promise<void>{
 async function loadModels(){
   loadingModels=true;renderModelHint();
   try{const result=await invoke<{models:ModelChoice[];warnings:string[]}>('available_models');modelChoices=result.models;modelWarnings=result.warnings;[threadModels,threadReasoning]=await Promise.all([invoke<Record<string,string>>('thread_models'),invoke<Record<string,string>>('thread_reasoning')]);updateModelOptions();}
-  catch(e){error(String(e));}finally{loadingModels=false;render();}
+  catch(e){error(String(e),{label:'再試行',run:()=>refreshModels()});}finally{loadingModels=false;render();}
 }
 type UiState = {project?:string|null;thread?:string|null;tab?:string;sidebarHidden?:boolean;defaultMode?:string;pins?:string[];drafts?:Record<string,Draft>;plans?:Record<string,string>;planningRequests?:Record<string,string>;reviewRequests?:Record<string,string>;expandedProjects?:string[];pinnedProjects?:string[]};
 let ui: UiState = {};
@@ -171,10 +174,28 @@ if(!ui.drafts || typeof ui.drafts!=='object' || Array.isArray(ui.drafts))ui.draf
 if(!ui.plans || typeof ui.plans!=='object' || Array.isArray(ui.plans))ui.plans={};
 if(!Array.isArray(ui.pins))ui.pins=[];
 ui.planningRequests ||= {};ui.reviewRequests ||= {};ui.expandedProjects ||= [];ui.pinnedProjects ||= [];
-let lastTreeProject:string|null=null;
+let lastTreeProject:string|null=null,lastTreeMarkup='';
+let hubFramePending=false;
+const hubEvents:JournalEvent[]=[];
+function queueHubEvent(record:JournalEvent){
+ hubEvents.push(record);if(hubFramePending)return;hubFramePending=true;
+ window.requestAnimationFrame(()=>{hubFramePending=false;const events=hubEvents.splice(0);for(const event of events)applyEvent(event,false,true);render();});
+}
 
 type Usage = { provider:string; model:string; prompt_tokens:number|null; completion_tokens:number|null; cached_tokens:number|null; latency_ms:number|null };
-let usage:Usage[]=[];
+const usageByThread=new Map<string,Usage[]>();
+type PaneRead={loading:boolean;loaded:boolean;error?:string;retry:()=>Promise<void>};
+const paneReads=new Map<string,PaneRead>(),pendingReads=new Map<string,Promise<void>>();
+function readPane(id:string,tab:string,load:()=>Promise<void>):Promise<void>{
+ const key=`${id}:${tab}`,pending=pendingReads.get(key);if(pending)return pending;
+ const current=view(id),hasData=threads.find(t=>t.id===id)?.provider==='autonomous'?!!current.execution:tab==='Diff'?!!current.diff:tab==='Context'?current.context!==undefined:tab==='Usage'?usageByThread.has(id):false;
+ const state=paneReads.get(key)||{loading:false,loaded:hasData,retry:()=>readPane(id,tab,load)};
+ state.loading=true;state.error=undefined;state.retry=()=>readPane(id,tab,load);paneReads.set(key,state);
+ if(activeThread===id&&activeTab===tab)renderContent();
+ const work=load().then(()=>{state.loaded=true;}).catch(e=>{state.error=String(e);}).finally(()=>{
+  state.loading=false;pendingReads.delete(key);if(activeThread===id&&activeTab===tab)renderContent();
+ });pendingReads.set(key,work);return work;
+}
 type GraphTask = {id:string;title:string;description:string;status:string;dependencies:string[];worktree_id:string|null};
 type ContextInspection = {initial_tokens:number;retrieved_tokens:number;current_estimate:number;parent_conversation_inherited:boolean;capsule:{goal:string;budget:{max_total_tokens:number};items:{source:string;reference:string;text:string}[]};retrievals:{source:string;query:string;token_estimate:number;result_ref:string}[]};
 let graph:GraphTask[]=[];
@@ -184,9 +205,49 @@ let activeTab = 'Chat', busy = false, stopping=false, importingManifest=false;
 let renderedContentKey='';
 const paneStates=new Map<string,{scroll:number;disclosures:(readonly [string,boolean])[];innerScroll:(readonly [string|undefined,number,number])[]}>();
 const app = document.querySelector<HTMLDivElement>('#app')!;
-app.innerHTML = `<aside><div class="sidebar-heading"><div class="brand"><span class="mark" aria-hidden="true">✳</span><span class="brand-wordmark" aria-label="Localoud AI"><span class="brand-local">Lo</span>c<span class="brand-local">a</span>loud<span class="brand-ai"> AI</span></span></div></div><button id="new" class="new" title="新しいタスク ⌘N">＋ 新しいタスク <kbd>⌘N</kbd></button><button id="command-menu" class="command-trigger">タスク・操作を検索 <kbd>⌘K</kbd></button><div class="section-title">プロジェクト <button id="add" aria-label="フォルダを開く" title="フォルダを開く ⌘O">＋</button></div><div class="tree-filter"><button id="show-archived" title="アーカイブを表示" aria-label="アーカイブを表示">アーカイブ</button><input id="task-filter" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="タスクを絞り込む" placeholder="タスクを検索"></div><div id="projects" aria-label="プロジェクト別のタスク"></div><button id="settings" class="settings">接続設定</button><div class="sidebar-bottom"><span class="dot"></span> Local-first <small>Context stays intentional.</small></div></aside><main><header><div><span class="eyebrow">WORKSPACE</span><h1 id="project-title">プロジェクトを開く</h1><button id="project-path" class="project-path" title="フォルダのパスをコピー"></button></div><div class="header-actions"><button id="sidebar-toggle" title="サイドバーを切り替え ⌘B" aria-label="サイドバーを切り替え">☰</button><button id="session-actions" title="セッションの操作" aria-label="セッションの操作" hidden>⋯</button><button id="rename-task" hidden>名前を変更</button><span id="status" class="badge">Codex app-server</span><button id="resume" hidden>再開・状態を確認</button></div></header><nav aria-label="ワークスペースの表示">${tabs.map(t => `<button data-tab="${t}">${tabLabels[t]}</button>`).join('')}</nav><div id="error" role="alert" hidden></div><div id="notice" role="status" hidden></div><section id="content" aria-live="polite"></section><footer><div class="compose"><textarea id="task-input" aria-label="タスクの指示" placeholder="実装したいことを入力…"></textarea><div class="compose-controls"><div class="executor-controls"><div id="operation" role="group" aria-label="依頼先"><button type="button" data-operation="autonomous" aria-pressed="true">ChatGPTで計画</button><button type="button" data-operation="implement" aria-pressed="false">通常の依頼</button></div><span id="execution-source" class="execution-source"></span><select id="task-mode" hidden aria-hidden="true"><option value="autonomous">Manifestを実行</option><option value="implement" selected>実装する</option><option value="codex-plan">プランモード（Codex）</option><option value="goal">ゴールを設定して実行</option><option value="plan">実行計画を作る</option></select><label for="preference">モデル</label><select id="preference"><option value="auto">自動</option></select><label for="reasoning">Reasoning</label><select id="reasoning"><option value="">既定</option></select><button id="auto-settings-button" type="button">振り分け設定</button><button id="refresh-models" type="button" title="利用できるモデルを再取得" aria-label="モデル一覧を更新">↻</button><input spellcheck="false" autocorrect="off" autocapitalize="off" id="known-files" aria-label="対象ファイル" placeholder="対象ファイル（例: src/main.rs）"></div><div><button id="stop" class="round-send" title="停止" aria-label="停止" hidden>■</button><button id="send" class="primary round-send" title="送信" aria-label="送信">↑</button></div></div></div><p id="model-hint" class="model-hint"></p><div class="footnote"><span id="draft-status"></span><span>⌘Enter で送信 · Enter で改行</span></div></footer></main><dialog id="register"><form><h2>プロジェクトを登録</h2><p>作業する Git リポジトリのフォルダを選択してください。</p><button id="browse-project" type="button" class="primary">フォルダを選択…</button><label for="path">フォルダの絶対パス</label><input spellcheck="false" autocorrect="off" autocapitalize="off" id="path" required placeholder="/Users/you/projects/my-app"><p id="form-error" role="alert"></p><div class="dialog-actions"><button type="button" id="cancel">キャンセル</button><button class="primary" type="submit">登録する</button></div></form></dialog><dialog id="connection-settings"><form id="settings-form"><h2>接続設定</h2><button id="mcp-settings-button" type="button">MCP公開設定</button><p>デスクトップアプリから使う Codex 実行ファイルを指定します。</p><label for="codex-path">Codex 実行ファイルの絶対パス</label><button id="browse-codex" type="button">ファイルを選択…</button><input spellcheck="false" autocorrect="off" autocapitalize="off" id="codex-path" required placeholder="/opt/homebrew/bin/codex"><label for="astra-mode">レビュー・診断の利用経路</label><select id="astra-mode"><option value="disabled">無効（手動計画）</option><option value="codex_integrated">Codex 認証を利用</option></select><label for="astra-model">既定のレビュー・診断モデル ID</label><input id="astra-model" value="gpt-6-astra"><label for="astra-reasoning">レビュー・診断の Reasoning</label><select id="astra-reasoning"><option value="">既定</option></select><p>直接 API の課金設定とは別です。最終レビュー・診断で使用します。ChatGPTの計画・レビューのモデルは、内蔵ブラウザ側で選択します。</p><fieldset><legend>ローカルモデル</legend><p>対応サービスを起動し、その接続情報を指定します。保存時にモデルを照合し、再起動後に反映します。</p><label for="local-name">表示名</label><input id="local-name" required><label for="local-id">モデル ID（サービスの返す値）</label><input id="local-id" required spellcheck="false" autocorrect="off" autocapitalize="off"><label for="local-endpoint">接続先（ポートを含むURL）</label><input id="local-endpoint" required spellcheck="false" autocorrect="off" autocapitalize="off"><p>専用API（GET /health・POST /v1/generate）または OpenAI互換API（GET /v1/models・POST /v1/chat/completions）を提供するローカル実行環境に対応しています。OpenAI Responses APIだけのサービスは対象外です。</p><p>量子化ビット数は接続先から自動取得します。この画面でモデルの量子化は変更しません。</p></fieldset><p id="settings-error" role="alert"></p><div class="dialog-actions"><button type="button" id="settings-cancel">閉じる</button><button type="submit" class="primary">保存する</button></div></form></dialog>`;
-document.body.insertAdjacentHTML('beforeend', `<dialog id="commands" aria-label="タスク・操作を検索"><label for="command-query">タスク・操作を検索</label><input id="command-query" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="タスク名、プロジェクト名、操作…" autocomplete="off"><div id="command-results"></div><small>↑↓ で選択 · Enter で開く · Esc で閉じる</small></dialog><dialog id="rename-dialog"><form id="rename-form"><h2>タスク名を変更</h2><label for="task-name">タスク名</label><input id="task-name" required maxlength="120"><p id="rename-error" role="alert"></p><div class="dialog-actions"><button type="button" id="rename-cancel">キャンセル</button><button type="submit" class="primary">保存</button></div></form></dialog>`);
-const more=document.createElement('details');more.id='compose-more';more.innerHTML='<summary aria-label="入力オプション" title="入力オプション">＋</summary><div class="compose-more-panel"></div>';
+app.innerHTML = `<aside><div class="sidebar-heading"><div class="brand"><span class="mark" aria-hidden="true">✳</span><span class="brand-wordmark" aria-label="Localoud AI"><span class="brand-local">Lo</span>c<span class="brand-local">a</span>loud<span class="brand-ai"> AI</span></span></div></div><button id="new" class="new" title="新しいタスク ⌘N">＋ 新しいタスク <kbd>⌘N</kbd></button><button id="command-menu" class="command-trigger">タスク・操作を検索 <kbd>⌘K</kbd></button><div class="section-title">プロジェクト <button id="add" aria-label="フォルダを開く" title="フォルダを開く ⌘O">＋</button></div><div class="tree-filter"><button id="show-archived" title="アーカイブを表示" aria-label="アーカイブを表示">アーカイブ</button><input id="task-filter" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="タスクを絞り込む" placeholder="タスクを検索"></div><div id="projects" aria-label="プロジェクト別のタスク"></div><button id="settings" class="settings">接続設定</button><div class="sidebar-bottom"><span class="dot"></span> Local-first <small>Context stays intentional.</small></div></aside><main><a id="skip-to-content" class="skip-link" href="#content">メインコンテンツへ移動</a><header><div><span class="eyebrow">WORKSPACE</span><h1 id="project-title">プロジェクトを開く</h1><button id="project-path" class="project-path" title="フォルダのパスをコピー"></button></div><div class="header-actions"><button id="sidebar-toggle" title="サイドバーを切り替え ⌘B" aria-label="サイドバーを切り替え"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h12"/></svg></button><button id="session-actions" title="セッションの操作" aria-label="セッションの操作" hidden><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 8h.01M8 8h.01M13 8h.01"/></svg></button><button id="rename-task" hidden>名前を変更</button><span id="status" class="badge"></span><button id="resume" hidden>再開・状態を確認</button></div></header><nav role="tablist" aria-label="ワークスペースの表示">${tabs.map(t => `<button role="tab" aria-controls="content" aria-selected="false" data-tab="${t}">${tabLabels[t]}</button>`).join('')}</nav><div id="error" role="alert" hidden></div><div id="notice" role="status" hidden></div><section id="content" role="tabpanel" tabindex="-1" aria-live="polite"></section><footer><div class="compose"><textarea id="task-input" aria-label="タスクの指示" placeholder="実装したいことを入力…"></textarea><div class="compose-controls"><div class="executor-controls"><div id="operation" role="group" aria-label="依頼先"><button type="button" data-operation="autonomous" aria-pressed="true">ChatGPTで計画</button><button type="button" data-operation="implement" aria-pressed="false">通常の依頼</button></div><span id="execution-source" class="execution-source"></span><select id="task-mode" hidden aria-hidden="true"><option value="autonomous">Manifestを実行</option><option value="implement" selected>実装する</option><option value="codex-plan">プランモード（Codex）</option><option value="goal">ゴールを設定して実行</option><option value="plan">実行計画を作る</option></select><label for="preference">モデル</label><select id="preference"><option value="auto">自動</option></select><label for="reasoning">Reasoning</label><select id="reasoning"><option value="">既定</option></select><button id="auto-settings-button" type="button">振り分け設定</button><button id="refresh-models" type="button" title="利用できるモデルを再取得" aria-label="モデル一覧を更新"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M13 6A5 5 0 1 0 14 9"/><path d="M13 3v3h-3"/></svg></button><input spellcheck="false" autocorrect="off" autocapitalize="off" id="known-files" aria-label="対象ファイル" placeholder="対象ファイル（例: src/main.rs）"></div><div><button id="stop" class="round-send" title="停止" aria-label="停止" hidden>■</button><button id="send" class="primary round-send" title="送信" aria-label="送信">↑</button></div></div></div><p id="model-hint" class="model-hint"></p><div class="footnote"><span id="draft-status"></span><span>⌘Enter で送信 · Enter で改行</span></div></footer></main><dialog id="register"><form><h2>プロジェクトを登録</h2><p>作業する Git リポジトリのフォルダを選択してください。</p><button id="browse-project" type="button" class="primary">フォルダを選択…</button><label for="path">フォルダの絶対パス</label><input spellcheck="false" autocorrect="off" autocapitalize="off" id="path" aria-describedby="form-error" required placeholder="/Users/you/projects/my-app"><p id="form-error" role="alert"></p><div class="dialog-actions"><button type="button" id="cancel">キャンセル</button><button class="primary" type="submit">登録する</button></div></form></dialog><dialog id="connection-settings"><form id="settings-form"><h2>接続設定</h2><button id="mcp-settings-button" type="button">MCP公開設定</button><p>デスクトップアプリから使う Codex 実行ファイルを指定します。</p><label for="codex-path">Codex 実行ファイルの絶対パス</label><button id="browse-codex" type="button">ファイルを選択…</button><input spellcheck="false" autocorrect="off" autocapitalize="off" id="codex-path" aria-describedby="settings-error" required placeholder="/opt/homebrew/bin/codex"><label for="astra-mode">レビュー・診断の利用経路</label><select id="astra-mode"><option value="disabled">無効（手動計画）</option><option value="codex_integrated">Codex 認証を利用</option></select><label for="astra-model">既定のレビュー・診断モデル ID</label><input id="astra-model" aria-describedby="settings-error" value="gpt-6-astra"><label for="astra-reasoning">レビュー・診断の Reasoning</label><select id="astra-reasoning"><option value="">既定</option></select><p>直接 API の課金設定とは別です。最終レビュー・診断で使用します。ChatGPTの計画・レビューのモデルは、内蔵ブラウザ側で選択します。</p><fieldset><legend>ローカルモデル</legend><p>対応サービスを起動し、その接続情報を指定します。保存時にモデルを照合し、再起動後に反映します。</p><label for="local-name">表示名</label><input id="local-name" aria-describedby="settings-error" required><label for="local-id">モデル ID（サービスの返す値）</label><input id="local-id" aria-describedby="settings-error" required spellcheck="false" autocorrect="off" autocapitalize="off"><label for="local-endpoint">接続先（ポートを含むURL）</label><input id="local-endpoint" aria-describedby="settings-error" required spellcheck="false" autocorrect="off" autocapitalize="off"><p>専用API（GET /health・POST /v1/generate）または OpenAI互換API（GET /v1/models・POST /v1/chat/completions）を提供するローカル実行環境に対応しています。OpenAI Responses APIだけのサービスは対象外です。</p><p>量子化ビット数は接続先から自動取得します。この画面でモデルの量子化は変更しません。</p></fieldset><p id="settings-error" role="alert"></p><div class="dialog-actions"><button type="button" id="settings-cancel">閉じる</button><button type="submit" class="primary">保存する</button></div></form></dialog>`;
+document.body.insertAdjacentHTML('beforeend', `<dialog id="commands" aria-label="タスク・操作を検索"><label for="command-query">タスク・操作を検索</label><input id="command-query" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="タスク名、プロジェクト名、操作…" autocomplete="off"><div id="command-results"></div><small>↑↓ で選択 · Enter で開く · Esc で閉じる</small></dialog><dialog id="rename-dialog"><form id="rename-form"><h2>タスク名を変更</h2><label for="task-name">タスク名</label><input id="task-name" aria-describedby="rename-error" required maxlength="120"><p id="rename-error" role="alert"></p><div class="dialog-actions"><button type="button" id="rename-cancel">キャンセル</button><button type="submit" class="primary">保存</button></div></form></dialog>`);
+document.querySelector<HTMLButtonElement>('#stop')!.innerHTML='<svg aria-hidden="true" viewBox="0 0 16 16"><rect x="5" y="5" width="6" height="6" rx="1"/></svg>';
+document.querySelector<HTMLButtonElement>('#send')!.innerHTML='<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M8 13V3M4.5 7.5 8 3l3.5 4.5"/></svg>';
+document.querySelector<HTMLElement>('.mark')!.innerHTML='<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M8 1.5 9.7 6.3 14.5 8l-4.8 1.7L8 14.5 6.3 9.7 1.5 8l4.8-1.7L8 1.5Z"/></svg>';
+for(const [dialog,title] of [['register','register-title'],['connection-settings','settings-title'],['rename-dialog','rename-title']] as const){const d=document.getElementById(dialog),h=d?.querySelector('h2');if(d&&h){h.id=title;d.setAttribute('aria-labelledby',title);}}
+for(const [formId,errorId] of [['#register form','form-error'],['#settings-form','settings-error'],['#rename-form','rename-error']]){
+ const form=document.querySelector<HTMLFormElement>(formId)!;form.noValidate=true;
+ const summary=document.getElementById(errorId)!;summary.tabIndex=-1;summary.classList.add('error-summary');
+ for(const field of Array.from(form.querySelectorAll<HTMLInputElement>('input'))){
+  field.insertAdjacentHTML('afterend',`<p id="${field.id}-error" class="field-error"></p>`);
+  field.setAttribute('aria-describedby',`${field.id}-error`);
+  field.addEventListener('input',()=>{field.removeAttribute('aria-invalid');document.getElementById(`${field.id}-error`)!.textContent='';});
+ }
+ form.addEventListener('submit',event=>{
+  const invalid:Array<{field:HTMLInputElement;message:string}>=[];
+  for(const field of Array.from(form.querySelectorAll<HTMLInputElement>('input:not(:disabled)'))){
+   let message='';const value=field.value.trim();
+   if(field.required&&!value)message='入力してください。';
+   else if(value&&['path','codex-path'].includes(field.id)&&!value.startsWith('/'))message='/ から始まる絶対パスを入力してください。';
+   else if(value&&field.id==='local-endpoint'){try{const address=new URL(value);if(!['http:','https:'].includes(address.protocol))throw Error();}catch{message='http:// または https:// から始まる接続先URLを入力してください。';}}
+   field.toggleAttribute('aria-invalid',!!message);if(message)field.setAttribute('aria-invalid','true');
+   document.getElementById(`${field.id}-error`)!.textContent=message;
+   if(message)invalid.push({field,message});
+  }
+  summary.replaceChildren();
+  if(!invalid.length)return;
+  event.preventDefault();event.stopImmediatePropagation();
+  summary.append(`${invalid.length}項目を確認してください。`);
+  for(const {field,message} of invalid){const link=document.createElement('a');link.href=`#${field.id}`;const label=form.querySelector(`label[for="${field.id}"]`)?.textContent||'入力';link.textContent=`${label}: ${message}`;link.onclick=e=>{e.preventDefault();field.focus();};summary.append(link);}
+  if(invalid.length>1)summary.focus();else invalid[0].field.focus();
+ },true);
+ form.closest('dialog')?.addEventListener('cancel',event=>{if(form.getAttribute('aria-busy')==='true'&&form.dataset.loading!=='true')event.preventDefault();});
+}
+function formBusy(form:HTMLFormElement,value:boolean){
+ form.setAttribute('aria-busy',String(value));
+ form.querySelectorAll<HTMLInputElement|HTMLButtonElement|HTMLSelectElement>('input,button,select').forEach(el=>{
+  if(value){el.dataset.wasDisabled=String(el.disabled);el.disabled=true;}
+  else{el.disabled=el.dataset.wasDisabled==='true';delete el.dataset.wasDisabled;}
+ });
+ const submit=form.querySelector<HTMLButtonElement>('[type="submit"]');if(submit){if(value){submit.dataset.label=submit.textContent||'';submit.textContent='保存中…';}else submit.textContent=submit.dataset.label||'保存する';}
+}
+const more=document.createElement('details');more.id='compose-more';more.innerHTML='<summary aria-label="入力オプション" title="入力オプション"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></summary><div class="compose-more-panel"></div>';
 document.querySelector('.executor-controls')!.prepend(more);
 document.querySelector('.compose')!.prepend(document.querySelector('#operation')!);
 document.querySelector('[data-operation="implement"]')!.textContent='実行する';
@@ -201,14 +262,26 @@ localScope.append(document.getElementById('known-files')!);document.querySelecto
 const implementPlan=document.createElement('button');implementPlan.id='implement-plan';implementPlan.type='button';implementPlan.textContent='この計画で実装';implementPlan.hidden=true;
 document.querySelector('#execution-source')!.after(implementPlan);
 implementPlan.onclick=()=>{if(busy||selectedView()?.running||selectedView()?.needsResume||!activeThread)return;if(!setComposerMode('implement'))return;const input=document.querySelector<HTMLTextAreaElement>('#task-input')!;if(!input.value.trim())input.value='この計画に沿って実装し、必要な検証を行ってください。';void send();};
-const browserWorkspace=setupBrowserWorkspace(invoke);
+  const browserWorkspace=setupBrowserWorkspace(invoke);
 const openManifestReview=setupManifestReview(invoke,sendAutonomous);
 const quota=document.querySelector<HTMLElement>('#chatgpt-usage')!;document.querySelector('#settings-form')!.append(quota);
 const recordChatGptTurn=setupChatGptUsage(quota);
 if(isTauri())void listen<CompletedTurn>('chatgpt-turn-completed',event=>recordChatGptTurn(event.payload));
 document.querySelector('#settings-form')!.insertAdjacentHTML('beforeend','<section id="total-usage"></section>');
-const sidebarButton=document.querySelector('#sidebar-toggle')!;document.querySelector('.sidebar-heading')!.append(sidebarButton);
-const modelPicker=document.createElement('details');modelPicker.id='model-picker';modelPicker.innerHTML='<summary aria-label="モデルと思考量"><span id="model-picker-name"></span> <span id="model-picker-effort"></span><span class="model-chevron">⌄</span></summary><div class="model-picker-panel"></div>';document.querySelector('#preference')!.before(modelPicker);
+// The navigation toggle must remain outside the region it hides.
+let mobileSidebarOpen=false;
+const sidebarButton=document.querySelector<HTMLButtonElement>('#sidebar-toggle')!;
+document.querySelector('main>header')!.prepend(sidebarButton);
+sidebarButton.setAttribute('aria-controls','project-sidebar');
+const sidebar=document.querySelector<HTMLElement>('#app>aside')!;sidebar.id='project-sidebar';sidebar.setAttribute('aria-label','プロジェクトとタスク');
+sidebar.querySelector('.sidebar-heading')!.insertAdjacentHTML('beforeend','<button id="sidebar-close" type="button" aria-label="プロジェクト一覧を閉じる">閉じる</button>');
+app.insertAdjacentHTML('beforeend','<div id="sidebar-backdrop" hidden></div>');
+app.prepend(document.querySelector('#skip-to-content')!);
+document.querySelector('#content')!.removeAttribute('aria-live');
+document.querySelector('#content')!.setAttribute('tabindex','0');
+document.querySelector('#status')!.setAttribute('role','status');
+document.querySelector('#task-input')!.setAttribute('aria-describedby','model-hint');
+const modelPicker=document.createElement('details');modelPicker.id='model-picker';modelPicker.innerHTML='<summary aria-label="モデルと思考量"><span id="model-picker-name"></span> <span id="model-picker-effort"></span><svg class="model-chevron" aria-hidden="true" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg></summary><div class="model-picker-panel"></div>';document.querySelector('#preference')!.before(modelPicker);
 for(const id of ['preference','reasoning']){modelPicker.querySelector('div')!.append(document.querySelector(`label[for=${id}]`)!,document.getElementById(id)!);}
 const modelHealth=document.createElement('section');modelHealth.id='model-health';modelHealth.hidden=true;document.querySelector('#model-hint')!.after(modelHealth);
 modelPicker.querySelector('div')!.insertAdjacentHTML('beforeend','<p class="model-help">おまかせは依頼に応じて振り分けます。ローカルLLMは1〜2ファイルの小さな編集、Codexは調査・実装・検証に使えます。</p>');
@@ -217,7 +290,33 @@ app.insertAdjacentHTML('beforeend','<dialog id="lifecycle-dialog" aria-label="�
 const escape = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 function view(id: string): View { if (!views.has(id)) views.set(id, { messages: [], events: [], diff: '', running: false, needsResume: true, sequence: 0 }); return views.get(id)!; }
 function selectedView() { return activeThread ? view(activeThread) : null; }
-function error(message: string) { if(message)notice(''); const el = document.querySelector<HTMLDivElement>('#error')!; el.hidden = !message; el.innerHTML = message ? `<span>${escape(message)}</span><button aria-label="エラーを閉じる" id="dismiss-error">×</button>` : ''; document.querySelector('#dismiss-error')?.addEventListener('click',()=>error('')); }
+type ErrorRecovery = {label: string; run: () => void | Promise<void>};
+let errorRecovery: ErrorRecovery | undefined;
+function error(message: string, recovery?: ErrorRecovery) {
+  if(message)notice('');
+  errorRecovery=message?recovery:undefined;
+  const el=document.querySelector<HTMLDivElement>('#error')!;
+  el.hidden=!message;
+  el.innerHTML=message?`<span>${escape(message)}</span><span class="error-actions">${recovery?`<button type="button" id="retry-error">${escape(recovery.label)}</button>`:''}<button type="button" aria-label="エラーを閉じる" id="dismiss-error"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></span>`:'';
+  document.querySelector('#dismiss-error')?.addEventListener('click',()=>error(''));
+  document.querySelector('#retry-error')?.addEventListener('click',()=>{const run=errorRecovery?.run;error('');if(run)void run();});
+}
+function focusContent() {
+  const content=document.querySelector<HTMLElement>('#content');
+  const active=document.querySelector<HTMLButtonElement>(`[data-tab="${activeTab}"]`);
+  if(content&&active){active.id=`tab-${activeTab}`;content.setAttribute('aria-labelledby',active.id);content.focus({preventScroll:true});}
+}
+function updateSendAvailability(){
+ const send=document.querySelector<HTMLButtonElement>('#send')!,input=document.querySelector<HTMLTextAreaElement>('#task-input')!;
+ send.disabled=busy||!activeProject||!!selectedView()?.needsResume||!isTauri()||legacyThread()||!input.value.trim();
+ if(!autonomousMode()&&!activeThread&&document.querySelector<HTMLSelectElement>('#preference')!.value!=='auto')send.disabled ||= !readTarget(document.querySelector<HTMLSelectElement>('#preference')!,document.querySelector<HTMLSelectElement>('#reasoning')!,modelChoices);
+}
+function controlKey(el:HTMLElement):string {
+  if(el.id)return `id:${el.id}`;
+  for(const name of ['data-copy-message','data-flow-action','data-thread','data-project','data-project-toggle','data-project-menu','data-project-new','data-pin'])if(el.hasAttribute(name))return `${name}:${el.getAttribute(name)}`;
+  if(el.tagName==='SUMMARY'&&el.parentElement?.id)return `summary:${el.parentElement.id}`;
+  return `${el.tagName}:${el.getAttribute('aria-label')||el.textContent}`;
+}
 function render() {
   composer?.syncContext();
   browserWorkspace.setSidebarHidden(!!ui.sidebarHidden);
@@ -227,7 +326,19 @@ function render() {
   const path = document.querySelector<HTMLButtonElement>('#project-path')!; path.textContent=project?.root || ''; path.hidden=!project; path.title=`${project?.root || ''} — クリックでコピー`;
   document.querySelector<HTMLButtonElement>('#session-actions')!.hidden=!activeThread;
   document.querySelector('#project-title')!.textContent = projects.find(p => p.id === activeProject)?.name || 'プロジェクトを開く';
-  document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b => { b.classList.toggle('active', b.dataset.tab === activeTab); b.onclick = () => { activeTab = b.dataset.tab!; rememberSelection(); render(); if(activeTab === 'Diff' && activeThread) void refreshDiff(activeThread); if(activeTab === 'Usage') void refreshUsage(); if(activeTab === 'Context' && activeThread) void refreshContext(activeThread); if(activeTab === 'Plan') void refreshGraph(); }; });
+  document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b => {
+    const selected=b.dataset.tab===activeTab;
+    b.classList.toggle('active', selected); b.setAttribute('aria-selected',String(selected)); b.tabIndex=selected?0:-1; b.id=`tab-${b.dataset.tab}`;
+    b.onclick = () => { activeTab = b.dataset.tab!; rememberSelection(); render(); b.focus(); if(activeTab === 'Diff' && activeThread) void refreshDiff(activeThread); if(activeTab === 'Usage') void refreshUsage(); if(activeTab === 'Context' && activeThread) void refreshContext(activeThread); if(activeTab === 'Plan') void refreshGraph(); };
+    b.onkeydown = event => {
+      if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+      event.preventDefault(); const tabButtons=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tab]')); const index=tabButtons.indexOf(b);
+      const next=event.key==='Home'?0:event.key==='End'?tabButtons.length-1:(index+(event.key==='ArrowRight'?1:-1)+tabButtons.length)%tabButtons.length;
+      tabButtons.forEach((tab,i)=>tab.tabIndex=i===next?0:-1);
+      tabButtons[next]?.focus();
+    };
+  });
+  document.querySelector('#content')?.setAttribute('aria-labelledby',`tab-${activeTab}`);
   document.querySelectorAll<HTMLButtonElement>('[data-thread]').forEach(b => b.onclick = () => void selectThread(b.dataset.thread!));
   const v = selectedView();
   const current = threads.find(t=>t.id===activeThread);
@@ -274,21 +385,22 @@ function render() {
   browserWorkspace.setWorkflow(flowMarkup({project:project?.name||'',title:current?.title||planning||'新しいタスク',status:v?.needsResume?'reconciliation_required':current?.status||'draft',kind:legacyThread()?'legacy':autonomousMode()?'manifest':'direct',hasTask:!!current,planningRequested:!!planning,reviewRequested:!!focus?.artifactVersion&&ui.reviewRequests![focus.id]===focus.artifactVersion,id:current?.id,version:focus?.artifactVersion,iteration:v?.progress?.iteration,busy,importing:importingManifest,stopping,running:!!v?.running,writing:activeTab==='Chat'}),handleFlowAction);
   resume.hidden=true;
   stop.hidden=autonomousMode()||!v?.running;
+  stop.innerHTML='<svg aria-hidden="true" viewBox="0 0 16 16"><rect x="5" y="5" width="6" height="6" rx="1"/></svg>';
   stop.title=stopping?'停止中…':'実行を停止';
   stop.setAttribute('aria-label',stop.title);
   stop.setAttribute('aria-busy',String(stopping));
   const planningDraft=autonomousMode()&&!activeThread;
   const sendLabel=planningDraft?'ChatGPTへの依頼をコピー':planningMode()&&!activeThread?'計画を作成':mode==='codex-plan'?'プランを相談':mode==='goal'?'ゴールを開始':'送信';
-  send.textContent=planningDraft?'依頼をコピーしてChatGPTへ':!activeThread?(mode==='codex-plan'?'計画を相談':mode==='goal'?'ゴールを開始':modelSelect.value==='auto'?'おまかせで実行':'このモデルで実行'):'↑';
+  send.innerHTML=`<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M8 13V3M4.5 7.5 8 3l3.5 4.5"/></svg><span>${busy?'処理中…':escape(sendLabel)}</span>`;
   send.title=sendLabel;send.setAttribute('aria-label',sendLabel);send.setAttribute('aria-busy',String(busy));
   send.classList.toggle('manifest-send',!activeThread);
   send.hidden=autonomousMode()&&!!activeThread||!!v?.running;
-  send.disabled=busy||!activeProject||!!v?.needsResume||!isTauri()||legacyThread()||!input.value.trim();
-  if(!autonomousMode()&&!activeThread&&modelSelect.value!=='auto')send.disabled ||= !readTarget(modelSelect,document.querySelector<HTMLSelectElement>('#reasoning')!,modelChoices);
+  updateSendAvailability();
   if(planningDraft)input.placeholder='何を実現したいですか？ 条件や制約もここに書けます。';
   document.querySelector('.footnote>span:last-child')!.textContent=planningDraft?'⌘Enter でコピー · Enter で改行':'⌘Enter で送信 · Enter で改行';
   document.querySelector<HTMLElement>('main>footer')!.hidden=activeTab!=='Chat'||autonomousMode()&&!!activeThread||legacyThread()||archivedThread();
   more.hidden=autonomousMode();
+  renderNavigation();
   renderContent();
 }
 function handleFlowAction(action:string){
@@ -332,8 +444,8 @@ function renderContent() {
   const oldScroll=priorPane?.scroll||0,follow=sameView&&content.scrollHeight-content.clientHeight-oldScroll<64;
 
   const focused = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
-  const focusId = sameView && content.contains(focused) ? focused?.id : undefined;
-  const selection = focusId && (focused instanceof HTMLTextAreaElement || focused instanceof HTMLInputElement) ? [focused.selectionStart, focused.selectionEnd] : null;
+  const focusKey = sameView && focused && content.contains(focused) ? controlKey(focused) : undefined;
+  const selection = focusKey && (focused instanceof HTMLTextAreaElement || focused instanceof HTMLInputElement) ? [focused.selectionStart, focused.selectionEnd] : null;
   const disclosures=priorPane?.disclosures||[],innerScroll=priorPane?.innerScroll||[];
   const current=threads.find(t=>t.id===activeThread), label=threadModelLabel(current);
   if(autonomousThread()&&v?.execution&&activeTab==='Chat')content.innerHTML=executionOverview(v.execution,v.progress,statusLabel);
@@ -348,7 +460,7 @@ function renderContent() {
     else if(autonomousThread())content.innerHTML=`<div class="conversation task-records"><details id="task-goal"><summary>依頼内容・合格条件を確認</summary><div class="message-text">${escape(v.focus?.goal||'')}${v.focus?.acceptance?.length?`<ul>${v.focus.acceptance.map(a=>`<li>${escape(a)}</li>`).join('')}</ul>`:''}</div></details>${v.focus?.manifestId?`<p class="handoff-receipt">実行依頼 · ID <code>${escape(v.focus.manifestId)}</code></p>`:''}${v.focus?.reviewId?`<p class="handoff-receipt">レビュー結果 · ${escape(v.focus.verdict||'')} · ID <code>${escape(v.focus.reviewId)}</code></p>`:''}<details id="task-records"><summary>作業記録・検証の詳細（${v.messages.filter(m=>m.role!=='user').length}件）</summary>${v.messages.map((m,index)=>m.role==='user'?'':recordMarkup(m.text,m.key,index,markdown)).join('')}</details></div>`;
     else content.innerHTML = `<div class="conversation">${v.route?(autonomousThread()?`<div class="route-note"><pre>${escape(v.route)}</pre></div>`:`<details class="route-note"><summary>${escape(v.route.split('\n')[0])}</summary><p>${escape(v.route)}</p></details>`):''}${v.messages.map((m,index) => `<article class="message ${m.role === 'user' ? 'user' : ''}"><div class="message-role">${m.role === 'user' ? 'あなた' : escape(m.label||label)}<button class="copy-message" data-copy-message="${index}" title="本文をコピー">コピー</button></div><div class="message-text ${m.role === 'user' ? '' : 'markdown'}">${m.role === 'user' ? escape(m.text) : markdown(m.text)}</div></article>`).join('')}${v.running ? `<div class="working">● ${escape(label)} が作業中</div>` : ''}</div>`;
     if(autonomousThread()&&v)content.insertAdjacentHTML('beforeend',progressMarkup(v.progress,statusLabel));
-  } else if (activeTab === 'Diff') content.innerHTML = v?.diff ? `<div class="diff-toolbar"><span class="muted">保存済みの変更</span></div>${diffMarkup(v.diff)}` : '<div class="empty"><h2>変更を確認する</h2><p>変更がないか、まだ取得されていません。</p><p></p></div>';
+  } else if (activeTab === 'Diff') content.innerHTML = v?.diff ? `<div class="diff-toolbar"><span class="muted">保存済みの変更</span></div>${diffMarkup(v.diff)}` : `<div class="empty"><h2>変更</h2><p>${!activeThread?'タスクを選択すると変更を確認できます。':paneReads.get(`${activeThread}:Diff`)?.loaded?'保存済みの変更はありません。':'変更を読み込みます。'}</p></div>`;
   else if (activeTab === 'Terminal') content.innerHTML = v?.events.length ? `<div class="event-list">${v.events.filter(e => !['message_delta', 'message_completed'].includes(e.event.kind)).map(e => `<div class="event-row"><span>${escape(e.event.kind)}</span><pre>${escape(e.event.text)}</pre></div>`).join('')}</div>` : '<div class="empty"><h2>実行ログ</h2><p>ツールの実行と結果をここに表示します。</p></div>';
   else if (activeTab === 'Agents') content.innerHTML = `<section class="read-panel"><h2>実行担当</h2>${current?`<article class="read-card"><div class="read-row"><strong>${escape(label)}</strong><span>${escape(statusLabel(current.status))}</span></div><p>${escape(current.title)}</p>${v?.summary?`<p>${escape(v.summary)}</p>`:''}</article>`:'<p>計画を取り込むと担当が表示されます。</p>'}</section>`;
   else if (activeTab === 'Context') {
@@ -358,13 +470,23 @@ function renderContent() {
 
   }
   else if(activeTab === 'Plan') content.innerHTML = `<section class="read-panel"><h2>計画</h2><p>${activeThread?'このタスクには取り込まれた実行計画がありません。直接実行の依頼と結果は「概要」で確認できます。':'チャットで依頼を相談し、確定した計画を取り込むと、担当・順序・完了条件がここに表示されます。'}</p></section>`;
-  else if(activeTab === 'Usage') content.innerHTML = usageMarkup(usage,activeThread?'このセッションの使用量':'セッションを選択してください');
+  else if(activeTab === 'Usage') content.innerHTML = usageMarkup(activeThread?usageByThread.get(activeThread)||[]:[],activeThread?'このタスクの使用量':'タスクを選択してください');
   else content.innerHTML = `<div class="empty"><h2>${escape(activeTab)}</h2><p>${activeTab === 'Plan' ? '計画機能は Milestone F で接続します。' : 'プロバイダーの使用量はまだ集計していません。'}</p><span class="muted">未取得の数値はゼロとして扱いません。</span></div>`;
+  const read=activeThread?paneReads.get(`${activeThread}:${activeTab}`):undefined;
+  content.setAttribute('aria-busy',String(!!read?.loading));
+  if(read?.loading||read?.error){
+    const feedback=`<div class="pane-feedback" ${read.error?'role="alert"':'role="status"'}><p>${read.error?`${escape(tabLabels[activeTab])}を読み込めませんでした。${read.loaded?'前回の表示を残しています。':''}接続を確認して、再試行してください。`:`${escape(tabLabels[activeTab])}を読み込み中…`}</p>${read.error?`<details><summary>エラーの詳細</summary><pre>${escape(read.error)}</pre></details><button id="retry-pane" type="button">再試行</button>`:''}</div>`;
+    if(!read.loaded)content.innerHTML=`<section class="read-panel"><h2>${escape(tabLabels[activeTab])}</h2>${feedback}</section>`;
+    else content.insertAdjacentHTML('afterbegin',feedback);
+  }
+  document.querySelector('#retry-pane')?.addEventListener('click',()=>{void read?.retry();focusContent();});
+  if(autonomousThread()&&v?.progress?.error){const alert=content.querySelector('.progress-error');if(alert){const retry=document.createElement('button');retry.id='retry-activity';retry.type='button';retry.textContent='進捗を再読み込み';const id=activeThread!,tab=activeTab;retry.onclick=()=>{void readPane(id,tab,()=>refreshAutonomous(id));focusContent();};alert.append(retry);}}
   content.querySelectorAll<HTMLButtonElement>('button').forEach(b=>b.disabled ||= busy);
+  content.querySelectorAll<HTMLElement>('.flow-actions[aria-label]').forEach(el=>el.setAttribute('role','group'));
   content.querySelectorAll<HTMLButtonElement>('[data-flow-action]').forEach(b=>b.onclick=()=>handleFlowAction(b.dataset.flowAction!));
   disclosures.forEach(([id,open])=>{const d=document.getElementById(id);if(d instanceof HTMLDetailsElement)d.open=open;});
   for(const el of Array.from(content.querySelectorAll<HTMLElement>('[data-scroll-key]'))){const prior=innerScroll.find(([key])=>key===el.dataset.scrollKey);if(prior){el.scrollTop=prior[1];el.scrollLeft=prior[2];}}
-  if(focusId){const next=document.getElementById(focusId);if(next instanceof HTMLInputElement || next instanceof HTMLTextAreaElement){next.focus({preventScroll:true});if(selection&&selection[0]!==null&&selection[1]!==null)next.setSelectionRange(selection[0],selection[1]);}}
+  if(focusKey){const next=Array.from(content.querySelectorAll<HTMLElement>('button,a,summary,input,textarea,select')).find(el=>controlKey(el)===focusKey);if(next){next.focus({preventScroll:true});if(selection&&selection[0]!==null&&selection[1]!==null&&(next instanceof HTMLInputElement||next instanceof HTMLTextAreaElement))next.setSelectionRange(selection[0],selection[1]);}}
   content.scrollTop = activeTab==='Chat'&&!autonomousThread()&&!!v?.messages.length&&(follow||!priorPane) ? content.scrollHeight : oldScroll;
   content.querySelectorAll<HTMLAnchorElement>('a').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();if(a.dataset.externalUrl)void invoke('open_web_link',{url:a.dataset.externalUrl}).catch(e=>error(String(e)));}));
   content.querySelectorAll<HTMLButtonElement>('[data-copy-message]').forEach(b=>b.onclick=()=>void copyText(v?.messages[Number(b.dataset.copyMessage)]?.text || '',b));
@@ -386,9 +508,9 @@ function renderContent() {
   document.querySelector('#summarize')?.addEventListener('click',()=>void localInsight('summarize_task'));
   document.querySelector('#first-review')?.addEventListener('click',()=>void localInsight('review_task'));
 }
-function applyEvent(record: JournalEvent, replay = false) {
+function applyEvent(record: JournalEvent, replay = false, deferred = false) {
   const e = record.event;
-  for(const [id,v] of views){const worker=v.progress?.workers.find(w=>w.providerThread===e.thread_id);if(worker){applyWorkerEvent(worker,record,!replay);if(activeThread===id)renderContent();return;}}
+  for(const [id,v] of views){const worker=v.progress?.workers.find(w=>w.providerThread===e.thread_id);if(worker){applyWorkerEvent(worker,record,!replay);if(activeThread===id&&!replay&&!deferred)renderContent();return;}}
   const auto=threads.find(t=>t.provider==='autonomous'&&t.provider_thread_id===e.thread_id);if(auto&&!replay){void refreshAutonomous(auto.id);return;}
   if (!e.thread_id) {
     if(e.kind==='memory_unavailable')error(e.text);
@@ -416,22 +538,21 @@ function applyEvent(record: JournalEvent, replay = false) {
   if (['error', 'approval_required'].includes(e.kind)) error(e.text);
   if(!replay&&thread.id===activeThread&&activeTab==='Usage'&&['turn_completed','usage'].includes(e.kind))void refreshUsage();
   if(thread.id===activeThread&&['input_required','goal_updated','turn_completed'].includes(e.kind))void composer?.refreshThread();
-  if (thread.id === activeThread) render();
+  if (thread.id === activeThread&&!replay&&!deferred) render();
 }
 function knownFiles():string[] { return [...new Set([...(document.querySelector('#known-files') as HTMLInputElement).value.split(',').map(s=>s.trim()).filter(Boolean),...(composer?.getMentions()||[]).filter(m=>m.kind==='file').map(m=>m.kind==='file'?m.path:'')])]; }
 async function astraPlan(){if(!activeProject||busy)return;const model=selectedModel();if(!model||model.local){error('計画するモデルを選択してください。');return;}const goal=(document.querySelector('#task-input') as HTMLTextAreaElement).value.trim();if(!goal){error('下の指示欄に、計画したい内容を入力してください。');return;}busy=true;error('');render();try{const p=await invoke('create_astra_plan',{projectId:activeProject,goal,model:model.model,reasoning:selectedReasoning()});planText=JSON.stringify(p,null,2);if(activeProject)ui.plans![activeProject]=planText;saveUi();activeTab='Plan';rememberSelection();}catch(e){error(String(e));}finally{busy=false;render();}}
 async function astraInsight(command:'final_review'|'diagnose_task'){if(!activeThread||busy)return;if(chatgptSelected()){error('ChatGPTの会話欄でレビュー・診断を依頼してください。Codexには送りません。');return;}const id=activeThread;busy=true;error('');render();try{if(command==='final_review')view(id).finalReview=await invoke(command,{threadId:id});else view(id).recovery=await invoke(command,{threadId:id,question:(document.querySelector('#task-input') as HTMLTextAreaElement).value.trim()||null});}catch(e){error(String(e));}finally{busy=false;render();}}
 async function applyRework(){if(!activeThread||busy)return;busy=true;render();try{await invoke('apply_rework',{threadId:activeThread});}catch(e){error(String(e));}finally{busy=false;render();}}
-async function refreshThreads() {try {[threads,archivedThreads]=await Promise.all([invoke<Thread[]>('threads'),invoke<string[]>('archived_threads')]);render();}catch(e){error(String(e));}}
-async function refreshGraph() {if(autonomousThread()&&activeThread){await refreshAutonomous(activeThread);return;}if(!activeProject)return;try {const id=activeProject;const tasks=await invoke<GraphTask[]>('task_graph',{projectId:id});if(activeProject!==id)return;graph=tasks;if(activeTab==='Plan')renderContent();}catch(e){error(String(e));}}
-async function refreshContext(id:string) {if(threads.find(t=>t.id===id)?.provider==='autonomous'){await refreshAutonomous(id);return;}try {view(id).context=await invoke<ContextInspection|null>('inspect_context',{threadId:id});view(id).capture=await invoke<Capture>('memory_candidates',{threadId:id});if(activeThread===id&&activeTab==='Context')renderContent();}catch(e){error(String(e));}}
+async function refreshThreads() {try {[threads,archivedThreads]=await Promise.all([invoke<Thread[]>('threads'),invoke<string[]>('archived_threads')]);render();}catch(e){error(String(e),{label:'再試行',run:()=>refreshThreads()});}}
+async function syncArchivedSessions() {try {const failures=await invoke<string[]>('sync_archived_sessions');if(failures.length)error(failures.join('\n'),{label:'一覧で状態を確認',run:()=>refreshThreads()});}catch(e){error(`アーカイブ同期の結果を確認できませんでした。一覧を更新して現在の状態を確認してください。 ${String(e)}`,{label:'一覧で状態を確認',run:()=>refreshThreads()});}}
+async function refreshGraph() {if(autonomousThread()&&activeThread){const id=activeThread;return readPane(id,'Plan',()=>refreshAutonomous(id));}const id=activeProject;if(!id)return;try {const tasks=await invoke<GraphTask[]>('task_graph',{projectId:id});if(activeProject!==id)return;graph=tasks;if(activeTab==='Plan')renderContent();}catch(e){if(activeProject===id)error(String(e),{label:'再試行',run:()=>refreshGraph()});}}
+async function refreshContext(id:string) {return readPane(id,'Context',async()=>{if(threads.find(t=>t.id===id)?.provider==='autonomous'){await refreshAutonomous(id);return;}const [context,capture]=await Promise.all([invoke<ContextInspection|null>('inspect_context',{threadId:id}),invoke<Capture>('memory_candidates',{threadId:id})]);view(id).context=context;view(id).capture=capture;});}
 async function runPlan() {if(!activeProject||busy)return;busy=true;error('');render();try {graph=await invoke<GraphTask[]>('run_plan',{projectId:activeProject,plan:JSON.parse(planText),concurrency:2});await refreshThreads();}catch(e){error(String(e));}finally{busy=false;render();}}
 function usageMarkup(rows:Usage[],title:string){return `<div class="inspector usage"><h2>${escape(title)}</h2><p>${rows.length}件の推論記録（記録済みの実行のみ）。未取得は —。時間はローカルLLMの処理時間、Codexのターン経過時間です。</p><table><thead><tr><th>モデル</th><th>入力</th><th>出力</th><th>キャッシュ</th><th>時間</th></tr></thead><tbody>${rows.map(u=>`<tr><td>${escape(u.model)}</td><td>${u.prompt_tokens??'—'}</td><td>${u.completion_tokens??'—'}</td><td>${u.cached_tokens??'—'}</td><td>${u.latency_ms==null?'—':(u.latency_ms/1000).toFixed(1)+' s'}</td></tr>`).join('')}</tbody></table></div>`;}
 async function refreshUsage() {
- const id=activeThread;usage=[];
- if(autonomousThread()&&id){await refreshAutonomous(id);return;}
- if(activeTab==='Usage')renderContent();if(!id)return;
- try{const rows=await invoke<Usage[]>('model_usage',{threadId:id});if(activeThread===id){usage=rows;if(activeTab==='Usage')renderContent();}}catch(e){error(String(e));}
+ const id=activeThread;if(!id)return;
+ return readPane(id,'Usage',async()=>{if(threads.find(t=>t.id===id)?.provider==='autonomous'){await refreshAutonomous(id);return;}const rows=await invoke<Usage[]>('model_usage',{threadId:id});usageByThread.set(id,rows);});
 }
 async function localInsight(command:'summarize_task'|'review_task') {
   if(!activeThread || busy)return;busy=true;render();
@@ -439,12 +560,10 @@ async function localInsight(command:'summarize_task'|'review_task') {
   catch(e){error(String(e));}finally{busy=false;render();}
 }
 async function refreshDiff(id: string) {
-  if(threads.find(t=>t.id===id)?.provider==='autonomous'){await refreshAutonomous(id);return;}
-  try { view(id).diff = await invoke<string>('repo_diff', {threadId:id}); if(activeThread === id && activeTab === 'Diff') renderContent(); }
-  catch(e) { error(String(e)); }
+  return readPane(id,'Diff',async()=>{if(threads.find(t=>t.id===id)?.provider==='autonomous'){await refreshAutonomous(id);return;}view(id).diff=await invoke<string>('repo_diff',{threadId:id});});
 }
 async function selectThread(id: string) {
-  if (busy) return; notice(''); saveDraft(); const t=threads.find(t=>t.id===id); if(t)activeProject=t.project_id; activeThread = id; usage=[]; restoreDraft(); rememberSelection(); busy = true; error(''); render();
+  if (busy) return; mobileSidebarOpen=false;notice(''); saveDraft(); const t=threads.find(t=>t.id===id); if(t)activeProject=t.project_id; activeThread = id; restoreDraft(); rememberSelection(); busy = true; error(''); render();
   try {
     if(t?.provider==='autonomous'){(document.querySelector('#task-mode') as HTMLSelectElement).value='autonomous';await refreshAutonomous(id);return;}
     if(t?.provider==='workflow'){await refreshWorkflow(id);return;}
@@ -455,7 +574,7 @@ async function selectThread(id: string) {
     for (;;) { const history = await invoke<JournalEvent[]>('event_history', { threadId: id, after }); for (const e of history) applyEvent(e, true); if (history.length < 2000) break; after = history[history.length - 1].sequence; }
     const insights=await invoke<{review:View['finalReview'];recovery:View['recovery']}>('worker_insights',{threadId:id});v.finalReview=insights.review||undefined;v.recovery=insights.recovery||undefined;
     v.running = !!snapshot.active_turn && !v.completedTurns?.has(snapshot.active_turn.id); v.activeTurn=snapshot.active_turn?.id; v.needsResume = false;
-  } catch (e) { view(id).needsResume = true; error(String(e)); } finally { busy = false; render(); }
+  } catch (e) { view(id).needsResume = true; error(String(e),{label:'再試行',run:()=>selectThread(id)}); } finally { busy = false; render(); focusContent(); }
   if(activeTab==='Usage')void refreshUsage();if(activeTab==='Diff')void refreshDiff(id);if(activeTab==='Context')void refreshContext(id);
   if(threads.find(t=>t.id===id)?.provider==='codex')void composer?.refreshThread(true);
   if(activeProject)void composer?.seedHistory(view(id).messages.filter(m=>m.role==='user').map(m=>m.text).slice(-10),activeProject);
@@ -540,36 +659,51 @@ async function registerProject(path:string) {
     const dialog=document.querySelector<HTMLDialogElement>('#register')!;if(!dialog.open)dialog.showModal();
   }
 }
+let settingsReady=false,settingsSaving=false,settingsLoading=false;
+async function loadConnectionSettings(){
+ if(settingsLoading)return;settingsLoading=true;settingsReady=false;
+ const form=document.querySelector<HTMLFormElement>('#settings-form')!,summary=document.querySelector<HTMLElement>('#settings-error')!;
+ formBusy(form,true);form.dataset.loading='true';document.querySelector<HTMLButtonElement>('#settings-cancel')!.disabled=false;form.querySelector<HTMLButtonElement>('[type="submit"]')!.textContent='読み込み中…';summary.textContent='';
+ try{
+  const [local,path,config]=await Promise.all([invoke<LocalConfig>('local_model_settings'),invoke<string>('codex_binary'),invoke<{mode:string;model:string;reasoning:string|null}>('astra_settings')]);
+  localConfig=local;for(const [id,value] of Object.entries({'local-name':local.display_name,'local-id':local.model_id,'local-endpoint':local.endpoint,'codex-path':path,'astra-mode':config.mode,'astra-model':config.model}))(document.getElementById(id) as HTMLInputElement|HTMLSelectElement).value=value;
+  fillReasoningSelect(document.querySelector<HTMLSelectElement>('#astra-reasoning')!,modelChoices.find(m=>!m.local&&m.model===config.model),config.reasoning);settingsReady=true;
+  form.querySelectorAll<HTMLInputElement>('input').forEach(field=>{field.removeAttribute('aria-invalid');document.getElementById(`${field.id}-error`)!.textContent='';});
+ }catch(e){summary.textContent=`設定を読み込めませんでした。保存はまだできません。 ${String(e)}`;const retry=document.createElement('button');retry.type='button';retry.textContent='設定を再読み込み';retry.onclick=()=>void loadConnectionSettings();summary.append(retry);}
+ finally{settingsLoading=false;delete form.dataset.loading;formBusy(form,false);form.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled=!settingsReady;}
+}
 document.querySelector('#settings')!.addEventListener('click', async () => {
   document.querySelector('#settings-error')!.textContent='';
   (document.querySelector('#connection-settings') as HTMLDialogElement).showModal();
   const total=document.querySelector('#total-usage')!;total.textContent='使用量を読み込み中…';void invoke<Usage[]>('model_usage').then(rows=>total.innerHTML=usageMarkup(rows,'全体の使用量')).catch(e=>total.textContent=String(e));
-  try { localConfig=await invoke<LocalConfig>('local_model_settings');for(const [id,value] of Object.entries({'local-name':localConfig.display_name,'local-id':localConfig.model_id,'local-endpoint':localConfig.endpoint}))(document.getElementById(id) as HTMLInputElement).value=value; (document.querySelector('#codex-path') as HTMLInputElement).value = await invoke<string>('codex_binary'); const config=await invoke<{mode:string;model:string;reasoning:string|null}>('astra_settings');(document.querySelector('#astra-mode') as HTMLSelectElement).value=config.mode;(document.querySelector('#astra-model') as HTMLInputElement).value=config.model;fillReasoningSelect(document.querySelector<HTMLSelectElement>('#astra-reasoning')!,modelChoices.find(m=>!m.local&&m.model===config.model),config.reasoning); }
-  catch (e) { document.querySelector('#settings-error')!.textContent = String(e); }
+  await loadConnectionSettings();
 });
 document.querySelector('#settings-cancel')!.addEventListener('click', () => (document.querySelector('#connection-settings') as HTMLDialogElement).close());
 document.querySelector('#settings-form')!.addEventListener('submit', async e => {
-  e.preventDefault(); try {
+  e.preventDefault();if(settingsSaving||!settingsReady)return;settingsSaving=true;
+  const form=document.querySelector<HTMLFormElement>('#settings-form')!;formBusy(form,true);let savedPart=false;
+  try {
     const value=(id:string)=>(document.getElementById(id) as HTMLInputElement).value.trim();
     const next={display_name:value('local-name'),model_id:value('local-id'),endpoint:value('local-endpoint')};
     const localChanged=JSON.stringify(next)!==JSON.stringify(localConfig&&{display_name:localConfig.display_name,model_id:localConfig.model_id,endpoint:localConfig.endpoint});
-    if(localChanged){localConfig=await invoke<LocalConfig>('set_local_model_settings',{config:next});notice('ローカルモデル設定を保存しました。アプリを再起動すると反映されます。');}
-    const path=(document.querySelector('#codex-path') as HTMLInputElement).value;if(path!==await invoke<string>('codex_binary')) {await invoke('set_codex_binary',{path});for(const v of views.values())v.needsResume=true;}
+    if(localChanged){localConfig=await invoke<LocalConfig>('set_local_model_settings',{config:next});savedPart=true;notice('ローカルモデル設定を保存しました。アプリを再起動すると反映されます。');}
+    const path=(document.querySelector('#codex-path') as HTMLInputElement).value;if(path!==await invoke<string>('codex_binary')) {await invoke('set_codex_binary',{path});savedPart=true;for(const v of views.values())v.needsResume=true;}
     await invoke('set_astra_settings',{config:{mode:(document.querySelector('#astra-mode') as HTMLSelectElement).value,model:(document.querySelector('#astra-model') as HTMLInputElement).value,reasoning:(document.querySelector('#astra-reasoning') as HTMLSelectElement).value||null}});
     document.querySelector('#settings-error')!.textContent = '';
-    (document.querySelector('#connection-settings') as HTMLDialogElement).close(); error('');void refreshModels();
-  } catch(e) { document.querySelector('#settings-error')!.textContent = String(e); }
+    (document.querySelector('#connection-settings') as HTMLDialogElement).close(); error('');if(!localChanged)notice('接続設定を保存しました。');void refreshModels();
+  } catch(e) { const summary=document.querySelector<HTMLElement>('#settings-error')!;summary.textContent=(savedPart?'一部の設定は保存済みです。未完了の設定を確認してください。 ':'保存できませんでした。入力内容を残しています。 ')+String(e);summary.focus(); }
+  finally{settingsSaving=false;formBusy(form,false);}
 });
 document.querySelector('#add')!.addEventListener('click', openDialog);
 document.querySelector('#new')!.addEventListener('click', newTask);
-document.querySelector<HTMLTextAreaElement>('#task-input')!.addEventListener('input',()=>{if(autonomousMode()&&!activeThread)document.querySelector<HTMLButtonElement>('#send')!.disabled=busy||!activeProject||!document.querySelector<HTMLTextAreaElement>('#task-input')!.value.trim();});
+document.querySelector<HTMLTextAreaElement>('#task-input')!.addEventListener('input',updateSendAvailability);
 document.querySelector('#resume')!.addEventListener('click', async () => { if (!activeThread||busy)return; if(!autonomousThread()){void selectThread(activeThread);return;}const id=activeThread;busy=true;render();try{await invoke('autonomous_resume',{threadId:id});await refreshAutonomous(id);}catch(e){error(String(e));}finally{busy=false;render();} });
 document.querySelector('#send')!.addEventListener('click', () => void send());
 document.querySelector<HTMLTextAreaElement>('#task-input')!.addEventListener('keydown', e => { if (!e.isComposing && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(); } });
 document.querySelector('#stop')!.addEventListener('click', async () => { if (!activeThread || stopping) return; const id=activeThread;stopping=true;render();try{await invoke(autonomousThread()?'autonomous_stop':'interrupt_turn',{threadId:id});if(autonomousThread())await refreshAutonomous(id);else if(workflowThread())await refreshWorkflow(id);}catch(e){view(id).needsResume=true;error(String(e));}finally{stopping=false;render();}});
 document.querySelector('#cancel')!.addEventListener('click', () => (document.querySelector('#register') as HTMLDialogElement).close());
 document.querySelector('#register form')!.addEventListener('submit', async e => {
-  e.preventDefault(); if(busy)return; busy=true;render();try{await registerProject((document.querySelector('#path') as HTMLInputElement).value);}finally{busy=false;render();focusComposer();}
+  e.preventDefault(); if(busy)return; busy=true;const form=e.currentTarget as HTMLFormElement;formBusy(form,true);render();try{await registerProject((document.querySelector('#path') as HTMLInputElement).value);}finally{busy=false;formBusy(form,false);render();if(document.querySelector<HTMLDialogElement>('#register')!.open)document.querySelector<HTMLElement>('#form-error')!.focus();else focusComposer();}
 });
 document.querySelector('#browse-project')!.addEventListener('click',()=>{(document.querySelector('#register') as HTMLDialogElement).close();void pickProject();});
 document.querySelector('#browse-codex')!.addEventListener('click',async()=>{if(picking)return;picking=true;try{const path=await nativeInvoke<string|null>('choose_path',{kind:'codex_binary'});if(path)(document.querySelector('#codex-path') as HTMLInputElement).value=path;}catch(e){document.querySelector('#settings-error')!.textContent=String(e);}finally{picking=false;}});
@@ -589,10 +723,16 @@ window.addEventListener('error', e => error(e.message));
 render();
 if (isTauri()) {
   void refreshModels();
-  void invoke<string[]>('sync_archived_sessions').then(failures=>{if(failures.length)error(failures.join('\n'));}).catch(e=>error(String(e)));
-  await listen<JournalEvent>('hub-event', e => applyEvent(e.payload));
+  void syncArchivedSessions();
+  await listen<JournalEvent>('hub-event', e => queueHubEvent(e.payload));
   await listen<number>('hub-stream-gap', () => { if (activeThread) { view(activeThread).needsResume = true; error('イベント配信が遅れました。「再開・状態を確認」で保存済み履歴を読み直してください。'); render(); } });
-  try { [projects, threads, archivedThreads] = await Promise.all([invoke<Project[]>('projects'), invoke<Thread[]>('threads'),invoke<string[]>('archived_threads')]); activeProject = projects.find(p=>p.id===ui.project)?.id || projects[0]?.id || null; activeTab=tabs.includes(ui.tab||'')?ui.tab!:'Chat';planText=activeProject?ui.plans![activeProject]||planText:planText;restoreDraft();render();if(ui.thread && threads.some(t=>t.id===ui.thread&&t.project_id===activeProject))await selectThread(ui.thread);if(activeTab==='Plan')void refreshGraph();if(activeTab==='Diff'&&activeThread)void refreshDiff(activeThread);if(activeTab==='Context'&&activeThread)void refreshContext(activeThread);if(activeTab==='Usage')void refreshUsage(); } catch (e) { error(String(e)); }
+  await loadWorkspace();
+}
+async function loadWorkspace(){
+ if(loadingWorkspace)return;loadingWorkspace=true;render();
+ try { [projects, threads, archivedThreads] = await Promise.all([invoke<Project[]>('projects'), invoke<Thread[]>('threads'),invoke<string[]>('archived_threads')]); activeProject = projects.find(p=>p.id===ui.project)?.id || projects[0]?.id || null; activeTab=tabs.includes(ui.tab||'')?ui.tab!:'Chat';planText=activeProject?ui.plans![activeProject]||planText:planText;restoreDraft();render();if(ui.thread && threads.some(t=>t.id===ui.thread&&t.project_id===activeProject))await selectThread(ui.thread);if(activeTab==='Plan')void refreshGraph();if(activeTab==='Diff'&&activeThread)void refreshDiff(activeThread);if(activeTab==='Context'&&activeThread)void refreshContext(activeThread);if(activeTab==='Usage')void refreshUsage(); }
+ catch(e){error(`作業一覧を読み込めませんでした。 ${String(e)}`,{label:'一覧を再読み込み',run:()=>loadWorkspace()});}
+ finally{loadingWorkspace=false;render();}
 }
 
 async function resumePlan() {if(!activeProject||busy)return;busy=true;error('');render();try{graph=await invoke<GraphTask[]>('resume_plan',{projectId:activeProject});await refreshThreads();}catch(e){error(String(e));}finally{busy=false;render();}}
@@ -620,12 +760,12 @@ function restoreDraft() {
 }
 function focusComposer() { document.querySelector<HTMLTextAreaElement>('#task-input')!.focus(); }
 function switchProject(id:string, force=false) {
-  if(busy&&!force)return; notice(''); saveDraft();activeProject=id;activeThread=null;activeTab='Chat';graph=[];
+  if(busy&&!force)return;mobileSidebarOpen=false;error('');notice(''); saveDraft();activeProject=id;activeThread=null;activeTab='Chat';graph=[];
   planText=ui.plans![id] || defaultPlanText;restoreDraft();rememberSelection();render();
   if(activeTab==='Plan')void refreshGraph();focusComposer();
 }
 function newTask() {
-  if(busy)return;notice('');saveDraft();activeThread=null;activeTab='Chat';restoreDraft();rememberSelection();error('');render();focusComposer();
+  if(busy)return;mobileSidebarOpen=false;notice('');saveDraft();activeThread=null;activeTab='Chat';restoreDraft();rememberSelection();error('');render();focusComposer();
   if(!activeProject)void pickProject();
 }
 function notice(message:string) { const el=document.querySelector<HTMLDivElement>('#notice')!;el.hidden=!message;el.textContent=message; }
@@ -634,23 +774,31 @@ async function copyText(text:string, button?:HTMLButtonElement) {
   catch { error('コピーできませんでした。テキストを選択して ⌘C を押してください。'); return false; }
 }
 function renderThreads() {
+  const root=document.querySelector<HTMLElement>('#projects')!,focused=document.activeElement;
+  const focusKey=focused instanceof HTMLElement&&root.contains(focused)?controlKey(focused):undefined;
   const archive=document.querySelector<HTMLButtonElement>('#show-archived')!;archive.classList.toggle('active',showArchived);archive.setAttribute('aria-pressed',String(showArchived));
   if(lastTreeProject!==activeProject){lastTreeProject=activeProject;if(activeProject&&!ui.expandedProjects!.includes(activeProject))ui.expandedProjects!.push(activeProject);}
   const query=taskFilter.toLowerCase();
-  document.querySelector('#projects')!.innerHTML=[...projects].sort((a,b)=>Number(ui.pinnedProjects!.includes(b.id))-Number(ui.pinnedProjects!.includes(a.id))).map(p=>{
+  const markup=[...projects].sort((a,b)=>Number(ui.pinnedProjects!.includes(b.id))-Number(ui.pinnedProjects!.includes(a.id))).map(p=>{
     const all=threads.filter(t=>t.project_id===p.id&&archivedThreads.includes(t.id)===showArchived);
     const matches=all.filter(t=>!query||p.name.toLowerCase().includes(query)||`${t.title} ${statusLabel(t.status)}`.toLowerCase().includes(query));
     if(query&&!matches.length&&!p.name.toLowerCase().includes(query))return '';
     matches.sort((a,b)=>Number(ui.pins!.includes(b.id))-Number(ui.pins!.includes(a.id)));
     const expanded=!!query||ui.expandedProjects!.includes(p.id);
     return `<section class="project-group ${p.id===activeProject?'active-project':''}" data-project-group="${p.id}"><div class="project-row"><button class="project-toggle" data-project-toggle="${p.id}" aria-label="${escape(p.name)}のタスクを${expanded?'閉じる':'表示'}" aria-expanded="${expanded}">${expanded?'⌄':'›'}</button><button class="project" data-project="${p.id}" title="${escape(p.root)}"><span>${escape(p.name)}</span><small>${all.length}</small></button><button class="project-more" data-project-menu="${p.id}" aria-label="${escape(p.name)}の操作">⋯</button><button class="project-more" data-project-new="${p.id}" aria-label="${escape(p.name)}で新規セッションを開始" title="新規セッション">＋</button></div>${expanded?`<div class="project-tasks" aria-label="${escape(p.name)}のタスク">${matches.map(t=>`<div class="thread-row"><button class="thread ${t.id===activeThread?'selected':''}" data-thread="${t.id}" title="${escape(t.title)}"><span>${escape(t.title)}</span><small class="state-${escape(t.status)}">${escape(statusLabel(t.status))}</small></button><button class="pin-thread ${ui.pins!.includes(t.id)?'pinned':''}" data-pin="${t.id}" aria-label="${escape(t.title)}を${ui.pins!.includes(t.id)?'固定解除':'固定'}" aria-pressed="${ui.pins!.includes(t.id)}">${ui.pins!.includes(t.id)?'★':'☆'}</button></div>`).join('')||`<p class="side-empty muted">${showArchived?'アーカイブはありません。':'タスクはまだありません。'}</p>`}</div>`:''}</section>`;
-  }).join('')||'<p class="side-empty muted">該当するプロジェクト・タスクはありません。</p>';
+  }).join('')||`<p class="side-empty muted">${loadingWorkspace?'プロジェクトを読み込み中…':!projects.length?'フォルダを開くと、プロジェクトとタスクをここに表示します。':'該当するプロジェクト・タスクはありません。検索語を短くしてお試しください。'}</p>`;
+  if(lastTreeMarkup===markup)return;lastTreeMarkup=markup;root.innerHTML=markup;
+  document.querySelectorAll<HTMLButtonElement>('[data-project-toggle]').forEach(b=>{const expanded=b.getAttribute('aria-expanded')==='true';b.innerHTML=`<svg aria-hidden="true" viewBox="0 0 16 16"><path d="${expanded?'m4 6 4 4 4-4':'m6 4 4 4-4 4'}"/></svg>`;});
+  document.querySelectorAll<HTMLButtonElement>('[data-project-menu]').forEach(b=>{b.innerHTML='<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3.5 8h.01M8 8h.01M12.5 8h.01"/></svg>';});
+  document.querySelectorAll<HTMLButtonElement>('[data-project-new]').forEach(b=>{b.innerHTML='<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>';});
+  document.querySelectorAll<HTMLButtonElement>('[data-pin]').forEach(b=>{b.innerHTML=`<svg aria-hidden="true" viewBox="0 0 16 16"><path d="m8 2 1.8 3.7 4.2.6-3 2.9.7 4.2L8 11.4l-3.7 2 .7-4.2-3-2.9 4.2-.6L8 2Z" ${b.getAttribute('aria-pressed')==='true'?'fill="currentColor" stroke="none"':''}/></svg>`;});
   document.querySelectorAll<HTMLButtonElement>('[data-project-new]').forEach(b=>b.onclick=()=>{if(busy)return;switchProject(b.dataset.projectNew!);newTask();});
   document.querySelectorAll<HTMLButtonElement>('[data-project-toggle]').forEach(b=>b.onclick=()=>{const id=b.dataset.projectToggle!;ui.expandedProjects=ui.expandedProjects!.includes(id)?ui.expandedProjects!.filter(p=>p!==id):[...ui.expandedProjects!,id];saveUi();renderThreads();});
   document.querySelectorAll<HTMLButtonElement>('[data-project]').forEach(b=>b.onclick=()=>switchProject(b.dataset.project!));
   document.querySelectorAll<HTMLButtonElement>('[data-project-menu]').forEach(b=>b.onclick=()=>openProjectMenu(b.dataset.projectMenu!,b));
   document.querySelectorAll<HTMLButtonElement>('[data-thread]').forEach(b=>b.onclick=()=>void selectThread(b.dataset.thread!));
   document.querySelectorAll<HTMLButtonElement>('[data-pin]').forEach(b=>b.onclick=()=>{const id=b.dataset.pin!;ui.pins=ui.pins!.includes(id)?ui.pins!.filter(p=>p!==id):[...ui.pins!,id];saveUi();renderThreads();});
+  if(focusKey)Array.from(root.querySelectorAll<HTMLElement>('button')).find(el=>controlKey(el)===focusKey)?.focus({preventScroll:true});
 }
 type MenuAction={title:string;detail:string;run:()=>void};
 function menuActions():MenuAction[] {
@@ -660,7 +808,7 @@ function menuActions():MenuAction[] {
     {title:'新しいタスク',detail:'⌘N',run:newTask},
     {title:'接続設定',detail:'⌘,',run:()=>document.querySelector<HTMLButtonElement>('#settings')!.click()},
     {title:'Auto の振り分け設定',detail:'5段階のモデルと reasoning',run:()=>void openAutoSettings()},
-    ...tabs.map(tab=>({title:`${tabLabels[tab]} を表示`,detail:'表示を切り替え',run:()=>{activeTab=tab;rememberSelection();render();if(tab==='Diff'&&activeThread)void refreshDiff(activeThread);if(tab==='Plan')void refreshGraph();if(tab==='Context'&&activeThread)void refreshContext(activeThread);if(tab==='Usage')void refreshUsage();}})),
+    ...tabs.map(tab=>({title:`${tabLabels[tab]} を表示`,detail:'表示を切り替え',run:()=>{activeTab=tab;rememberSelection();render();focusContent();if(tab==='Diff'&&activeThread)void refreshDiff(activeThread);if(tab==='Plan')void refreshGraph();if(tab==='Context'&&activeThread)void refreshContext(activeThread);if(tab==='Usage')void refreshUsage();}})),
     ...projects.map(p=>({title:p.name,detail:p.root,run:()=>switchProject(p.id)})),
     ...threads.filter(t=>!archivedThreads.includes(t.id)&&projects.some(p=>p.id===t.project_id)).map(t=>({title:t.title,detail:`${projects.find(p=>p.id===t.project_id)?.name||''} · ${statusLabel(t.status)}`,run:()=>{activeTab='Chat';void selectThread(t.id);}})),
   ];
@@ -672,7 +820,36 @@ function renderCommands() {
   document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach(b=>b.onclick=()=>{(document.querySelector('#commands') as HTMLDialogElement).close();matches[Number(b.dataset.command)].run();});
 }
 function openCommands() { if(picking||document.querySelector('dialog[open]'))return;const d=document.querySelector<HTMLDialogElement>('#commands')!; (document.querySelector('#command-query') as HTMLInputElement).value='';renderCommands();d.showModal();document.querySelector<HTMLInputElement>('#command-query')!.focus(); }
-function toggleSidebar() { ui.sidebarHidden=!ui.sidebarHidden;saveUi();render(); }
+function narrowWindow(){return window.matchMedia?.('(max-width: 650px)').matches||false;}
+function renderNavigation(){
+ const narrow=narrowWindow(),open=narrow&&mobileSidebarOpen;
+ app.classList.toggle('mobile-sidebar-open',open);
+ document.querySelector<HTMLElement>('main')!.inert=open;
+ document.querySelector<HTMLElement>('#sidebar-backdrop')!.hidden=!open;
+ document.querySelector<HTMLButtonElement>('#sidebar-close')!.hidden=!narrow;
+ sidebarButton.setAttribute('aria-expanded',String(narrow?open:!ui.sidebarHidden));
+ sidebarButton.setAttribute('aria-label',(narrow?!open:ui.sidebarHidden)?'プロジェクト一覧を表示':'プロジェクト一覧を閉じる');
+ if(open){sidebar.setAttribute('role','dialog');sidebar.setAttribute('aria-modal','true');}
+ else{sidebar.removeAttribute('role');sidebar.removeAttribute('aria-modal');}
+}
+function closeNavigation(){mobileSidebarOpen=false;renderNavigation();sidebarButton.focus();}
+function toggleSidebar() {
+ if(narrowWindow()){mobileSidebarOpen=!mobileSidebarOpen;renderNavigation();(mobileSidebarOpen?document.querySelector<HTMLElement>('#sidebar-close'):sidebarButton)?.focus();}
+ else{ui.sidebarHidden=!ui.sidebarHidden;saveUi();render();sidebarButton.focus();}
+}
+document.querySelector('#sidebar-close')!.addEventListener('click',closeNavigation);
+document.querySelector('#sidebar-backdrop')!.addEventListener('click',closeNavigation);
+sidebar.addEventListener('keydown',e=>{
+ if(!mobileSidebarOpen||!narrowWindow())return;
+ if(e.key==='Escape'){e.preventDefault();closeNavigation();}
+ if(e.key==='Tab'){
+  const controls=Array.from(sidebar.querySelectorAll<HTMLElement>('button:not(:disabled),input')).filter(el=>el.getClientRects().length);
+  const first=controls[0],last=controls.at(-1);
+  if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}
+  else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}
+ }
+});
+window.addEventListener('resize',()=>{if(!narrowWindow())mobileSidebarOpen=false;renderNavigation();});
 for(const id of ['task-input','known-files','preference'])document.getElementById(id)!.addEventListener('input',saveDraft);
 document.querySelector<HTMLInputElement>('#task-filter')!.addEventListener('input',e=>{taskFilter=(e.target as HTMLInputElement).value;renderThreads();});
 document.querySelector('#command-menu')!.addEventListener('click',openCommands);
@@ -710,6 +887,11 @@ function openLifecycle(kind:'project'|'session',id:string){
   const items=kind==='project'?[['unregister','登録を解除']]:[['rename','名前を変更'],[archivedThreads.includes(id)?'restore':'archive',archivedThreads.includes(id)?'アーカイブから復元':'アーカイブ'],['delete','履歴を削除']];
   for(const [action,label] of items){const button=document.createElement('button');button.textContent=label;button.onclick=async()=>{
     if(action==='rename'){dialog.close();document.querySelector<HTMLButtonElement>('#rename-task')!.click();return;}
+    if(action==='delete'&&button.dataset.confirmed!=='true'){
+      button.dataset.confirmed='true';button.classList.add('danger');button.textContent='このタスクの履歴を削除する';
+      document.querySelector('#lifecycle-description')!.textContent=`「${threads.find(t=>t.id===id)?.title||id}」の、このアプリ内の会話履歴を削除します。プロバイダー側の会話と作業ファイルは残ります。取り消す場合は「閉じる」を選んでください。`;
+      button.focus();return;
+    }
     button.disabled=true;
     try{
       if(action==='unregister'){await invoke('unregister_project',{projectId:id});projects=await invoke<Project[]>('projects');if(activeProject===id){saveDraft();activeProject=projects[0]?.id||null;activeThread=null;restoreDraft();rememberSelection();}}
