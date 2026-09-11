@@ -1,6 +1,7 @@
 use crate::{models, AppState};
 use protocol_types::composer::{InputMention, TurnOptions};
 use provider_codex::composer::ComposerCatalog;
+use provider_spark::validate_completion_suffix;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -436,13 +437,16 @@ pub async fn complete_prompt(
     })
     .await;
     let fallback_reason = match local_attempt {
-        Ok(Ok(suffix)) => {
-            return Ok(CompletionResult {
-                suffix,
-                source: format!("ローカル · {}", local.model_id()),
-                fallback_reason: None,
-            })
-        }
+        Ok(Ok(suffix)) => match validate_completion_suffix(&prefix, &suffix) {
+            Ok(suffix) => {
+                return Ok(CompletionResult {
+                    suffix,
+                    source: format!("ローカル · {}", local.model_id()),
+                    fallback_reason: None,
+                })
+            }
+            Err(e) => format!("ローカル補完を破棄しました: {e}"),
+        },
         Ok(Err(e)) => format!("ローカル補完を利用できません: {e}"),
         Err(_) => "ローカル補完が15秒以内に完了しませんでした。".into(),
     };
@@ -456,6 +460,8 @@ pub async fn complete_prompt(
         .complete_composer_text(root, "gpt-5.6-luna", "low", prompt)
         .await
         .map_err(|e| format!("{fallback_reason} Luna / lowも利用できません: {e:#}"))?;
+    let suffix = validate_completion_suffix(&prefix, &suffix)
+        .map_err(|e| format!("{fallback_reason} Luna / lowも利用できません: {e}"))?;
     Ok(CompletionResult {
         suffix,
         source: "Luna / low".into(),
