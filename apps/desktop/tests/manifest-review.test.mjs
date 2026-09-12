@@ -7,16 +7,16 @@ import {JSDOM} from 'jsdom';
 
 const source=(await readFile(new URL('../src/manifest-review.ts',import.meta.url),'utf8')).replace('export function','function');
 const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
-const task=()=>({kind:'task',project_id:'project',request:'確認した依頼',scope:['src/task.ts'],acceptance:['入力が残る'],steps:[{title:'入力を保持',goal:'下書きを保存',owned_paths:['src/task.ts'],acceptance:['画面を戻しても入力が残る']}]});
+const task=()=>({kind:'task',project_id:'project',request:'確認した依頼',scope:['src/task.ts'],acceptance:['入力が残る'],steps:[{key:'keep',title:'入力を保持',goal:'下書きを保存',level:2,owned_paths:['src/task.ts'],acceptance:['画面を戻しても入力が残る']}]});
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 function deferred(){let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};}
-function fixture(read,commit){
+function fixture(read,commit,models=()=>[]){
  const dom=new JSDOM('<body></body>');
  dom.window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
  dom.window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
  const setup=vm.runInNewContext(js+';setupManifestReview',{document:dom.window.document});
  const imports=[],reads=[];let returned=0;
- const open=setup(async(command,args)=>{reads.push({command,args});return read();},async(text,id)=>{imports.push({text,id});if(commit)await commit();});
+ const open=setup(async(command,args)=>{reads.push({command,args});return read();},async(text,id)=>{imports.push({text,id});if(commit)await commit();},models);
  const doc=dom.window.document;
  return {imports,reads,doc,dom,open:()=>open({id:'project',name:'Project'},()=>returned++),returned:()=>returned,confirm:()=>doc.querySelector('#manifest-confirm'),cancel:()=>doc.querySelector('#manifest-cancel'),dialog:()=>doc.querySelector('dialog'),close:()=>dom.window.close()};
 }
@@ -47,6 +47,18 @@ test('mismatched projects and invalid clipboard content never enable execution',
  for(const read of [()=>({...task(),project_id:'another'}),()=>{throw Error('JSON形式が不正');}]){
   const f=fixture(read);try{await f.open();assert.equal(f.confirm().disabled,true);assert.ok(f.doc.querySelector('#manifest-error').textContent);f.confirm().click();assert.equal(f.imports.length,0);}finally{f.close();}
  }
+});
+test('task step model override is shown and serialized into the confirmed payload',async()=>{
+ const choices=[{key:'api:anthropic:model',label:'Anthropic / model',model:'model',profile_id:'anthropic',local:false,reasoning:['low','high']}];
+ const f=fixture(task,undefined,()=>choices);try{
+  await f.open();
+  const model=f.doc.querySelector('[data-step-model="0"]'),reasoning=f.doc.querySelector('[data-step-reasoning="0"]');
+  model.value=choices[0].key;model.dispatchEvent(new f.dom.window.Event('change'));
+  reasoning.value='high';reasoning.dispatchEvent(new f.dom.window.Event('change'));
+  f.confirm().click();await settle();
+  const imported=JSON.parse(f.imports[0].text);
+  assert.deepEqual(imported.steps[0].target_override,{provider:'api',profile_id:'anthropic',model:'model',reasoning:'high'});
+ }finally{f.close();}
 });
 test('review confirmation describes its effect and failed imports retain the same payload for retry',async()=>{
  for(const [verdict,changes,label] of [['pass',[],'合格を記録して完了'],['fail',[{step_key:'one',instruction:'修正する'}],'この修正を実行'],['inconclusive',[],'結果を記録']]){

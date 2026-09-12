@@ -1,10 +1,11 @@
-export type ModelChoice = {key:string;label:string;model:string;local:boolean;reasoning:string[];default_reasoning:string|null;is_default:boolean};
+export type ModelChoice = {key:string;label:string;model:string;profile_id?:string;protocol?:string;local:boolean;reasoning:string[];tools?:boolean;default_reasoning:string|null;is_default:boolean};
 export function resolvedModel(model:ModelChoice|undefined,_effort:string|null):ModelChoice|undefined{return model;}
-export type ModelTarget = {provider:'local'|'codex';model:string;reasoning:string|null};
+export type ModelTarget = {provider:'local'|'codex'|'api';profile_id?:string|null;model:string;reasoning:string|null};
+export function profileForChoice(model:ModelChoice){return model.profile_id||(model.local?'spark':'codex');}
 function option(select:HTMLSelectElement,label:string,value:string,disabled=false){const o=select.ownerDocument.createElement('option');o.textContent=label;o.value=value;o.disabled=disabled;select.add(o);return o;}
 export function appendModelOptions(select:HTMLSelectElement,models:ModelChoice[]){
-  for(const [label,local] of [['ローカル',true],['Codex',false]] as const){
-    const choices=models.filter(m=>m.local===local);if(!choices.length)continue;
+  for(const [label,match] of [['ローカル',(m:ModelChoice)=>profileForChoice(m)==='spark'],['Codex',(m:ModelChoice)=>profileForChoice(m)==='codex'],['API providers',(m:ModelChoice)=>!['spark','codex'].includes(profileForChoice(m))]] as const){
+    const choices=models.filter(match);if(!choices.length)continue;
     const group=select.ownerDocument.createElement('optgroup');group.label=label;
     for(const model of choices){
       const item=select.ownerDocument.createElement('option');
@@ -16,13 +17,17 @@ export function appendModelOptions(select:HTMLSelectElement,models:ModelChoice[]
   }
 
 }
-export function modelForTarget(models:ModelChoice[],target:ModelTarget|null|undefined){return target&&['local','codex'].includes(target.provider)?models.find(m=>m.model===target.model&&m.local===(target.provider==='local')):undefined;}
+export function modelForTarget(models:ModelChoice[],target:ModelTarget|null|undefined){
+  if(!target||!['local','codex','api'].includes(target.provider))return undefined;
+  const profile=target.profile_id||(target.provider==='local'?'spark':target.provider==='codex'?'codex':null);
+  return models.find(m=>m.model===target.model&&(!profile||profileForChoice(m)===profile));
+}
 export function fillModelSelect(select:HTMLSelectElement,models:ModelChoice[],target:ModelTarget|null){
   select.replaceChildren();option(select,'モデルを選択','');
   appendModelOptions(select,models);
   const match=modelForTarget(models,target);
   if(match)select.value=match.key;
-  else if(target){const unavailable=`unavailable:${target.provider}:${target.model}`;option(select,`${target.model}（利用不可）`,unavailable,true);select.value=unavailable;}
+  else if(target){const unavailable=`unavailable:${target.profile_id||target.provider}:${target.model}`;option(select,`${target.profile_id?target.profile_id+' / ':''}${target.model}（利用不可）`,unavailable,true);select.value=unavailable;}
 }
 export function fillReasoningSelect(select:HTMLSelectElement,model:ModelChoice|undefined,desired:string|null=null){
   select.replaceChildren();
@@ -38,5 +43,7 @@ export function readTarget(modelSelect:HTMLSelectElement,reasoningSelect:HTMLSel
   const choice=models.find(m=>m.key===modelSelect.value), effort=reasoningSelect.value||null;
   const model=resolvedModel(choice,effort);
   if(!model || (effort&&(model.local||!model.reasoning.includes(effort))))return null;
-  return {provider:model.local?'local':'codex',model:model.model,reasoning:effort};
+  const profile=profileForChoice(model),target:ModelTarget={provider:profile==='spark'?'local':profile==='codex'?'codex':'api',model:model.model,reasoning:effort};
+  if(model.profile_id)target.profile_id=model.profile_id;
+  return target;
 }

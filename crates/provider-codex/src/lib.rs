@@ -37,7 +37,12 @@ impl CodexProvider {
     /// Reconcile the exact saved turn before interrupting. A restarted server
     /// has no loaded runtime for turns already persisted as terminal.
     pub async fn reconcile_stopped_turn(&self, turn: &ProviderTurn) -> Result<()> {
-        let value = self.request("thread/read", json!({"threadId":turn.thread_id,"includeTurns":true})).await?;
+        let value = self
+            .request(
+                "thread/read",
+                json!({"threadId":turn.thread_id,"includeTurns":true}),
+            )
+            .await?;
         if persisted_turn_is_terminal(&value, turn)? {
             return Ok(());
         }
@@ -554,9 +559,13 @@ impl CodingAgentProvider for CodexProvider {
         Ok(())
     }
     async fn unarchive_thread(&self, thread: &ProviderThread) -> Result<()> {
-        let result = self.request("thread/unarchive", json!({"threadId":thread.id}))
+        let result = self
+            .request("thread/unarchive", json!({"threadId":thread.id}))
             .await?;
-        anyhow::ensure!(result["thread"]["id"].as_str() == Some(thread.id.as_str()), "Restored thread ID does not match");
+        anyhow::ensure!(
+            result["thread"]["id"].as_str() == Some(thread.id.as_str()),
+            "Restored thread ID does not match"
+        );
         Ok(())
     }
     async fn start_worker(
@@ -625,7 +634,7 @@ impl CodingAgentProvider for CodexProvider {
         let result = self
             .request(
                 "thread/start",
-                json!({"cwd":root,"sandbox":"workspace-write","approvalPolicy":"on-request"}),
+                json!({"cwd":root,"sandbox":"read-only","approvalPolicy":"never"}),
             )
             .await?;
         Ok(ProviderThread {
@@ -644,7 +653,12 @@ impl CodingAgentProvider for CodexProvider {
         {
             bail!("選択したモデルは接続先で利用できません。モデル一覧を更新してください。");
         }
-        let result = self.request("thread/start", json!({"cwd":root,"model":model,"sandbox":"workspace-write","approvalPolicy":"on-request"})).await?;
+        let result = self
+            .request(
+                "thread/start",
+                json!({"cwd":root,"model":model,"sandbox":"read-only","approvalPolicy":"never"}),
+            )
+            .await?;
         if result["model"].as_str() != Some(model) {
             bail!("接続先が別のモデルを返しました。指示は送信していません。");
         }
@@ -660,7 +674,7 @@ impl CodingAgentProvider for CodexProvider {
         thread: &ProviderThread,
         root: PathBuf,
     ) -> Result<ThreadSnapshot> {
-        snapshot(self.request("thread/resume",json!({"threadId":thread.id,"cwd":root,"sandbox":"workspace-write","approvalPolicy":"on-request"})).await?)
+        snapshot(self.request("thread/resume",json!({"threadId":thread.id,"cwd":root,"sandbox":"read-only","approvalPolicy":"never"})).await?)
     }
     async fn resume_thread_with_model(
         &self,
@@ -668,7 +682,7 @@ impl CodingAgentProvider for CodexProvider {
         root: PathBuf,
         model: &str,
     ) -> Result<ThreadSnapshot> {
-        let result = self.request("thread/resume",json!({"threadId":thread.id,"cwd":root,"model":model,"sandbox":"workspace-write","approvalPolicy":"on-request"})).await?;
+        let result = self.request("thread/resume",json!({"threadId":thread.id,"cwd":root,"model":model,"sandbox":"read-only","approvalPolicy":"never"})).await?;
         if result["model"].as_str() != Some(model) {
             bail!("再開時のモデルが一致しません。指示は送信していません。");
         }
@@ -762,7 +776,13 @@ fn persisted_turn_is_terminal(value: &Value, expected: &ProviderTurn) -> Result<
     if thread["id"].as_str() != Some(expected.thread_id.as_str()) {
         bail!("reconciliation returned a different thread");
     }
-    let turn = thread["turns"].as_array().and_then(|turns| turns.iter().find(|turn| turn["id"].as_str() == Some(expected.id.as_str())))
+    let turn = thread["turns"]
+        .as_array()
+        .and_then(|turns| {
+            turns
+                .iter()
+                .find(|turn| turn["id"].as_str() == Some(expected.id.as_str()))
+        })
         .context("saved turn is missing; stop cannot be confirmed")?;
     match turn["status"].as_str() {
         Some("completed" | "interrupted" | "failed") => Ok(true),
@@ -917,12 +937,28 @@ fn normalize(v: &Value) -> Option<AgentEvent> {
 mod tests {
     #[test]
     fn reconciliation_requires_the_exact_saved_turn_and_known_status() {
-        let turn = crate::ProviderTurn { thread_id: "t".into(), id: "u".into(), status: "inProgress".into() };
+        let turn = crate::ProviderTurn {
+            thread_id: "t".into(),
+            id: "u".into(),
+            status: "inProgress".into(),
+        };
         for status in ["completed", "interrupted", "failed"] {
-            assert!(super::persisted_turn_is_terminal(&serde_json::json!({"thread":{"id":"t","turns":[{"id":"u","status":status}]}}), &turn).unwrap());
+            assert!(super::persisted_turn_is_terminal(
+                &serde_json::json!({"thread":{"id":"t","turns":[{"id":"u","status":status}]}}),
+                &turn
+            )
+            .unwrap());
         }
-        assert!(!super::persisted_turn_is_terminal(&serde_json::json!({"thread":{"id":"t","turns":[{"id":"u","status":"inProgress"}]}}), &turn).unwrap());
-        for value in [serde_json::json!({"thread":{"id":"other","turns":[]}}), serde_json::json!({"thread":{"id":"t","turns":[]}}), serde_json::json!({"thread":{"id":"t","turns":[{"id":"u","status":"unknown"}]}})] {
+        assert!(!super::persisted_turn_is_terminal(
+            &serde_json::json!({"thread":{"id":"t","turns":[{"id":"u","status":"inProgress"}]}}),
+            &turn
+        )
+        .unwrap());
+        for value in [
+            serde_json::json!({"thread":{"id":"other","turns":[]}}),
+            serde_json::json!({"thread":{"id":"t","turns":[]}}),
+            serde_json::json!({"thread":{"id":"t","turns":[{"id":"u","status":"unknown"}]}}),
+        ] {
             assert!(super::persisted_turn_is_terminal(&value, &turn).is_err());
         }
     }

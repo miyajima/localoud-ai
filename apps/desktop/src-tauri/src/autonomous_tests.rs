@@ -7,6 +7,7 @@ fn step(key: &str, paths: &[&str], dependencies: &[&str]) -> PlanStep {
         goal: "implement a bounded change".into(),
         dependencies: dependencies.iter().map(|s| s.to_string()).collect(),
         level: 2,
+        target_override: None,
         owned_paths: paths.iter().map(|s| s.to_string()).collect(),
         acceptance: vec!["verify the changed behavior".into()],
         risk: Some("low".into()),
@@ -16,6 +17,7 @@ fn step(key: &str, paths: &[&str], dependencies: &[&str]) -> PlanStep {
 fn target() -> ModelTarget {
     ModelTarget {
         provider: ModelProvider::Codex,
+        profile_id: Some("codex".into()),
         model: "saved-model".into(),
         reasoning: Some("xhigh".into()),
     }
@@ -117,6 +119,7 @@ fn saved_routes_preserve_every_model_and_exact_effort() {
     for assignment in &mut config.levels {
         assignment.target = ModelTarget {
             provider: ModelProvider::Codex,
+            profile_id: Some("codex".into()),
             model: format!("model-{}", assignment.level),
             reasoning: Some(format!("effort-{}", assignment.level)),
         };
@@ -130,6 +133,21 @@ fn saved_routes_preserve_every_model_and_exact_effort() {
         assert_eq!(t.reasoning, Some(format!("effort-{level}")));
     }
     assert!(frozen.target(0).is_err());
+}
+#[test]
+fn plan_step_override_is_validated_and_frozen_in_the_step() {
+    let mut overridden = step("override", &["src/lib.rs"], &[]);
+    overridden.target_override = Some(ModelTarget {
+        provider: ModelProvider::Api,
+        profile_id: Some("anthropic-prod".into()),
+        model: "claude-model".into(),
+        reasoning: Some("high".into()),
+    });
+    let parsed = parse(vec![overridden.clone()]).unwrap();
+    assert_eq!(parsed[0].target_override, overridden.target_override);
+
+    overridden.target_override.as_mut().unwrap().profile_id = None;
+    assert!(parse(vec![overridden]).is_err());
 }
 #[test]
 fn conflicts_are_serialized_including_directory_ownership() {
@@ -171,6 +189,117 @@ fn failed_dependency_blocks_successors_and_review() {
     tasks[1].output = Some(" ".into());
     assert!(evidence_complete(&tasks).is_err());
 }
+
+#[test]
+fn automated_review_contract_is_fail_closed() {
+    let steps = vec![task(step("a", &["a"], &[]))];
+    let pass = parse_automated_review(
+        r#"```json
+{"verdict":"pass","summary":"all evidence matches","findings":[],"changes":[]}
+```"#,
+        &steps,
+    )
+    .unwrap();
+    assert!(matches!(pass.verdict, AutomatedVerdict::Pass));
+
+    for invalid in [
+        r#"{"verdict":"pass","summary":"ok","findings":[],"changes":[{"step_key":"a","instruction":"fix"}]}"#,
+        r#"{"verdict":"rework","summary":"fix","findings":[],"changes":[]}"#,
+        r#"{"verdict":"rework","summary":"fix","findings":[],"changes":[{"step_key":"missing","instruction":"fix"}]}"#,
+        r#"{"verdict":"inconclusive","summary":"unknown","findings":[],"changes":[{"step_key":"a","instruction":"fix"}]}"#,
+        r#"{"verdict":"pass","summary":"","findings":[],"changes":[]}"#,
+        r#"{"verdict":"pass","summary":"ok","findings":[],"changes":[],"extra":true}"#,
+    ] {
+        assert!(
+            parse_automated_review(invalid, &steps).is_err(),
+            "{invalid}"
+        );
+    }
+}
+
+#[test]
+fn review_pass_completes_and_rework_invalidates_dependents() {
+    let mut steps = vec![
+        task(step("a", &["a"], &[])),
+        task(step("b", &["b"], &["a"])),
+    ];
+    for step in &mut steps {
+        completed(step);
+    }
+    let mut w = workflow(steps);
+    w.manifest = Some(crate::manifest::TaskManifest {
+        version: 1,
+        manifest_id: "manifest".into(),
+        project_id: w.thread.project_id.to_string(),
+        base_revision: w.source_head.clone(),
+        request: "request".into(),
+        acceptance: vec!["done".into()],
+        scope: vec!["a".into(), "b".into()],
+        steps: w.steps.iter().map(|step| step.step.clone()).collect(),
+    });
+    w.thread.status = "awaiting_review".into();
+    w.artifact_version = Some("b".repeat(64));
+    let review_message: protocol_types::a2a::Message = serde_json::from_str(
+        &review_payload(
+            &w,
+            "diff --git a/a b/a",
+            w.artifact_version.as_deref().unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    review_message.validate().unwrap();
+    assert_eq!(
+        review_message.parts[0].media_type.as_deref(),
+        Some(protocol_types::a2a::REVIEW_CAPSULE_MEDIA_TYPE)
+    );
+    assert_eq!(
+        review_message.parts[0].data.as_ref().unwrap()["goal"],
+        "request"
+    );
+    assert_eq!(review_message.reference_task_ids.len(), 2);
+    let rework = crate::manifest::ReviewManifest {
+        version: 1,
+        manifest_id: "review-one".into(),
+        project_id: w.thread.project_id.to_string(),
+        task_id: w.thread.id.to_string(),
+        artifact_version: w.artifact_version.clone().unwrap(),
+        verdict: crate::manifest::Verdict::Fail,
+        summary: "a needs correction".into(),
+        findings: vec!["finding".into()],
+        changes: vec![crate::manifest::ReviewChange {
+            step_key: "a".into(),
+            instruction: "correct a".into(),
+        }],
+    };
+    assert!(prepare_review(&mut w, &rework).unwrap());
+    assert_eq!(w.iteration, 2);
+    assert!(w.steps.iter().all(|step| step.status == "pending"));
+    assert!(w.steps[1]
+        .revision_instruction
+        .as_deref()
+        .unwrap()
+        .contains("Upstream"));
+
+    for step in &mut w.steps {
+        completed(step);
+    }
+    w.thread.status = "awaiting_review".into();
+    w.artifact_version = Some("c".repeat(64));
+    let pass = crate::manifest::ReviewManifest {
+        version: 1,
+        manifest_id: "review-two".into(),
+        project_id: w.thread.project_id.to_string(),
+        task_id: w.thread.id.to_string(),
+        artifact_version: w.artifact_version.clone().unwrap(),
+        verdict: crate::manifest::Verdict::Pass,
+        summary: "accepted".into(),
+        findings: vec![],
+        changes: vec![],
+    };
+    assert!(!prepare_review(&mut w, &pass).unwrap());
+    assert_eq!(w.thread.status, "completed");
+}
 #[test]
 fn capsules_are_bounded_and_exclude_orchestration_and_unrelated_outputs() {
     let mut tasks = vec![
@@ -187,6 +316,15 @@ fn capsules_are_bounded_and_exclude_orchestration_and_unrelated_outputs() {
         text: "ORCHESTRATOR TRANSCRIPT".into(),
     });
     let p = capsule(&w, 1).unwrap();
+    let envelope: protocol_types::a2a::Message = serde_json::from_str(&p).unwrap();
+    envelope.validate().unwrap();
+    assert_eq!(envelope.role, protocol_types::a2a::Role::User);
+    assert_eq!(
+        envelope.parts[0].media_type.as_deref(),
+        Some(protocol_types::a2a::CONTEXT_CAPSULE_MEDIA_TYPE)
+    );
+    assert_eq!(envelope.parts[0].data.as_ref().unwrap()["task"]["key"], "b");
+    assert_eq!(envelope.reference_task_ids.len(), 1);
     assert!(!p.contains("TRANSCRIPT"));
     assert!(!p.contains("original request"));
     assert!(p.contains("verified output"));
@@ -283,6 +421,72 @@ fn workflow_capsules_children_and_stop_survive_store_reopen() {
     assert_eq!(recovered.steps[0].capsule, w.steps[0].capsule);
     assert_eq!(recovered.settings_snapshot, w.settings_snapshot);
     assert_eq!(recovered.iteration, w.iteration);
+}
+
+#[test]
+fn review_attention_resume_retries_review_without_reexecuting_steps() {
+    let mut state = task(step("a", &["a"], &[]));
+    completed(&mut state);
+    let original_task = state.task_id;
+    let mut w = workflow(vec![state]);
+    w.manifest = Some(crate::manifest::TaskManifest {
+        version: 1,
+        manifest_id: "manifest".into(),
+        project_id: w.thread.project_id.to_string(),
+        base_revision: w.source_head.clone(),
+        request: "request".into(),
+        acceptance: vec!["done".into()],
+        scope: vec!["a".into()],
+        steps: w.steps.iter().map(|step| step.step.clone()).collect(),
+    });
+    w.thread.status = "needs_attention".into();
+    w.artifact_version = Some("d".repeat(64));
+    w.final_diff = Some("diff".into());
+    prepare_resume(&mut w).unwrap();
+    assert_eq!(w.thread.status, "queued");
+    assert_eq!(w.iteration, 1);
+    assert_eq!(w.steps[0].status, "completed");
+    assert_eq!(w.steps[0].task_id, original_task);
+    assert!(w.artifact_version.is_none());
+    assert_eq!(w.history.len(), 1);
+}
+
+#[test]
+fn explicit_failed_api_resume_creates_a_fresh_attempt_but_unknown_outcomes_do_not_replay() {
+    let mut state = task(step("api", &["src/lib.rs"], &[]));
+    state.target = ModelTarget {
+        provider: ModelProvider::Api,
+        profile_id: Some("fixture-api".into()),
+        model: "fixture-model".into(),
+        reasoning: None,
+    };
+    state.status = "failed".into();
+    state.child_id = Some(HubThreadId::default());
+    let mut workflow = workflow(vec![state]);
+    workflow.manifest = Some(crate::manifest::TaskManifest {
+        version: 1,
+        manifest_id: "fixture".into(),
+        project_id: workflow.thread.project_id.to_string(),
+        base_revision: workflow.source_head.clone(),
+        request: "retry".into(),
+        acceptance: vec!["verified".into()],
+        scope: vec!["src/lib.rs".into()],
+        steps: workflow
+            .steps
+            .iter()
+            .map(|item| item.step.clone())
+            .collect(),
+    });
+
+    let mut known_failure = workflow.clone();
+    known_failure.thread.status = "failed".into();
+    prepare_resume(&mut known_failure).unwrap();
+    assert!(known_failure.steps[0].child_id.is_none());
+
+    workflow.thread.status = "reconciliation_required".into();
+    let original_child = workflow.steps[0].child_id;
+    prepare_resume(&mut workflow).unwrap();
+    assert_eq!(workflow.steps[0].child_id, original_child);
 }
 #[tokio::test]
 async fn diamond_dependencies_apply_each_incremental_patch_once() {
@@ -489,7 +693,11 @@ fn manifest_receipt_is_atomic_and_survives_restart() {
 #[test]
 fn duplicate_manifest_reopens_deleted_mapping_without_replaying_or_replacing_state() {
     let d = tempfile::tempdir().unwrap();
-    std::process::Command::new("git").arg("init").arg(d.path()).output().unwrap();
+    std::process::Command::new("git")
+        .arg("init")
+        .arg(d.path())
+        .output()
+        .unwrap();
     let mut store = hub_db::Store::open(&d.path().join("hub.db")).unwrap();
     let project = store.register_project(d.path()).unwrap();
     let mut w = workflow(vec![task(step("a", &["a"], &[]))]);
@@ -497,19 +705,34 @@ fn duplicate_manifest_reopens_deleted_mapping_without_replaying_or_replacing_sta
     w.thread.status = "interrupted".into();
     w.stop_requested = true;
     let saved = serde_json::to_string(&w).unwrap();
-    let receipt = json!({"thread_id": w.thread.id, "manifest": {"manifest_id":"reopen"}}).to_string();
-    store.accept_manifest("reopen", &receipt, &w.thread, &key(w.thread.id), &saved).unwrap();
+    let receipt =
+        json!({"thread_id": w.thread.id, "manifest": {"manifest_id":"reopen"}}).to_string();
+    store
+        .accept_manifest("reopen", &receipt, &w.thread, &key(w.thread.id), &saved)
+        .unwrap();
     store.delete_thread(w.thread.id).unwrap();
     assert!(store.threads().unwrap().is_empty());
-    assert!(crate::manifest::existing_task(&store, "reopen", &ProjectId::default().to_string()).is_err());
+    assert!(
+        crate::manifest::existing_task(&store, "reopen", &ProjectId::default().to_string())
+            .is_err()
+    );
     assert!(store.threads().unwrap().is_empty());
-    let restored = crate::manifest::existing_task(&store, "reopen", &project.id.to_string()).unwrap().unwrap();
+    let restored = crate::manifest::existing_task(&store, "reopen", &project.id.to_string())
+        .unwrap()
+        .unwrap();
     assert_eq!(restored.id, w.thread.id);
     assert_eq!(restored.status, "interrupted");
     assert_eq!(store.threads().unwrap().len(), 1);
     assert_eq!(store.setting(&key(w.thread.id)).unwrap().unwrap(), saved);
-    assert_eq!(store.setting("manifest_receipt:reopen").unwrap().unwrap(), receipt);
-    assert!(crate::manifest::existing_task(&store, "unknown", &project.id.to_string()).unwrap().is_none());
+    assert_eq!(
+        store.setting("manifest_receipt:reopen").unwrap().unwrap(),
+        receipt
+    );
+    assert!(
+        crate::manifest::existing_task(&store, "unknown", &project.id.to_string())
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -518,17 +741,37 @@ async fn progress_diff_uses_worker_then_integrated_tree_including_new_files() {
     git(dir.path(), &["init"]).await.unwrap();
     std::fs::write(dir.path().join("base.txt"), "original\n").unwrap();
     git(dir.path(), &["add", "base.txt"]).await.unwrap();
-    git(dir.path(), &["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]).await.unwrap();
+    git(
+        dir.path(),
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@localhost",
+            "commit",
+            "-m",
+            "fixture",
+        ],
+    )
+    .await
+    .unwrap();
     let head = git(dir.path(), &["rev-parse", "HEAD"]).await.unwrap();
     let manager = GitWorktrees::new(dir.path()).unwrap();
-    let tree = manager.create(TaskId::default(), head.trim()).await.unwrap();
+    let tree = manager
+        .create(TaskId::default(), head.trim())
+        .await
+        .unwrap();
     std::fs::write(tree.path.join("new.txt"), "new worker content\n").unwrap();
     let mut w = workflow(vec![task(step("worker", &["new.txt"], &[]))]);
     w.source_root = dir.path().to_owned();
     w.steps[0].worktree = Some(tree.clone());
     let changes = worktree_changes(&w).await.unwrap();
     assert_eq!(changes[0].key, "worker");
-    assert!(changes[0].diff.as_ref().unwrap().contains("+new worker content"));
+    assert!(changes[0]
+        .diff
+        .as_ref()
+        .unwrap()
+        .contains("+new worker content"));
     assert!(!dir.path().join("new.txt").exists());
     w.artifact = Some(tree.clone());
     assert_eq!(worktree_changes(&w).await.unwrap()[0].key, "integrated");
@@ -541,16 +784,42 @@ async fn progress_diff_uses_worker_then_integrated_tree_including_new_files() {
 #[test]
 fn progress_history_filters_other_turns_and_stream_placeholders() {
     let dir = tempfile::tempdir().unwrap();
-    assert!(std::process::Command::new("git").args(["init", "-q"]).arg(dir.path()).status().unwrap().success());
+    assert!(std::process::Command::new("git")
+        .args(["init", "-q"])
+        .arg(dir.path())
+        .status()
+        .unwrap()
+        .success());
     let store = hub_db::Store::open(&dir.path().join("hub.db")).unwrap();
     let project = store.register_project(dir.path()).unwrap();
     let id = HubThreadId::default();
-    store.save_thread(&ThreadMapping { id, project_id:project.id, provider:"codex".into(), provider_thread_id:"activity-fixture".into(), title:"worker".into(),status:"running".into() }).unwrap();
-    for (kind, turn, text) in [("message_completed", "old", "old result"),("message_delta", "current", "omitted"),("item_started", "current", "inspect"),("message_completed", "current", "editing file")] {
-        store.append_event(Some("activity-fixture"),kind,&json!({"thread_id":"activity-fixture","turn_id":turn,"kind":kind,"text":text}).to_string()).unwrap();
+    store
+        .save_thread(&ThreadMapping {
+            id,
+            project_id: project.id,
+            provider: "codex".into(),
+            provider_thread_id: "activity-fixture".into(),
+            title: "worker".into(),
+            status: "running".into(),
+        })
+        .unwrap();
+    for (kind, turn, text) in [
+        ("message_completed", "old", "old result"),
+        ("message_delta", "current", "omitted"),
+        ("item_started", "current", "inspect"),
+        ("message_completed", "current", "editing file"),
+    ] {
+        store
+            .append_event(
+                Some("activity-fixture"),
+                kind,
+                &json!({"thread_id":"activity-fixture","turn_id":turn,"kind":kind,"text":text})
+                    .to_string(),
+            )
+            .unwrap();
     }
-    let events=store.recent_activity(id,Some("current")).unwrap();
-    assert_eq!(events.len(),2);
+    let events = store.recent_activity(id, Some("current")).unwrap();
+    assert_eq!(events.len(), 2);
     assert!(events[0].1.contains("inspect"));
     assert!(events[1].1.contains("editing file"));
 }

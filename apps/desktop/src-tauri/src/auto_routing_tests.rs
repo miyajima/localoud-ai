@@ -100,6 +100,22 @@ async fn fixture() -> Fixture {
         provider: Arc::new(SparkProvider::configured(local_config.clone()).unwrap()),
         lock: tokio::sync::Mutex::new(()),
     };
+    models::ensure_builtin_profiles(&store.lock().unwrap(), &local_config).unwrap();
+    let providers = Arc::new(tokio::sync::RwLock::new(
+        provider_api::ProviderRegistry::from_profiles(
+            store.lock().unwrap().provider_profiles().unwrap(),
+        )
+        .unwrap(),
+    ));
+    let api_sessions = Arc::new(hub_runtime::api_sessions::ApiSessions::new(
+        store.clone(),
+        bus.clone(),
+        providers.clone(),
+    ));
+    let command_approvals = Arc::new(hub_runtime::api_sessions::CommandApprovals::new(
+        store.clone(),
+        bus.clone(),
+    ));
     let state = AppState {
         read_mcp: crate::read_mcp::ReadMcp::new(store.clone()),
         workflow_lock: tokio::sync::Mutex::new(()),
@@ -110,6 +126,9 @@ async fn fixture() -> Fixture {
         data_dir: directory.path().to_path_buf(),
         local,
         local_config,
+        providers,
+        api_sessions,
+        command_approvals,
         auto_routes: Mutex::new(HashMap::new()),
         running_plans: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
     };
@@ -181,6 +200,7 @@ async fn classifier_uses_the_local_difficulty_protocol_and_records_usage() {
 
     let replacement = ModelTarget {
         provider: ModelProvider::Codex,
+        profile_id: Some("codex".into()),
         model: "fixture/replacement".into(),
         reasoning: Some("low".into()),
     };
@@ -286,8 +306,11 @@ fn initial_routes_use_available_routine_and_planner_models() {
         key: format!("codex:{name}"),
         label: name.into(),
         model: name.into(),
+        profile_id: "codex".into(),
+        protocol: protocol_types::providers::ProviderProtocol::CodexAppServer,
         local: false,
         reasoning: vec![],
+        tools: true,
         default_reasoning: None,
         is_default,
     };
@@ -309,4 +332,34 @@ fn initial_routes_use_available_routine_and_planner_models() {
     assert!(initial_settings("local-model".into(), &catalog)
         .fallback
         .is_none());
+}
+
+#[test]
+fn legacy_auto_settings_gain_planner_and_reviewer_defaults_once() {
+    let target = |model: &str| ModelTarget {
+        provider: ModelProvider::Codex,
+        profile_id: Some("codex".into()),
+        model: model.into(),
+        reasoning: None,
+    };
+    let mut config = AutoSettings::initial("fixture/local".into(), Some(target("routine")));
+    config.levels[4].target = target("level-five");
+    config.planner_default = None;
+    config.reviewer_default = None;
+    let reviewer = ModelTarget {
+        provider: ModelProvider::Codex,
+        profile_id: Some("codex".into()),
+        model: "saved-astra".into(),
+        reasoning: Some("high".into()),
+    };
+    let (migrated, changed) = normalize_saved_settings(config, Some(reviewer.clone()));
+    assert!(changed);
+    assert_eq!(
+        migrated.planner_default.as_ref().unwrap().model,
+        "level-five"
+    );
+    assert_eq!(migrated.reviewer_default, Some(reviewer));
+    let (unchanged, changed) = normalize_saved_settings(migrated.clone(), None);
+    assert!(!changed);
+    assert_eq!(unchanged, migrated);
 }

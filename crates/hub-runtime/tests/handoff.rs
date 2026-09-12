@@ -126,7 +126,20 @@ async fn actual_worker_receives_persisted_handoff_through_plan_dispatch() -> any
     );
     let prompt = request["input"][0]["text"].as_str().unwrap();
     let capsule = store.lock().unwrap().capsule(task.id)?.unwrap().0;
-    assert!(prompt.contains(&serde_json::to_string_pretty(&capsule)?));
+    let envelope = prompt
+        .split_once("<a2a-message protocol-version=\"1.0\">\n")
+        .and_then(|(_, value)| value.split_once("\n</a2a-message>"))
+        .map(|(value, _)| value)
+        .expect("worker prompt must contain one A2A v1 envelope");
+    let message: protocol_types::a2a::Message = serde_json::from_str(envelope)?;
+    message.validate()?;
+    let expected_task_id = task.id.to_string();
+    assert_eq!(message.task_id.as_deref(), Some(expected_task_id.as_str()));
+    assert_eq!(
+        message.parts[0].media_type.as_deref(),
+        Some(protocol_types::a2a::CONTEXT_CAPSULE_MEDIA_TYPE)
+    );
+    assert_eq!(message.parts[0].data, Some(serde_json::to_value(&capsule)?));
     assert!(prompt.contains("not authorization"));
     let selection: hub_context::handoff::Selection = serde_json::from_str(&capsule.items[0].text)?;
     assert_eq!(selection.sources.len(), 6);

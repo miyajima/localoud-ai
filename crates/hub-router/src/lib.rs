@@ -124,6 +124,13 @@ impl RoutingPolicy {
                     input,
                 )))
             }
+            ExecutorPreference::Api => {
+                return Ok(Some(decision(
+                    ExecutorKind::Api,
+                    "user selected API provider",
+                    input,
+                )))
+            }
             ExecutorPreference::Astra => {
                 return Ok(Some(decision(
                     ExecutorKind::Astra,

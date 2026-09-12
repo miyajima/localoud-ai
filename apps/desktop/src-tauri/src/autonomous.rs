@@ -9,7 +9,7 @@ use protocol_types::{CodingAgentProvider, EventDetails, Message, ProviderThread,
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Component, Path, PathBuf},
     sync::{Mutex, OnceLock},
     time::Duration,
@@ -49,6 +49,10 @@ pub struct PlanStep {
     pub goal: String,
     pub dependencies: Vec<String>,
     pub level: u8,
+    /// Optional user/planner selection. It is resolved and frozen when the
+    /// manifest is imported; later Auto setting changes never affect the run.
+    #[serde(default)]
+    pub target_override: Option<ModelTarget>,
     #[serde(alias = "files")]
     pub owned_paths: Vec<String>,
     pub acceptance: Vec<String>,
@@ -124,6 +128,58 @@ pub struct IterationRecord {
     pub steps: Vec<StepState>,
     pub review: Option<Value>,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AutomatedVerdict {
+    Pass,
+    Rework,
+    Inconclusive,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AutomatedReviewOutput {
+    verdict: AutomatedVerdict,
+    summary: String,
+    findings: Vec<String>,
+    changes: Vec<crate::manifest::ReviewChange>,
+}
+
+impl AutomatedReviewOutput {
+    fn validate(&self, steps: &[StepState]) -> Result<()> {
+        if self.summary.trim().is_empty() || self.summary.len() > REVIEW_LIMIT {
+            return Err("review summary is empty or too large".into());
+        }
+        if self.findings.len() > 100 || self.changes.len() > 8 {
+            return Err("review output has too many findings or changes".into());
+        }
+        let unique_changes = self
+            .changes
+            .iter()
+            .map(|change| &change.step_key)
+            .collect::<HashSet<_>>();
+        if unique_changes.len() != self.changes.len() {
+            return Err("review output contains duplicate step changes".into());
+        }
+        if self.changes.iter().any(|change| {
+            change.instruction.trim().is_empty()
+                || !steps.iter().any(|step| step.step.key == change.step_key)
+        }) {
+            return Err("review output contains an invalid step change".into());
+        }
+        if matches!(self.verdict, AutomatedVerdict::Pass) && !self.changes.is_empty() {
+            return Err("passing review cannot request changes".into());
+        }
+        if matches!(self.verdict, AutomatedVerdict::Rework) && self.changes.is_empty() {
+            return Err("rework review must identify at least one step".into());
+        }
+        if matches!(self.verdict, AutomatedVerdict::Inconclusive) && !self.changes.is_empty() {
+            return Err("inconclusive review cannot request executable changes".into());
+        }
+        Ok(())
+    }
+}
 pub fn artifact_version(source_head: &str, diff: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
@@ -179,6 +235,7 @@ fn terminal(status: &str) -> bool {
             | "reconciliation_required"
             | "review_rejected"
             | "awaiting_review"
+            | "needs_attention"
             | "legacy_read_only"
     )
 }
@@ -225,6 +282,9 @@ pub(crate) fn parse_plan(text: &str) -> Result<Vec<PlanStep>> {
             || s.title.trim().is_empty()
             || s.goal.trim().is_empty()
             || !(1..=5).contains(&s.level)
+            || s.target_override
+                .as_ref()
+                .is_some_and(|target| target.validate().is_err())
             || s.owned_paths.is_empty()
             || s.owned_paths.len() > 32
             || !s.owned_paths.iter().all(|p| valid_path(p))
@@ -316,8 +376,31 @@ fn capsule(w: &AutonomousSnapshot, i: usize) -> Result<String> {
     let payload = json!({"task":w.steps[i].step,"target":w.steps[i].target,"dependencies":dependencies,
         "overall_acceptance":w.manifest.as_ref().map(|m| &m.acceptance),"revision_instruction":w.steps[i].revision_instruction,
         "iteration":w.iteration,"worktree_note":"Each iteration has a new worktree containing only base sources and current dependency outputs. Reimplement your step here; your prior own patch is not pre-applied. Never write to a previous worktree.",
-        "instructions":"Execute only this task in the supplied isolated worktree. Read repository sources as needed. No subagents, no commit, merge, push, external publication or changes outside owned_paths. Run acceptance checks and report their exact results. Do not claim unrun tests passed. No parent conversation is available."}).to_string();
-    bounded(payload, CAPSULE_LIMIT)
+        "instructions":"Execute only this task in the supplied isolated worktree. Read repository sources as needed. No subagents, no commit, merge, push, external publication or changes outside owned_paths. Run acceptance checks and report their exact results. Do not claim unrun tests passed. No parent conversation is available."});
+    let reference_task_ids = w.steps[i]
+        .step
+        .dependencies
+        .iter()
+        .filter_map(|key| {
+            w.steps
+                .iter()
+                .find(|step| &step.step.key == key)
+                .map(|step| step.task_id.to_string())
+        })
+        .collect();
+    let message = protocol_types::a2a::data_message(
+        format!(
+            "{}:{}:{}",
+            w.steps[i].task_id, w.iteration, w.steps[i].step.key
+        ),
+        Some(w.thread.id.to_string()),
+        Some(w.steps[i].task_id.to_string()),
+        payload,
+        protocol_types::a2a::CONTEXT_CAPSULE_MEDIA_TYPE,
+        reference_task_ids,
+    )
+    .map_err(err)?;
+    bounded(serde_json::to_string(&message).map_err(err)?, CAPSULE_LIMIT)
 }
 fn bounded(text: String, limit: usize) -> Result<String> {
     if text.len() > limit {
@@ -350,6 +433,13 @@ async fn git(root: &Path, args: &[&str]) -> Result<String> {
     }
     String::from_utf8(out.stdout).map_err(err)
 }
+
+pub(crate) async fn project_head(root: &Path) -> Result<String> {
+    Ok(git(root, &["rev-parse", "--verify", "HEAD^{commit}"])
+        .await?
+        .trim()
+        .to_owned())
+}
 async fn index_tree(w: &Worktree) -> Result<String> {
     git(&w.path, &["add", "-A", "--", "."]).await?;
     Ok(git(&w.path, &["write-tree"]).await?.trim().into())
@@ -367,23 +457,15 @@ pub async fn import_task(
     };
     let plan = parse_plan(&json!({"steps":manifest.steps}).to_string())?;
     let project_id = ProjectId(request.project_id.parse().map_err(err)?);
-    let (root, settings) = {
+    let settings = crate::auto_routing::read_settings(&state).await?;
+    let root = {
         let s = state.store.lock().map_err(err)?;
-        let root = s
-            .projects()
+        s.projects()
             .map_err(err)?
             .into_iter()
             .find(|p| p.id == project_id)
             .ok_or("project not found")?
-            .root;
-        let settings: AutoSettings = serde_json::from_str(
-            &s.setting("auto_routing_settings")
-                .map_err(err)?
-                .ok_or("save all five routing assignments first")?,
-        )
-        .map_err(err)?;
-        settings.validate().map_err(err)?;
-        (root, settings)
+            .root
     };
     let root = root.canonicalize().map_err(err)?;
     let top = git(&root, &["rev-parse", "--show-toplevel"]).await?;
@@ -418,7 +500,12 @@ pub async fn import_task(
     }
     let mut steps = Vec::new();
     for step in plan {
-        let target = settings.target(step.level).map_err(err)?;
+        let target = step
+            .target_override
+            .clone()
+            .map(Ok)
+            .unwrap_or_else(|| settings.target(step.level))
+            .map_err(err)?;
         steps.push(StepState {
             task_id: TaskId::default(),
             step,
@@ -468,6 +555,50 @@ pub async fn import_task(
         review: None,
         error: None,
     };
+    let task_ids = w
+        .steps
+        .iter()
+        .map(|step| (step.step.key.clone(), step.task_id))
+        .collect::<HashMap<_, _>>();
+    let durable_tasks = w
+        .steps
+        .iter()
+        .map(|step| hub_core::Task {
+            id: step.task_id,
+            project_id,
+            plan_id: None,
+            parent_task_id: None,
+            title: step.step.title.clone(),
+            description: step.step.goal.clone(),
+            dependencies: step
+                .step
+                .dependencies
+                .iter()
+                .filter_map(|key| task_ids.get(key).copied())
+                .collect(),
+            preferred_executor: hub_core::ExecutorPreference::Auto,
+            assigned_executor: Some(match step.target.provider {
+                ModelProvider::Local => hub_core::ExecutorKind::Spark,
+                ModelProvider::Codex => hub_core::ExecutorKind::Codex,
+                ModelProvider::Api => hub_core::ExecutorKind::Api,
+            }),
+            risk: match step.step.risk.as_deref() {
+                Some("low") => hub_core::RiskLevel::Low,
+                Some("high") => hub_core::RiskLevel::High,
+                _ => hub_core::RiskLevel::Medium,
+            },
+            complexity: match step.step.level {
+                0 | 1 => hub_core::Complexity::Trivial,
+                2 | 3 => hub_core::Complexity::Normal,
+                _ => hub_core::Complexity::Deep,
+            },
+            status: hub_core::TaskStatus::Ready,
+            context_capsule_id: None,
+            worktree_id: None,
+            attempts: 0,
+            max_attempts: 2,
+        })
+        .collect::<Vec<_>>();
     {
         let mut store = state.store.lock().map_err(err)?;
         store
@@ -479,6 +610,12 @@ pub async fn import_task(
                 &serde_json::to_string(&w).map_err(err)?,
             )
             .map_err(err)?;
+        for task in &durable_tasks {
+            store.save_task(task).map_err(err)?;
+        }
+        for task in &durable_tasks {
+            store.save_dependencies(task).map_err(err)?;
+        }
     }
     launch(app, id)?;
     Ok(thread)
@@ -537,7 +674,7 @@ fn prepare_review(
     }
     if !matches!(
         w.thread.status.as_str(),
-        "awaiting_review" | "review_rejected" | "completed"
+        "awaiting_review" | "review_rejected" | "needs_attention" | "completed"
     ) || w.artifact_version.as_deref() != Some(&review.artifact_version)
     {
         return Err("レビュー対象の版またはタスク状態が変わっています".into());
@@ -715,10 +852,20 @@ pub struct AutonomousActivity {
 async fn worktree_changes(w: &AutonomousSnapshot) -> Result<Vec<WorktreeChange>> {
     let manager = GitWorktrees::new(&w.source_root).map_err(err)?;
     let targets: Vec<_> = if let Some(artifact) = &w.artifact {
-        vec![("integrated".to_owned(), "統合した成果物".to_owned(), artifact)]
+        vec![(
+            "integrated".to_owned(),
+            "統合した成果物".to_owned(),
+            artifact,
+        )]
     } else {
-        w.steps.iter().filter_map(|s| s.worktree.as_ref().map(|tree|
-            (s.step.key.clone(), s.step.title.clone(), tree))).collect()
+        w.steps
+            .iter()
+            .filter_map(|s| {
+                s.worktree
+                    .as_ref()
+                    .map(|tree| (s.step.key.clone(), s.step.title.clone(), tree))
+            })
+            .collect()
     };
     let mut changes = vec![];
     for (key, title, tree) in targets {
@@ -728,7 +875,13 @@ async fn worktree_changes(w: &AutonomousSnapshot) -> Result<Vec<WorktreeChange>>
             Ok(diff) => (Some(diff), None),
             Err(e) => (None, Some(format!("{e:#}"))),
         };
-        changes.push(WorktreeChange { key, title, path: tree.path.clone(), diff, error });
+        changes.push(WorktreeChange {
+            key,
+            title,
+            path: tree.path.clone(),
+            diff,
+            error,
+        });
     }
     Ok(changes)
 }
@@ -744,23 +897,40 @@ pub async fn autonomous_activity(
     {
         let store = state.store.lock().map_err(err)?;
         for step in &w.steps {
-            let Some(child_id) = step.child_id else { continue };
-            let turn = w.children.iter().find(|c| c.id == child_id).and_then(|c| c.turn.as_ref());
+            let Some(child_id) = step.child_id else {
+                continue;
+            };
+            let turn = w
+                .children
+                .iter()
+                .find(|c| c.id == child_id)
+                .and_then(|c| c.turn.as_ref());
             let mut events = vec![];
-            for (sequence, body) in store.recent_activity(child_id, turn.map(|t| t.id.as_str())).map_err(err)? {
-                let mut event: protocol_types::AgentEvent = serde_json::from_str(&body).map_err(err)?;
+            for (sequence, body) in store
+                .recent_activity(child_id, turn.map(|t| t.id.as_str()))
+                .map_err(err)?
+            {
+                let mut event: protocol_types::AgentEvent =
+                    serde_json::from_str(&body).map_err(err)?;
                 if event.text.chars().count() > 6000 {
-                    event.text = event.text.chars().take(6000).collect::<String>() + "\n…（表示を省略）";
+                    event.text =
+                        event.text.chars().take(6000).collect::<String>() + "\n…（表示を省略）";
                 }
                 // The readable command and event text suffice for this panel;
                 // do not duplicate large tool argument payloads in every poll.
-                if !matches!(event.details, Some(EventDetails::Command { .. })) { event.details = None; }
+                if !matches!(event.details, Some(EventDetails::Command { .. })) {
+                    event.details = None;
+                }
                 events.push(hub_events::JournalEvent { sequence, event });
             }
             workers.push(WorkerActivity { child_id, events });
         }
     }
-    let changes = if include_changes { worktree_changes(&w).await? } else { vec![] };
+    let changes = if include_changes {
+        worktree_changes(&w).await?
+    } else {
+        vec![]
+    };
     Ok(AutonomousActivity { workers, changes })
 }
 
@@ -804,14 +974,38 @@ pub async fn autonomous_stop(
     read(&state, id)
 }
 fn prepare_resume(w: &mut AutonomousSnapshot) -> Result<()> {
-    if w.manifest.is_none()
-        || !matches!(
-            w.thread.status.as_str(),
-            "interrupted" | "failed" | "reconciliation_required"
-        )
-    {
+    if w.manifest.is_none() {
         return Err("再開できる中断済みManifestタスクではありません".into());
     }
+    if matches!(
+        w.thread.status.as_str(),
+        "awaiting_review" | "needs_attention"
+    ) && w.steps.iter().all(|step| step.status == "completed")
+    {
+        w.history.push(IterationRecord {
+            iteration: w.iteration,
+            artifact: w.artifact.clone(),
+            artifact_version: w.artifact_version.clone(),
+            final_diff: w.final_diff.clone(),
+            steps: w.steps.clone(),
+            review: w.review.clone(),
+        });
+        w.artifact = None;
+        w.artifact_version = None;
+        w.final_diff = None;
+        w.review = None;
+        w.error = None;
+        w.stop_requested = false;
+        w.thread.status = "queued".into();
+        return Ok(());
+    }
+    if !matches!(
+        w.thread.status.as_str(),
+        "interrupted" | "failed" | "reconciliation_required"
+    ) {
+        return Err("再開できる中断済みManifestタスクではありません".into());
+    }
+    let explicit_api_retry = matches!(w.thread.status.as_str(), "interrupted" | "failed");
     w.history.push(IterationRecord {
         iteration: w.iteration,
         artifact: w.artifact.clone(),
@@ -835,7 +1029,9 @@ fn prepare_resume(w: &mut AutonomousSnapshot) -> Result<()> {
         s.verification.clear();
         s.usage.clear();
         s.error = None;
-        if s.target.provider == ModelProvider::Local {
+        if s.target.provider == ModelProvider::Local
+            || (s.target.provider == ModelProvider::Api && explicit_api_retry)
+        {
             s.child_id = None;
         }
         s.revision_instruction=Some(format!("Previous attempt was interrupted or failed. Reimplement this step in this fresh worktree and verify it. {}",s.revision_instruction.as_deref().unwrap_or("")));
@@ -968,6 +1164,607 @@ async fn guard_with<T>(
         }
     }
 }
+
+fn parse_automated_review(text: &str, steps: &[StepState]) -> Result<AutomatedReviewOutput> {
+    let text = text.trim();
+    let text = text
+        .strip_prefix("```json\n")
+        .or_else(|| text.strip_prefix("```\n"))
+        .and_then(|body| body.strip_suffix("```"))
+        .unwrap_or(text)
+        .trim();
+    let output: AutomatedReviewOutput = serde_json::from_str(text).map_err(err)?;
+    output.validate(steps)?;
+    Ok(output)
+}
+
+fn review_payload(w: &AutonomousSnapshot, diff: &str, version: &str) -> Result<String> {
+    let manifest = w.manifest.as_ref().ok_or("review manifest is missing")?;
+    let payload = json!({
+        "goal": manifest.request,
+        "acceptance_criteria": manifest.acceptance,
+        "artifact_hash": version,
+        "base_revision": w.source_head,
+        "diff": diff,
+        "steps": w.steps.iter().map(|step| json!({
+            "key": step.step.key,
+            "title": step.step.title,
+            "description": step.step.goal,
+            "owned_paths": step.step.owned_paths,
+            "output": step.output,
+            "verification": step.verification,
+        })).collect::<Vec<_>>(),
+        "response_contract": {
+            "verdict": "pass | rework | inconclusive",
+            "summary": "non-empty string",
+            "findings": ["string"],
+            "changes": [{"step_key":"existing step key","instruction":"required correction"}]
+        }
+    });
+    let message = protocol_types::a2a::data_message(
+        format!("review:{}:{}:{version}", w.thread.id, w.iteration),
+        Some(w.thread.id.to_string()),
+        Some(w.thread.id.to_string()),
+        payload,
+        protocol_types::a2a::REVIEW_CAPSULE_MEDIA_TYPE,
+        w.steps
+            .iter()
+            .map(|step| step.task_id.to_string())
+            .collect(),
+    )
+    .map_err(err)?;
+    bounded(serde_json::to_string(&message).map_err(err)?, REVIEW_LIMIT)
+}
+
+async fn codex_review_turn(
+    state: &AppState,
+    thread: &ProviderThread,
+    target: &ModelTarget,
+    payload: String,
+) -> Result<String> {
+    let provider = crate::models::codex_provider(state).await?;
+    let mut events = provider.events();
+    let prompt = format!(
+        "You are a read-only final reviewer in a new session with no executor history. Review only the supplied goal, acceptance criteria, exact diff, and verification evidence. Do not edit files, run commands, delegate, or infer missing evidence. Return exactly one JSON object matching response_contract; pass only when the evidence and diff establish every acceptance condition.\n{payload}"
+    );
+    let turn = provider
+        .start_turn_with_reasoning(thread, prompt, &target.model, target.reasoning.as_deref())
+        .await
+        .map_err(err)?;
+    let deadline = tokio::time::Instant::now() + DEADLINE;
+    loop {
+        let event = tokio::time::timeout_at(deadline, events.recv())
+            .await
+            .map_err(|_| "reviewer timed out".to_string())?
+            .map_err(|e| format!("reviewer event stream lost: {e}"))?;
+        if event.thread_id.as_deref() != Some(&thread.id)
+            || event.turn_id.as_deref().is_some_and(|id| id != turn.id)
+        {
+            continue;
+        }
+        if event.kind == "error" {
+            return Err(format!("reviewer error: {}", event.text));
+        }
+        if event.kind == "turn_completed" {
+            if event.text != "completed" {
+                return Err(format!("reviewer ended: {}", event.text));
+            }
+            break;
+        }
+    }
+    let snapshot = provider.read_thread(thread).await.map_err(err)?;
+    snapshot
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.role == "assistant" && !message.text.trim().is_empty())
+        .map(|message| message.text.clone())
+        .ok_or_else(|| "reviewer returned no answer".into())
+}
+
+async fn automated_review(
+    state: &AppState,
+    id: HubThreadId,
+    artifact: &Worktree,
+    diff: &str,
+    version: &str,
+) -> Result<bool> {
+    let w = read(state, id)?;
+    let Some(target) = w.settings_snapshot.reviewer_default.clone() else {
+        update(state, id, |workflow| {
+            workflow.thread.status = "needs_attention".into();
+            workflow.error =
+                Some("reviewer_default is not configured; completion is blocked".into());
+        })?;
+        return Ok(false);
+    };
+    if let Err(error) = crate::models::validate_target(&target, state).await {
+        update(state, id, |workflow| {
+            workflow.thread.status = "needs_attention".into();
+            workflow.error = Some(format!("reviewer is unavailable: {error}"));
+        })?;
+        return Ok(false);
+    }
+    let payload = match review_payload(&w, diff, version) {
+        Ok(payload) => payload,
+        Err(error) => {
+            update(state, id, |workflow| {
+                workflow.thread.status = "needs_attention".into();
+                workflow.error = Some(format!("review input is not safely bounded: {error}"));
+            })?;
+            return Ok(false);
+        }
+    };
+    let reviewer_id = HubThreadId::default();
+    let logical_turn_id = TaskId::default().to_string();
+    let mut codex_thread = None;
+    let review_copy = if target.provider == ModelProvider::Codex {
+        let manager = GitWorktrees::new(&w.source_root).map_err(err)?;
+        match manager.create(TaskId::default(), &w.source_head).await {
+            Ok(copy) => {
+                if let Err(error) = manager.apply_dependency_patch(&copy, diff).await {
+                    update(state, id, |workflow| {
+                        workflow.thread.status = "needs_attention".into();
+                        workflow.error = Some(format!(
+                            "reviewer isolation worktree could not be prepared: {error}"
+                        ));
+                    })?;
+                    return Ok(false);
+                }
+                Some(copy)
+            }
+            Err(error) => {
+                update(state, id, |workflow| {
+                    workflow.thread.status = "needs_attention".into();
+                    workflow.error = Some(format!(
+                        "reviewer isolation worktree could not be created: {error}"
+                    ));
+                })?;
+                return Ok(false);
+            }
+        }
+    } else {
+        None
+    };
+    let api_profile_revision = if target.provider == ModelProvider::Api {
+        let revision = {
+            let registry = state.providers.read().await;
+            target
+                .profile_id
+                .as_deref()
+                .and_then(|profile_id| registry.profile(profile_id))
+                .map(|profile| profile.revision)
+        };
+        let Some(revision) = revision else {
+            update(state, id, |workflow| {
+                workflow.thread.status = "needs_attention".into();
+                workflow.error = Some("reviewer provider profile is unavailable".into());
+            })?;
+            return Ok(false);
+        };
+        Some(revision)
+    } else {
+        None
+    };
+    let provider_thread_id = match target.provider {
+        ModelProvider::Codex => {
+            let thread_result: Result<ProviderThread> = async {
+                let provider = crate::models::codex_provider(state).await?;
+                provider
+                    .start_thread_with_model(
+                        review_copy
+                            .as_ref()
+                            .ok_or("reviewer isolation worktree is missing")?
+                            .path
+                            .clone(),
+                        &target.model,
+                    )
+                    .await
+                    .map_err(err)
+            }
+            .await;
+            let thread = match thread_result {
+                Ok(thread) => thread,
+                Err(error) => {
+                    update(state, id, |workflow| {
+                        workflow.thread.status = "needs_attention".into();
+                        workflow.error = Some(format!("reviewer session could not start: {error}"));
+                    })?;
+                    return Ok(false);
+                }
+            };
+            let provider_thread_id = thread.id.clone();
+            codex_thread = Some(thread);
+            provider_thread_id
+        }
+        ModelProvider::Api => format!("api-review:{reviewer_id}"),
+        ModelProvider::Local => format!("local-review:{reviewer_id}"),
+    };
+    let mapping = ThreadMapping {
+        id: reviewer_id,
+        project_id: w.thread.project_id,
+        provider: match target.provider {
+            ModelProvider::Codex => "codex".into(),
+            ModelProvider::Api => format!(
+                "api:{}",
+                target
+                    .profile_id
+                    .as_deref()
+                    .ok_or("reviewer profile is missing")?
+            ),
+            ModelProvider::Local => "spark".into(),
+        },
+        provider_thread_id: provider_thread_id.clone(),
+        title: format!("Review: {}", w.thread.title),
+        status: "running".into(),
+    };
+    let run_ids = w
+        .steps
+        .iter()
+        .map(|step| (step.task_id, TaskId::default().to_string()))
+        .collect::<Vec<_>>();
+    {
+        let store = state.store.lock().map_err(err)?;
+        store.save_thread(&mapping).map_err(err)?;
+        store
+            .set_setting(&format!("autonomous_parent:{reviewer_id}"), &id.to_string())
+            .map_err(err)?;
+        if target.provider != ModelProvider::Local {
+            let profile_id = target.profile_id.clone().unwrap_or_else(|| "codex".into());
+            let profile_revision = api_profile_revision.unwrap_or(1);
+            let api_target = protocol_types::providers::ModelTarget {
+                profile_id,
+                model_id: target.model.clone(),
+                effort: target.reasoning.clone(),
+            };
+            store
+                .set_session_model_policy(
+                    reviewer_id,
+                    &protocol_types::providers::SessionModelPolicy {
+                        default_target: api_target.clone(),
+                        reviewer_target: None,
+                        allow_turn_override: false,
+                    },
+                )
+                .map_err(err)?;
+            let segment_id = TaskId::default().to_string();
+            store
+                .start_provider_segment(&hub_db::ProviderSegmentRecord {
+                    id: segment_id.clone(),
+                    thread_id: reviewer_id,
+                    target: api_target.clone(),
+                    profile_revision,
+                    provider_thread_id: codex_thread.as_ref().map(|thread| thread.id.clone()),
+                    ended: false,
+                })
+                .map_err(err)?;
+            store
+                .record_turn_target(&hub_db::TurnTargetRecord {
+                    turn_id: logical_turn_id.clone(),
+                    thread_id: reviewer_id,
+                    segment_id,
+                    target: api_target,
+                    profile_revision,
+                    resolved_from: protocol_types::providers::TargetResolution::ReviewerDefault,
+                })
+                .map_err(err)?;
+        }
+        for (task_id, run_id) in &run_ids {
+            let executor_thread_id = w
+                .steps
+                .iter()
+                .find(|step| step.task_id == *task_id)
+                .and_then(|step| step.child_id)
+                .ok_or("executor session is missing for review")?;
+            store
+                .create_review_run(&hub_db::ReviewRunRecord {
+                    id: run_id.clone(),
+                    task_id: *task_id,
+                    executor_thread_id,
+                    reviewer_thread_id: reviewer_id,
+                    artifact_hash: version.into(),
+                    verdict: "pending".into(),
+                    body: json!({"status":"started","iteration":w.iteration}),
+                })
+                .map_err(err)?;
+        }
+    }
+    update(state, id, |workflow| {
+        workflow.children.push(Child {
+            id: reviewer_id,
+            role: format!("reviewer-{}", workflow.iteration),
+            provider: mapping.provider.clone(),
+            provider_thread: Some(ProviderThread {
+                id: provider_thread_id.clone(),
+            }),
+            turn: None,
+        });
+    })?;
+
+    let attempted: Result<AutomatedReviewOutput> = async {
+        match target.provider {
+        ModelProvider::Local => {
+            let generated = state
+                .local
+                .provider
+                .review_diff(&w.request.text, diff)
+                .await
+                .map_err(err)?;
+            state.local.record_usage(&generated.usage, None).map_err(err)?;
+            use protocol_types::local::ReviewVerdict;
+            let verdict = match generated.output.verdict {
+                ReviewVerdict::Approve => AutomatedVerdict::Pass,
+                ReviewVerdict::Rework => AutomatedVerdict::Rework,
+                ReviewVerdict::HumanRequired => AutomatedVerdict::Inconclusive,
+            };
+            let instruction = generated.output.findings.join("\n");
+            Ok(AutomatedReviewOutput {
+                changes: matches!(verdict, AutomatedVerdict::Rework)
+                    .then(|| {
+                        w.steps
+                            .iter()
+                            .map(|step| crate::manifest::ReviewChange {
+                                step_key: step.step.key.clone(),
+                                instruction: if instruction.trim().is_empty() {
+                                    generated.output.summary.clone()
+                                } else {
+                                    instruction.clone()
+                                },
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                verdict,
+                summary: generated.output.summary,
+                findings: generated.output.findings,
+            })
+        }
+        ModelProvider::Api => {
+            let profile_id = target.profile_id.clone().ok_or("reviewer profile is missing")?;
+            let transport = state
+                .providers
+                .read()
+                .await
+                .transport(&profile_id)
+                .map_err(err)?;
+            let result = hub_runtime::api_worker::ApiAgent {
+                root: artifact.path.clone(),
+                logical_thread_id: reviewer_id.to_string(),
+                logical_turn_id: logical_turn_id.clone(),
+                target: protocol_types::providers::ModelTarget {
+                    profile_id: profile_id.clone(),
+                    model_id: target.model.clone(),
+                    effort: target.reasoning.clone(),
+                },
+                transport,
+                external_tools: Vec::new(),
+                external_handler: None,
+                command_authorizer: None,
+                allow_writes: false,
+                allow_commands: false,
+            }
+            .run(
+                "You are a read-only final reviewer in a fresh session. The user message is an A2A v1 envelope; use only its review data Part containing the exact diff and evidence. Never edit, run commands, or delegate. Return exactly one JSON object matching response_contract. Pass only when every acceptance condition is established.".into(),
+                payload,
+            )
+            .await;
+            let result = match result {
+                Ok(result) => result,
+                Err(error) => {
+                    let store = state.store.lock().map_err(err)?;
+                    store
+                        .record_provider_turn_outcome(&hub_db::ProviderTurnOutcomeRecord {
+                            turn_id: logical_turn_id.clone(),
+                            thread_id: reviewer_id,
+                            status: "failed".into(),
+                            stop_reason: None,
+                            failure_kind: Some(
+                                provider_api::failure_kind(&error).as_str().into(),
+                            ),
+                            detail: Some(
+                                hub_policy::redact(&format!("{error:#}"))
+                                    .chars()
+                                    .take(2_000)
+                                    .collect(),
+                            ),
+                        })
+                        .map_err(err)?;
+                    return Err(err(error));
+                }
+            };
+            {
+                let store = state.store.lock().map_err(err)?;
+                for message in &result.transcript {
+                    store
+                        .append_provider_message(&hub_db::ProviderMessageRecord {
+                            id: TaskId::default().to_string(),
+                            thread_id: reviewer_id,
+                            segment_id: store
+                                .active_provider_segment(reviewer_id)
+                                .map_err(err)?
+                                .map(|segment| segment.id),
+                            provider_turn_id: Some(logical_turn_id.clone()),
+                            role: message.role,
+                            content: message.content.clone(),
+                            provider_state: message.provider_state.clone(),
+                        })
+                        .map_err(err)?;
+                }
+                store
+                    .record_usage(&hub_core::ModelUsageRecord {
+                        id: TaskId::default().to_string(),
+                        provider: profile_id.clone(),
+                        model: target.model.clone(),
+                        task_id: None,
+                        turn_id: Some(logical_turn_id.clone()),
+                        prompt_tokens: Some(result.usage.input_tokens),
+                        cached_tokens: Some(result.usage.cached_input_tokens),
+                        completion_tokens: Some(result.usage.output_tokens),
+                        estimated_cost: None,
+                        latency_ms: None,
+                    })
+                    .map_err(err)?;
+                store
+                    .record_provider_turn_outcome(&hub_db::ProviderTurnOutcomeRecord {
+                        turn_id: logical_turn_id.clone(),
+                        thread_id: reviewer_id,
+                        status: if result.refused {
+                            "refused"
+                        } else if result.failure_kind.is_some() {
+                            "failed"
+                        } else {
+                            "completed"
+                        }
+                        .into(),
+                        stop_reason: Some(result.stop_reason.clone()),
+                        failure_kind: result
+                            .failure_kind
+                            .map(|kind| kind.as_str().to_owned()),
+                        detail: result.failure.clone().or_else(|| {
+                            result
+                                .refused
+                                .then(|| result.text.chars().take(2_000).collect())
+                        }),
+                    })
+                    .map_err(err)?;
+            }
+            if result.refused {
+                return Err(format!(
+                    "reviewer provider refused the request (stop reason: {}): {}",
+                    result.stop_reason, result.text
+                ));
+            }
+            if let Some(failure) = &result.failure {
+                return Err(format!(
+                    "reviewer provider failed ({}): {failure}",
+                    result.stop_reason
+                ));
+            }
+            parse_automated_review(&result.text, &w.steps)
+        }
+        ModelProvider::Codex => {
+            let answer = codex_review_turn(
+                state,
+                codex_thread.as_ref().ok_or("reviewer thread is missing")?,
+                &target,
+                payload,
+            )
+            .await?;
+            parse_automated_review(&answer, &w.steps)
+        }
+        }
+    }
+    .await;
+    let mut output = attempted.unwrap_or_else(|error| AutomatedReviewOutput {
+        verdict: AutomatedVerdict::Inconclusive,
+        summary: format!("Automated reviewer could not establish a verdict: {error}"),
+        findings: vec![error],
+        changes: Vec::new(),
+    });
+    if let Err(error) = output.validate(&w.steps) {
+        output = AutomatedReviewOutput {
+            verdict: AutomatedVerdict::Inconclusive,
+            summary: format!("Automated reviewer returned an invalid result: {error}"),
+            findings: vec![error],
+            changes: Vec::new(),
+        };
+    }
+    let manager = GitWorktrees::new(&w.source_root).map_err(err)?;
+    let current_diff = manager.diff(artifact).await.map_err(err)?;
+    let reviewer_changed_copy = if let Some(copy) = &review_copy {
+        manager.diff(copy).await.map_err(err)? != diff
+    } else {
+        false
+    };
+    if artifact_version(&w.source_head, &current_diff) != version || reviewer_changed_copy {
+        output = AutomatedReviewOutput {
+            verdict: AutomatedVerdict::Inconclusive,
+            summary: "Reviewer session changed a reviewed artifact; its verdict was discarded"
+                .into(),
+            findings: vec![if reviewer_changed_copy {
+                "reviewer modified its isolated review copy".into()
+            } else {
+                "artifact hash changed during read-only review".into()
+            }],
+            changes: Vec::new(),
+        };
+    }
+    let verdict_name = match output.verdict {
+        AutomatedVerdict::Pass => "pass",
+        AutomatedVerdict::Rework => "rework",
+        AutomatedVerdict::Inconclusive => "inconclusive",
+    };
+    {
+        let store = state.store.lock().map_err(err)?;
+        for (_, run_id) in &run_ids {
+            store
+                .finish_review_run(run_id, version, verdict_name, &json!(output))
+                .map_err(err)?;
+        }
+        if let Some(mut reviewer) = store
+            .threads()
+            .map_err(err)?
+            .into_iter()
+            .find(|thread| thread.id == reviewer_id)
+        {
+            reviewer.status = "completed".into();
+            store.save_thread(&reviewer).map_err(err)?;
+        }
+    }
+    match output.verdict {
+        AutomatedVerdict::Pass => {
+            let mut next = read(state, id)?;
+            let review = crate::manifest::ReviewManifest {
+                version: 1,
+                manifest_id: format!("auto-review-{}-{}", next.iteration, reviewer_id),
+                project_id: next.thread.project_id.to_string(),
+                task_id: id.to_string(),
+                artifact_version: version.into(),
+                verdict: crate::manifest::Verdict::Pass,
+                summary: output.summary,
+                findings: output.findings,
+                changes: Vec::new(),
+            };
+            prepare_review(&mut next, &review)?;
+            update(state, id, |workflow| *workflow = next.clone())?;
+            Ok(false)
+        }
+        AutomatedVerdict::Rework if w.iteration < 2 => {
+            let mut next = read(state, id)?;
+            let review = crate::manifest::ReviewManifest {
+                version: 1,
+                manifest_id: format!("auto-review-{}-{}", next.iteration, reviewer_id),
+                project_id: next.thread.project_id.to_string(),
+                task_id: id.to_string(),
+                artifact_version: version.into(),
+                verdict: crate::manifest::Verdict::Fail,
+                summary: output.summary,
+                findings: output.findings,
+                changes: output.changes,
+            };
+            let rerun = prepare_review(&mut next, &review)?;
+            update(state, id, |workflow| *workflow = next.clone())?;
+            Ok(rerun)
+        }
+        AutomatedVerdict::Rework | AutomatedVerdict::Inconclusive => {
+            update(state, id, |workflow| {
+                workflow.review = Some(json!(output));
+                workflow.thread.status = "needs_attention".into();
+                workflow.error = Some(if matches!(output.verdict, AutomatedVerdict::Rework) {
+                    "review rework limit reached after two attempts".into()
+                } else {
+                    "automated review was inconclusive".into()
+                });
+                workflow.messages.push(Message {
+                    role: "assistant".into(),
+                    text: workflow.error.clone().unwrap_or_default(),
+                });
+            })?;
+            Ok(false)
+        }
+    }
+}
+
 async fn run(app: &tauri::AppHandle, id: HubThreadId) -> Result<()> {
     let state = app.state::<AppState>();
     let initial = read(&state, id)?;
@@ -975,15 +1772,9 @@ async fn run(app: &tauri::AppHandle, id: HubThreadId) -> Result<()> {
         return Err("旧ブラウザタスクは実行できません".into());
     }
     // Validate every used frozen route before the first worker.
-    let levels: std::collections::BTreeSet<_> =
-        initial.steps.iter().map(|s| s.step.level).collect();
-    for level in levels {
+    for step in &initial.steps {
         check(&state, id)?;
-        crate::models::validate_target(
-            &initial.settings_snapshot.target(level).map_err(err)?,
-            &state,
-        )
-        .await?;
+        crate::models::validate_worker_target(&step.target, &state).await?;
     }
     if git(&initial.source_root, &["rev-parse", "HEAD"])
         .await?
@@ -1016,78 +1807,90 @@ async fn run(app: &tauri::AppHandle, id: HubThreadId) -> Result<()> {
     }
     // Initialize once: concurrent first-run create_dir calls would race.
     GitWorktrees::new(&initial.source_root).map_err(err)?;
-    update(&state, id, |w| w.thread.status = "running".into())?;
-    loop {
-        check(&state, id)?;
-        let w = read(&state, id)?;
-        if w.steps.iter().all(|s| s.status == "completed") {
-            break;
-        }
-        let batch = ready_batch(&w.steps);
-        if batch.is_empty() {
-            return Err("no runnable tasks; failed/missing dependency evidence".into());
-        }
-        let mut jobs = tokio::task::JoinSet::new();
-        for i in batch {
-            let app = app.clone();
-            update(&state, id, |w| w.steps[i].status = "running".into())?;
-            jobs.spawn(async move {
-                let state = app.state::<AppState>();
-                let result = guarded(&state, id, worker(&state, id, i)).await;
-                if let Err(e) = &result {
-                    let _ = update(&state, id, |w| {
-                        w.steps[i].status = "failed".into();
-                        w.steps[i].error = Some(e.clone());
-                    });
+    'review_iterations: loop {
+        update(&state, id, |w| w.thread.status = "running".into())?;
+        loop {
+            check(&state, id)?;
+            let w = read(&state, id)?;
+            if w.steps.iter().all(|s| s.status == "completed") {
+                break;
+            }
+            let batch = ready_batch(&w.steps);
+            if batch.is_empty() {
+                return Err("no runnable tasks; failed/missing dependency evidence".into());
+            }
+            let mut jobs = tokio::task::JoinSet::new();
+            for i in batch {
+                let app = app.clone();
+                update(&state, id, |w| w.steps[i].status = "running".into())?;
+                jobs.spawn(async move {
+                    let state = app.state::<AppState>();
+                    let result = guarded(&state, id, worker(&state, id, i)).await;
+                    if let Err(e) = &result {
+                        let _ = update(&state, id, |w| {
+                            w.steps[i].status = "failed".into();
+                            w.steps[i].error = Some(e.clone());
+                        });
+                    }
+                    result
+                });
+            }
+            // Drain the batch on failure; no detached workers or successor dispatch.
+            let mut errors = Vec::new();
+            while let Some(result) = jobs.join_next().await {
+                match result {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => errors.push(e),
+                    Err(e) => errors.push(e.to_string()),
                 }
-                result
-            });
-        }
-        // Drain the batch on failure; no detached workers or successor dispatch.
-        let mut errors = Vec::new();
-        while let Some(result) = jobs.join_next().await {
-            match result {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => errors.push(e),
-                Err(e) => errors.push(e.to_string()),
+            }
+            if !errors.is_empty() {
+                return Err(errors.join("\n"));
             }
         }
-        if !errors.is_empty() {
-            return Err(errors.join("\n"));
+        let w = read(&state, id)?;
+        if w.steps.iter().any(|s| {
+            s.status != "completed"
+                || s.patch.is_none()
+                || s.output.as_ref().is_none_or(|v| v.trim().is_empty())
+        }) {
+            return Err("incomplete worker artifacts".into());
         }
-    }
-    let w = read(&state, id)?;
-    if w.steps.iter().any(|s| {
-        s.status != "completed"
-            || s.patch.is_none()
-            || s.output.as_ref().is_none_or(|v| v.trim().is_empty())
-    }) {
-        return Err("incomplete worker artifacts".into());
-    }
-    let manager = GitWorktrees::new(&w.source_root).map_err(err)?;
-    let artifact = manager
-        .create(TaskId::default(), &w.source_head)
-        .await
-        .map_err(err)?;
-    update(&state, id, |w| {
-        w.artifact = Some(artifact.clone());
-        w.thread.status = "integrating".into();
-    })?;
-    for s in &w.steps {
-        check(&state, id)?;
-        manager
-            .apply_dependency_patch(&artifact, s.patch.as_deref().ok_or("missing patch")?)
+        let manager = GitWorktrees::new(&w.source_root).map_err(err)?;
+        let artifact = manager
+            .create(TaskId::default(), &w.source_head)
             .await
             .map_err(err)?;
+        update(&state, id, |w| {
+            w.artifact = Some(artifact.clone());
+            w.thread.status = "integrating".into();
+        })?;
+        for s in &w.steps {
+            check(&state, id)?;
+            manager
+                .apply_dependency_patch(&artifact, s.patch.as_deref().ok_or("missing patch")?)
+                .await
+                .map_err(err)?;
+        }
+        let diff = manager.diff(&artifact).await.map_err(err)?;
+        update(&state, id, |w| w.final_diff = Some(diff.clone()))?;
+        let version = artifact_version(&w.source_head, &diff);
+        update(&state, id, |w| {
+            w.artifact_version = Some(version.clone());
+            w.thread.status = "awaiting_review".into();
+            w.messages.push(Message {
+                role: "assistant".into(),
+                text: format!(
+                    "実装を統合しました。別セッションreviewerで成果物 {} を検証します。",
+                    version
+                ),
+            });
+        })?;
+        if automated_review(&state, id, &artifact, &diff, &version).await? {
+            continue 'review_iterations;
+        }
+        break 'review_iterations;
     }
-    let diff = manager.diff(&artifact).await.map_err(err)?;
-    update(&state, id, |w| w.final_diff = Some(diff.clone()))?;
-    let version = artifact_version(&w.source_head, &diff);
-    update(&state, id, |w| {
-        w.artifact_version = Some(version.clone());
-        w.thread.status = "awaiting_review".into();
-        w.messages.push(Message { role:"assistant".into(), text:format!("実装を統合しました。ChatGPTでMCPを使ってレビューしてください。\nTask ID: {}\nArtifact version: {}\n成果物: {}\nレビュー結果はReview Manifestとして取り込めます。", id, version, artifact.path.display()) });
-    })?;
     Ok(())
 }
 fn local_scope(s: &PlanStep) -> Result<()> {
@@ -1120,10 +1923,68 @@ fn evidence_complete(steps: &[StepState]) -> Result<()> {
     }
     Ok(())
 }
+
+fn durable_task(w: &AutonomousSnapshot, i: usize) -> hub_core::Task {
+    let step = &w.steps[i];
+    let task_ids = w
+        .steps
+        .iter()
+        .map(|item| (item.step.key.as_str(), item.task_id))
+        .collect::<HashMap<_, _>>();
+    hub_core::Task {
+        id: step.task_id,
+        project_id: w.thread.project_id,
+        plan_id: None,
+        parent_task_id: None,
+        title: step.step.title.clone(),
+        description: step.step.goal.clone(),
+        dependencies: step
+            .step
+            .dependencies
+            .iter()
+            .filter_map(|key| task_ids.get(key.as_str()).copied())
+            .collect(),
+        preferred_executor: hub_core::ExecutorPreference::Auto,
+        assigned_executor: Some(match step.target.provider {
+            ModelProvider::Local => hub_core::ExecutorKind::Spark,
+            ModelProvider::Codex => hub_core::ExecutorKind::Codex,
+            ModelProvider::Api => hub_core::ExecutorKind::Api,
+        }),
+        risk: match step.step.risk.as_deref() {
+            Some("low") => hub_core::RiskLevel::Low,
+            Some("high") => hub_core::RiskLevel::High,
+            _ => hub_core::RiskLevel::Medium,
+        },
+        complexity: match step.step.level {
+            0 | 1 => hub_core::Complexity::Trivial,
+            2 | 3 => hub_core::Complexity::Normal,
+            _ => hub_core::Complexity::Deep,
+        },
+        status: hub_core::TaskStatus::Ready,
+        context_capsule_id: None,
+        worktree_id: None,
+        attempts: w.iteration.saturating_sub(1),
+        max_attempts: 2,
+    }
+}
+
 async fn worker(state: &AppState, id: HubThreadId, i: usize) -> Result<()> {
     check(state, id)?;
     let w = read(state, id)?;
     let s = &w.steps[i];
+    {
+        let store = state.store.lock().map_err(err)?;
+        if !store
+            .tasks(w.thread.project_id)
+            .map_err(err)?
+            .iter()
+            .any(|task| task.id == s.task_id)
+        {
+            let task = durable_task(&w, i);
+            store.save_task(&task).map_err(err)?;
+            store.save_dependencies(&task).map_err(err)?;
+        }
+    }
     let payload = capsule(&w, i)?;
     update(state, id, |w| w.steps[i].capsule = Some(payload.clone()))?;
     let manager = GitWorktrees::new(&w.source_root).map_err(err)?;
@@ -1222,6 +2083,7 @@ async fn worker(state: &AppState, id: HubThreadId, i: usize) -> Result<()> {
             generated.output.summary
         }
         ModelProvider::Codex => codex_worker(state, id, i, &worktree, payload).await?,
+        ModelProvider::Api => api_worker(state, id, i, &worktree, payload).await?,
     };
     check(state, id)?;
     if output.trim().is_empty() {
@@ -1301,6 +2163,371 @@ async fn worker(state: &AppState, id: HubThreadId, i: usize) -> Result<()> {
     })?;
     Ok(())
 }
+
+async fn api_worker(
+    state: &AppState,
+    id: HubThreadId,
+    i: usize,
+    worktree: &Worktree,
+    payload: String,
+) -> Result<String> {
+    use protocol_types::providers::{
+        ContentBlock, ModelTarget as ApiTarget, TargetResolution, TranscriptMessage, TranscriptRole,
+    };
+    let step = read(state, id)?.steps[i].clone();
+    let profile_id = step
+        .target
+        .profile_id
+        .clone()
+        .ok_or("API worker profile is missing")?;
+    let (profile, transport) = {
+        let registry = state.providers.read().await;
+        let profile = registry
+            .profile(&profile_id)
+            .cloned()
+            .ok_or("API worker profile is unavailable")?;
+        let transport = registry.transport(&profile_id).map_err(err)?;
+        (profile, transport)
+    };
+    let turn_id = TaskId::default().to_string();
+    let project_id = read(state, id)?.thread.project_id;
+    let target = ApiTarget {
+        profile_id: profile_id.clone(),
+        model_id: step.target.model.clone(),
+        effort: step.target.reasoning.clone(),
+    };
+    let (child, segment_id, provider_thread_id, transcript, persisted_count) = {
+        let store = state.store.lock().map_err(err)?;
+        let (child, segment_id, provider_thread_id, mut transcript) =
+            if let Some(child) = step.child_id {
+                let mut mapping = store
+                    .threads()
+                    .map_err(err)?
+                    .into_iter()
+                    .find(|mapping| mapping.id == child)
+                    .ok_or("saved API worker session is missing")?;
+                if mapping.provider != format!("api:{profile_id}") {
+                    return Err("saved API worker provider does not match the frozen target".into());
+                }
+                let segment = store
+                    .active_provider_segment(child)
+                    .map_err(err)?
+                    .ok_or("saved API worker segment is missing")?;
+                if segment.target != target || segment.profile_revision != profile.revision {
+                    return Err(
+                    "API provider profile or frozen target changed before rework; no request sent"
+                        .into(),
+                );
+                }
+                let transcript = store
+                    .provider_messages(child)
+                    .map_err(err)?
+                    .into_iter()
+                    .map(|message| TranscriptMessage {
+                        role: message.role,
+                        content: message.content,
+                        provider_state: (message.segment_id.as_deref() == Some(&segment.id))
+                            .then_some(message.provider_state)
+                            .flatten(),
+                    })
+                    .collect();
+                mapping.status = "dispatching".into();
+                store.save_thread(&mapping).map_err(err)?;
+                (child, segment.id, mapping.provider_thread_id, transcript)
+            } else {
+                let child = HubThreadId::default();
+                let segment_id = TaskId::default().to_string();
+                let provider_thread_id = format!("api-worker:{child}");
+                store
+                    .save_thread(&ThreadMapping {
+                        id: child,
+                        project_id,
+                        provider: format!("api:{profile_id}"),
+                        provider_thread_id: provider_thread_id.clone(),
+                        title: step.step.title.clone(),
+                        status: "dispatching".into(),
+                    })
+                    .map_err(err)?;
+                store
+                    .set_session_model_policy(
+                        child,
+                        &protocol_types::providers::SessionModelPolicy {
+                            default_target: target.clone(),
+                            reviewer_target: None,
+                            allow_turn_override: false,
+                        },
+                    )
+                    .map_err(err)?;
+                store
+                    .start_provider_segment(&hub_db::ProviderSegmentRecord {
+                        id: segment_id.clone(),
+                        thread_id: child,
+                        target: target.clone(),
+                        profile_revision: profile.revision,
+                        provider_thread_id: None,
+                        ended: false,
+                    })
+                    .map_err(err)?;
+                store
+                    .set_setting(&format!("autonomous_parent:{child}"), &id.to_string())
+                    .map_err(err)?;
+                (child, segment_id, provider_thread_id, Vec::new())
+            };
+        store
+            .record_turn_target(&hub_db::TurnTargetRecord {
+                turn_id: turn_id.clone(),
+                thread_id: child,
+                segment_id: segment_id.clone(),
+                target: target.clone(),
+                profile_revision: profile.revision,
+                resolved_from: if step.step.target_override.is_some() {
+                    TargetResolution::PlanStepOverride
+                } else {
+                    TargetResolution::DifficultyDefault
+                },
+            })
+            .map_err(err)?;
+        let user_message = TranscriptMessage {
+            role: TranscriptRole::User,
+            content: vec![ContentBlock::Text {
+                text: payload.clone(),
+            }],
+            provider_state: None,
+        };
+        store
+            .append_provider_message(&hub_db::ProviderMessageRecord {
+                id: TaskId::default().to_string(),
+                thread_id: child,
+                segment_id: Some(segment_id.clone()),
+                provider_turn_id: Some(turn_id.clone()),
+                role: user_message.role,
+                content: user_message.content.clone(),
+                provider_state: None,
+            })
+            .map_err(err)?;
+        transcript.push(user_message);
+        let persisted_count = transcript.len();
+        (
+            child,
+            segment_id,
+            provider_thread_id,
+            transcript,
+            persisted_count,
+        )
+    };
+    update(state, id, |workflow| {
+        workflow.steps[i].child_id = Some(child);
+        workflow.steps[i].dispatch_phase = Some("api_turn_start_attempted".into());
+        let turn = Some(ProviderTurn {
+            thread_id: provider_thread_id.clone(),
+            id: turn_id.clone(),
+            status: "inProgress".into(),
+        });
+        if let Some(existing) = workflow.children.iter_mut().find(|item| item.id == child) {
+            existing.turn = turn;
+        } else {
+            workflow.children.push(Child {
+                id: child,
+                role: step.step.key.clone(),
+                provider: format!("api:{profile_id}"),
+                provider_thread: Some(ProviderThread {
+                    id: provider_thread_id.clone(),
+                }),
+                turn,
+            });
+        }
+    })?;
+    check(state, id)?;
+    let system = "You are an implementation worker in an isolated Git worktree. The user message is an A2A v1 envelope; its context-capsule data Part is the task data and current authority boundary. Inspect only the workspace with the provided tools, make the smallest coherent change, and verify acceptance criteria with sandboxed commands. Do not delegate, access the network, install packages, commit, merge, or claim tests passed unless a command proved it. Finish with a concise implementation and verification summary.".to_owned();
+    let started = std::time::Instant::now();
+    let result = hub_runtime::api_worker::ApiAgent {
+        root: worktree.path.clone(),
+        logical_thread_id: child.to_string(),
+        logical_turn_id: turn_id.clone(),
+        target,
+        transport,
+        external_tools: Vec::new(),
+        external_handler: None,
+        command_authorizer: Some(state.command_approvals.clone()),
+        allow_writes: true,
+        allow_commands: true,
+    }
+    .run_with_history(system, transcript)
+    .await;
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            let store = state.store.lock().map_err(err)?;
+            store
+                .record_provider_turn_outcome(&hub_db::ProviderTurnOutcomeRecord {
+                    turn_id: turn_id.clone(),
+                    thread_id: child,
+                    status: "failed".into(),
+                    stop_reason: None,
+                    failure_kind: Some(provider_api::failure_kind(&error).as_str().into()),
+                    detail: Some(
+                        hub_policy::redact(&format!("{error:#}"))
+                            .chars()
+                            .take(2_000)
+                            .collect(),
+                    ),
+                })
+                .map_err(err)?;
+            if let Some(mut mapping) = store
+                .threads()
+                .map_err(err)?
+                .into_iter()
+                .find(|mapping| mapping.id == child)
+            {
+                mapping.status = "failed".into();
+                store.save_thread(&mapping).map_err(err)?;
+            }
+            drop(store);
+            update(state, id, |workflow| {
+                if let Some(saved) = workflow.children.iter_mut().find(|item| item.id == child) {
+                    if let Some(turn) = saved.turn.as_mut() {
+                        turn.status = "failed".into();
+                    }
+                }
+            })?;
+            return Err(err(error));
+        }
+    };
+    let revision = artifact_version(
+        &worktree.base_sha,
+        &GitWorktrees::new(&read(state, id)?.source_root)
+            .map_err(err)?
+            .diff(worktree)
+            .await
+            .map_err(err)?,
+    );
+    let command_evidence = result
+        .tool_activity
+        .iter()
+        .filter(|activity| activity["name"] == "workspace_command")
+        .map(|activity| {
+            json!({
+                "kind":"command",
+                "status":if activity["success"] == true { "passed" } else { "failed" },
+                "success":activity["success"],
+                "command":activity["arguments"]["argv"],
+                "exit_code":if activity["success"] == true { json!(0) } else { Value::Null },
+                "finished_at_unix_ms":observed_ms(),
+                "target_revision":revision,
+                "output":activity["output"],
+                "acceptance_status":"reported_by_sandbox_runner"
+            })
+        })
+        .collect::<Vec<_>>();
+    {
+        let store = state.store.lock().map_err(err)?;
+        for message in result.transcript.iter().skip(persisted_count) {
+            store
+                .append_provider_message(&hub_db::ProviderMessageRecord {
+                    id: TaskId::default().to_string(),
+                    thread_id: child,
+                    segment_id: Some(segment_id.clone()),
+                    provider_turn_id: Some(turn_id.clone()),
+                    role: message.role,
+                    content: message.content.clone(),
+                    provider_state: message.provider_state.clone(),
+                })
+                .map_err(err)?;
+        }
+        store
+            .record_usage(&hub_core::ModelUsageRecord {
+                id: TaskId::default().to_string(),
+                provider: profile_id.clone(),
+                model: step.target.model.clone(),
+                task_id: Some(step.task_id),
+                turn_id: Some(turn_id.clone()),
+                prompt_tokens: Some(result.usage.input_tokens),
+                cached_tokens: Some(result.usage.cached_input_tokens),
+                completion_tokens: Some(result.usage.output_tokens),
+                estimated_cost: None,
+                latency_ms: Some(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64),
+            })
+            .map_err(err)?;
+        store
+            .record_provider_turn_outcome(&hub_db::ProviderTurnOutcomeRecord {
+                turn_id: turn_id.clone(),
+                thread_id: child,
+                status: if result.refused {
+                    "refused"
+                } else if result.failure_kind.is_some() {
+                    "failed"
+                } else {
+                    "completed"
+                }
+                .into(),
+                stop_reason: Some(result.stop_reason.clone()),
+                failure_kind: result.failure_kind.map(|kind| kind.as_str().to_owned()),
+                detail: result.failure.clone().or_else(|| {
+                    result
+                        .refused
+                        .then(|| result.text.chars().take(2_000).collect())
+                }),
+            })
+            .map_err(err)?;
+        if let Some(mut mapping) = store
+            .threads()
+            .map_err(err)?
+            .into_iter()
+            .find(|mapping| mapping.id == child)
+        {
+            mapping.status = if result.failure_kind.is_some() {
+                "failed"
+            } else {
+                "completed"
+            }
+            .into();
+            store.save_thread(&mapping).map_err(err)?;
+        }
+    }
+    update(state, id, |workflow| {
+        if let Some(saved) = workflow.children.iter_mut().find(|item| item.id == child) {
+            if let Some(turn) = saved.turn.as_mut() {
+                turn.status = if result.failure_kind.is_some() {
+                    "failed"
+                } else {
+                    "completed"
+                }
+                .into();
+            }
+        }
+        workflow.steps[i].usage.push(json!({
+            "provider": profile_id,
+            "model": step.target.model,
+            "usage": result.usage,
+        }));
+        workflow.steps[i]
+            .verification
+            .extend(command_evidence.clone());
+        if workflow.steps[i].verification.is_empty() {
+            workflow.steps[i].verification.push(json!({
+                "kind":"acceptance",
+                "status":"not_observed",
+                "success":false,
+                "target_revision":null,
+                "output":"The API worker returned no host-side command evidence; reviewer must verify the diff and acceptance criteria."
+            }));
+        }
+    })?;
+    if result.refused {
+        return Err(format!(
+            "worker provider refused the request (stop reason: {}): {}",
+            result.stop_reason, result.text
+        ));
+    }
+    if let Some(failure) = result.failure {
+        return Err(format!(
+            "worker provider failed (stop reason: {}): {failure}",
+            result.stop_reason
+        ));
+    }
+    Ok(result.text)
+}
+
 async fn codex_worker(
     state: &AppState,
     id: HubThreadId,
@@ -1309,9 +2536,16 @@ async fn codex_worker(
     payload: String,
 ) -> Result<String> {
     let s = read(state, id)?.steps[i].clone();
-    let mut explicit_payload: Value = serde_json::from_str(&payload).map_err(err)?;
-    explicit_payload["working_directory"] = json!(worktree.path);
-    let payload = bounded(explicit_payload.to_string(), CAPSULE_LIMIT)?;
+    let mut handoff: protocol_types::a2a::Message = serde_json::from_str(&payload).map_err(err)?;
+    let data = handoff
+        .parts
+        .iter_mut()
+        .find_map(|part| part.data.as_mut())
+        .and_then(Value::as_object_mut)
+        .ok_or("A2A worker handoff is missing its data Part")?;
+    data.insert("working_directory".into(), json!(worktree.path));
+    handoff.validate().map_err(err)?;
+    let payload = bounded(serde_json::to_string(&handoff).map_err(err)?, CAPSULE_LIMIT)?;
     update(state, id, |w| w.steps[i].capsule = Some(payload.clone()))?;
     let provider = crate::models::codex_provider(state).await?;
     let mut events = provider.events();
@@ -1395,7 +2629,7 @@ async fn codex_worker(
     update(state, id, |w| {
         w.steps[i].dispatch_phase = Some("turn_start_attempted".into())
     })?;
-    let turn_started=std::time::Instant::now();
+    let turn_started = std::time::Instant::now();
     let turn = provider
         .start_turn_in_worktree(
             &thread,
@@ -1470,10 +2704,17 @@ async fn codex_worker(
             break;
         }
     }
-    update(state,id,|w| {
-        let usage=&mut w.steps[i].usage;
-        if usage.is_empty() { usage.push(json!({"tokens":null})); }
-        if let Some(last)=usage.last_mut().and_then(Value::as_object_mut) {last.insert("latency_ms".into(),json!(turn_started.elapsed().as_millis() as u64));}
+    update(state, id, |w| {
+        let usage = &mut w.steps[i].usage;
+        if usage.is_empty() {
+            usage.push(json!({"tokens":null}));
+        }
+        if let Some(last) = usage.last_mut().and_then(Value::as_object_mut) {
+            last.insert(
+                "latency_ms".into(),
+                json!(turn_started.elapsed().as_millis() as u64),
+            );
+        }
     })?;
     // Keep failed/unknown attempts as evidence for review, without misclassifying
     // an exploratory command failure as a failed implementation.

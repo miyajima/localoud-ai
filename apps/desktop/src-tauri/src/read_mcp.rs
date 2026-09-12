@@ -2,16 +2,16 @@
 use crate::AppState;
 use axum::{
     extract::{DefaultBodyLimit, State},
-    http::{HeaderMap, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 use cap_std::{ambient_authority, fs::Dir};
 use hub_core::Project;
 use hub_db::Store;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
@@ -87,7 +87,7 @@ impl ReadMcp {
         let config = self.config()?;
         let status = self.status.lock().map_err(err)?;
         Ok(
-            json!({"config":config,"running":status.running,"error":status.error,"local_endpoint":format!("http://127.0.0.1:{PORT}/mcp"),"external_connection_verified":false,"authentication":"Bearer token stored in macOS Keychain; required on all local requests"}),
+            json!({"config":config,"running":status.running,"error":status.error,"local_endpoint":format!("http://127.0.0.1:{PORT}/mcp"),"a2a_agent_card":format!("http://127.0.0.1:{PORT}/.well-known/agent-card.json"),"a2a_endpoint":format!("http://127.0.0.1:{PORT}/a2a/v1"),"external_connection_verified":false,"authentication":"Bearer token stored in macOS Keychain; required on MCP and A2A operations"}),
         )
     }
     fn validate_config(&self, config: &McpConfig) -> Result<()> {
@@ -183,16 +183,19 @@ impl ReadMcp {
         });
     }
     fn authorized(&self, h: &HeaderMap) -> bool {
+        self.local_request(h)
+            && self.token.lock().ok().is_some_and(|token| {
+                !token.is_empty()
+                    && h.get("authorization")
+                        .and_then(|v| v.to_str().ok())
+                        .is_some_and(|v| {
+                            constant_time_eq(v.as_bytes(), format!("Bearer {token}").as_bytes())
+                        })
+            })
+    }
+    fn local_request(&self, h: &HeaderMap) -> bool {
         let expected = format!("127.0.0.1:{PORT}");
-        let token = self.token.lock().ok();
-        token.is_some_and(|token| {
-            !token.is_empty()
-                && h.get("authorization")
-                    .and_then(|v| v.to_str().ok())
-                    .is_some_and(|v| {
-                        constant_time_eq(v.as_bytes(), format!("Bearer {token}").as_bytes())
-                    })
-        }) && h.get("host").and_then(|v| v.to_str().ok()) == Some(expected.as_str())
+        h.get("host").and_then(|v| v.to_str().ok()) == Some(expected.as_str())
             && h.get("origin")
                 .is_none_or(|v| v.to_str().is_ok_and(|v| v == format!("http://{expected}")))
             && self.config().is_ok_and(|c| c.enabled)
@@ -505,6 +508,15 @@ struct Arguments {
     offset: Option<usize>,
     limit: Option<usize>,
     log_index: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct A2aReadRequest {
+    skill_id: String,
+    tool: String,
+    #[serde(default)]
+    arguments: Value,
 }
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
@@ -891,9 +903,311 @@ fn tools_list() -> Vec<Value> {
 }
 fn router(state: Arc<ReadMcp>) -> Router {
     Router::new()
+        .route("/.well-known/agent-card.json", get(agent_card))
+        .route("/a2a/v1/message:send", post(a2a_send))
         .route("/mcp", post(rpc).get(no_stream).delete(no_stream))
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(state)
+}
+
+fn a2a_response(status: StatusCode, content_type: &'static str, value: Value) -> Response {
+    let mut response = (status, Json(value)).into_response();
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    response.headers_mut().insert(
+        "a2a-version",
+        HeaderValue::from_static(protocol_types::a2a::PROTOCOL_VERSION),
+    );
+    response
+}
+
+fn a2a_problem(status: StatusCode, title: &str, detail: impl Into<String>) -> Response {
+    a2a_response(
+        status,
+        "application/problem+json",
+        json!({
+            "type": "https://a2a-protocol.org/errors/invalid-request",
+            "title": title,
+            "status": status.as_u16(),
+            "detail": hub_policy::redact(&detail.into()),
+            "supportedVersions": [protocol_types::a2a::PROTOCOL_VERSION],
+        }),
+    )
+}
+
+fn a2a_version_problem() -> Response {
+    a2a_response(
+        StatusCode::BAD_REQUEST,
+        "application/problem+json",
+        json!({
+            "type": "https://a2a-protocol.org/errors/version-not-supported",
+            "title": "Protocol Version Not Supported",
+            "status": StatusCode::BAD_REQUEST.as_u16(),
+            "detail": "Localoud requires A2A-Version: 1.0",
+            "supportedVersions": [protocol_types::a2a::PROTOCOL_VERSION],
+        }),
+    )
+}
+
+async fn agent_card(State(state): State<Arc<ReadMcp>>, headers: HeaderMap) -> Response {
+    if !state.local_request(&headers) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let url = format!("http://127.0.0.1:{PORT}/a2a/v1");
+    a2a_response(
+        StatusCode::OK,
+        "application/a2a+json",
+        json!({
+            "name": "Localoud Read-only Agent",
+            "description": "Authenticated, bounded access to user-published Localoud project and task evidence. It never executes commands or changes files.",
+            "supportedInterfaces": [{
+                "url": url,
+                "protocolBinding": "HTTP+JSON",
+                "protocolVersion": protocol_types::a2a::PROTOCOL_VERSION,
+            }],
+            "version": env!("CARGO_PKG_VERSION"),
+            "capabilities": {
+                "streaming": false,
+                "pushNotifications": false,
+                "extendedAgentCard": false,
+                "extensions": [{
+                    "uri": protocol_types::a2a::READ_EXTENSION,
+                    "description": "Structured invocation of Localoud's bounded read-evidence tools through a data Part.",
+                    "required": false,
+                    "params": {"schemaVersion": 1, "maxResponseBytes": RESPONSE_BYTES},
+                }],
+            },
+            "securitySchemes": {
+                "localBearer": {
+                    "httpAuthSecurityScheme": {
+                        "description": "Opaque token copied from Localoud and sent in the Authorization header.",
+                        "scheme": "Bearer",
+                        "bearerFormat": "opaque",
+                    }
+                }
+            },
+            "securityRequirements": [{"schemes": {"localBearer": {"list": []}}}],
+            "defaultInputModes": [protocol_types::a2a::READ_REQUEST_MEDIA_TYPE],
+            "defaultOutputModes": ["application/json"],
+            "skills": [{
+                "id": "localoud-read-evidence",
+                "name": "Read Localoud evidence",
+                "description": "List published projects and inspect bounded source, diff, task, and saved verification evidence using the tool schema returned by handoff_schema or MCP tools/list.",
+                "tags": ["localoud", "source", "tasks", "verification", "read-only"],
+                "examples": ["List the projects explicitly published by the Localoud user."],
+                "inputModes": [protocol_types::a2a::READ_REQUEST_MEDIA_TYPE],
+                "outputModes": ["application/json"],
+            }],
+        }),
+    )
+}
+
+async fn a2a_send(
+    State(state): State<Arc<ReadMcp>>,
+    headers: HeaderMap,
+    Json(request): Json<protocol_types::a2a::SendMessageRequest>,
+) -> Response {
+    if !state.local_request(&headers) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    if !state.authorized(&headers) {
+        let mut response = a2a_problem(
+            StatusCode::UNAUTHORIZED,
+            "Authentication Required",
+            "A valid Localoud bearer token is required",
+        );
+        response
+            .headers_mut()
+            .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+        return response;
+    }
+    if headers.get("a2a-version").and_then(|v| v.to_str().ok())
+        != Some(protocol_types::a2a::PROTOCOL_VERSION)
+    {
+        return a2a_version_problem();
+    }
+    if !headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim() == "application/a2a+json")
+    {
+        return a2a_problem(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Unsupported Content Type",
+            "Content-Type must be application/a2a+json",
+        );
+    }
+    if !headers
+        .get("accept")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.contains("application/a2a+json") || v.contains("*/*"))
+    {
+        return a2a_problem(
+            StatusCode::NOT_ACCEPTABLE,
+            "Output Mode Not Supported",
+            "Accept must include application/a2a+json",
+        );
+    }
+    if request.tenant.is_some() {
+        return a2a_problem(
+            StatusCode::BAD_REQUEST,
+            "Invalid Request",
+            "This interface does not declare a tenant",
+        );
+    }
+    if let Err(error) = request.message.validate() {
+        return a2a_problem(
+            StatusCode::BAD_REQUEST,
+            "Invalid Message",
+            error.to_string(),
+        );
+    }
+    if request.message.role != protocol_types::a2a::Role::User
+        || request.message.task_id.is_some()
+        || request.message.parts.len() != 1
+    {
+        return a2a_problem(
+            StatusCode::BAD_REQUEST,
+            "Invalid Message",
+            "The read-only skill needs one ROLE_USER data Part and does not continue A2A Tasks",
+        );
+    }
+    if request
+        .message
+        .extensions
+        .iter()
+        .any(|extension| extension != protocol_types::a2a::READ_EXTENSION)
+    {
+        return a2a_problem(
+            StatusCode::BAD_REQUEST,
+            "Unsupported Extension",
+            "The message names an extension this interface does not support",
+        );
+    }
+    if request.configuration.as_ref().is_some_and(|configuration| {
+        !configuration.accepted_output_modes.is_empty()
+            && !configuration
+                .accepted_output_modes
+                .iter()
+                .any(|mode| mode == "application/json")
+    }) {
+        return a2a_problem(
+            StatusCode::BAD_REQUEST,
+            "Output Mode Not Supported",
+            "acceptedOutputModes must include application/json",
+        );
+    }
+    let part = &request.message.parts[0];
+    if part.media_type.as_deref() != Some(protocol_types::a2a::READ_REQUEST_MEDIA_TYPE) {
+        return a2a_problem(
+            StatusCode::BAD_REQUEST,
+            "Unsupported Content Type",
+            format!(
+                "The data Part mediaType must be {}",
+                protocol_types::a2a::READ_REQUEST_MEDIA_TYPE
+            ),
+        );
+    }
+    let invocation: A2aReadRequest = match part.data.clone() {
+        Some(value) => match serde_json::from_value(value) {
+            Ok(value) => value,
+            Err(error) => {
+                return a2a_problem(
+                    StatusCode::BAD_REQUEST,
+                    "Invalid Data Part",
+                    error.to_string(),
+                );
+            }
+        },
+        None => {
+            return a2a_problem(StatusCode::BAD_REQUEST, "Invalid Data Part", "missing data");
+        }
+    };
+    if invocation.skill_id != "localoud-read-evidence"
+        || !tools_list()
+            .iter()
+            .any(|tool| tool["name"] == invocation.tool)
+    {
+        return a2a_problem(
+            StatusCode::BAD_REQUEST,
+            "Skill Not Supported",
+            "Use skillId localoud-read-evidence and one of the advertised read-only tools",
+        );
+    }
+    let arguments: Arguments = match serde_json::from_value(invocation.arguments) {
+        Ok(value) => value,
+        Err(_) => {
+            return a2a_problem(
+                StatusCode::BAD_REQUEST,
+                "Invalid Arguments",
+                "Tool arguments do not match the advertised schema",
+            );
+        }
+    };
+    let result = match tokio::time::timeout(
+        Duration::from_secs(15),
+        state.call(&invocation.tool, arguments),
+    )
+    .await
+    {
+        Ok(Ok(value)) => match safe_value(value) {
+            Ok(value) => value,
+            Err(error) => {
+                return a2a_problem(StatusCode::BAD_REQUEST, "Bounded Read Failed", error);
+            }
+        },
+        Ok(Err(error)) => {
+            return a2a_problem(StatusCode::BAD_REQUEST, "Read Failed", error);
+        }
+        Err(_) => {
+            return a2a_problem(
+                StatusCode::REQUEST_TIMEOUT,
+                "Read Timed Out",
+                "Narrow the requested evidence",
+            );
+        }
+    };
+    let context_id = request
+        .message
+        .context_id
+        .clone()
+        .unwrap_or_else(|| hub_core::TaskId::default().to_string());
+    let message = protocol_types::a2a::Message {
+        message_id: hub_core::TaskId::default().to_string(),
+        context_id: Some(context_id),
+        task_id: None,
+        role: protocol_types::a2a::Role::Agent,
+        parts: vec![protocol_types::a2a::Part::data(
+            json!({
+                "skillId": invocation.skill_id,
+                "tool": invocation.tool,
+                "result": result,
+            }),
+            "application/json",
+        )],
+        metadata: Map::new(),
+        extensions: vec![protocol_types::a2a::READ_EXTENSION.into()],
+        reference_task_ids: vec![],
+    };
+    if let Err(error) = message.validate() {
+        return a2a_problem(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Invalid Agent Response",
+            error.to_string(),
+        );
+    }
+    let mut response = a2a_response(
+        StatusCode::OK,
+        "application/a2a+json",
+        json!({"message": message}),
+    );
+    response.headers_mut().insert(
+        "a2a-extensions",
+        HeaderValue::from_static(protocol_types::a2a::READ_EXTENSION),
+    );
+    response
 }
 async fn no_stream(State(state): State<Arc<ReadMcp>>, headers: HeaderMap) -> StatusCode {
     if state.authorized(&headers) {
@@ -1058,6 +1372,121 @@ mod tests {
             h.insert(k, v.parse().unwrap());
         }
         h
+    }
+    fn a2a_headers() -> HeaderMap {
+        let mut h = headers();
+        h.insert("accept", "application/a2a+json".parse().unwrap());
+        h.insert("content-type", "application/a2a+json".parse().unwrap());
+        h.insert("a2a-version", "1.0".parse().unwrap());
+        h
+    }
+    #[tokio::test]
+    async fn a2a_card_and_read_message_use_v1_envelopes() {
+        let (_d, s, _id) = fixture();
+        let mut public = HeaderMap::new();
+        public.insert("host", "127.0.0.1:8792".parse().unwrap());
+        let response = agent_card(State(s.clone()), public).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "application/a2a+json");
+        let body = axum::body::to_bytes(response.into_body(), RESPONSE_BYTES)
+            .await
+            .unwrap();
+        let card: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(card["supportedInterfaces"][0]["protocolVersion"], "1.0");
+        assert_eq!(
+            card["supportedInterfaces"][0]["protocolBinding"],
+            "HTTP+JSON"
+        );
+        assert_eq!(card["skills"][0]["id"], "localoud-read-evidence");
+
+        let mut message = protocol_types::a2a::data_message(
+            "request-1",
+            None,
+            None,
+            json!({
+                "skillId": "localoud-read-evidence",
+                "tool": "project_list",
+                "arguments": {},
+            }),
+            protocol_types::a2a::READ_REQUEST_MEDIA_TYPE,
+            vec![],
+        )
+        .unwrap();
+        message.extensions = vec![protocol_types::a2a::READ_EXTENSION.into()];
+        let response = a2a_send(
+            State(s),
+            a2a_headers(),
+            Json(protocol_types::a2a::SendMessageRequest {
+                tenant: None,
+                message,
+                configuration: None,
+                metadata: Map::new(),
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["a2a-version"], "1.0");
+        let body = axum::body::to_bytes(response.into_body(), RESPONSE_BYTES)
+            .await
+            .unwrap();
+        let value: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["message"]["role"], "ROLE_AGENT");
+        assert!(value["message"]["taskId"].is_null());
+        assert_eq!(value["message"]["parts"][0]["data"]["tool"], "project_list");
+        assert_eq!(
+            value["message"]["parts"][0]["data"]["result"]["projects"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+    #[tokio::test]
+    async fn a2a_rejects_missing_version_and_authentication() {
+        let (_d, s, _id) = fixture();
+        let message = protocol_types::a2a::data_message(
+            "request-2",
+            None,
+            None,
+            json!({
+                "skillId": "localoud-read-evidence",
+                "tool": "project_list",
+                "arguments": {},
+            }),
+            protocol_types::a2a::READ_REQUEST_MEDIA_TYPE,
+            vec![],
+        )
+        .unwrap();
+        let request = protocol_types::a2a::SendMessageRequest {
+            tenant: None,
+            message,
+            configuration: None,
+            metadata: Map::new(),
+        };
+        let mut missing_version = a2a_headers();
+        missing_version.remove("a2a-version");
+        assert_eq!(
+            a2a_send(State(s.clone()), missing_version, Json(request.clone()))
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let mut wrong_content_type = a2a_headers();
+        wrong_content_type.insert("content-type", "application/json".parse().unwrap());
+        assert_eq!(
+            a2a_send(State(s.clone()), wrong_content_type, Json(request.clone()))
+                .await
+                .status(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE
+        );
+        let mut unauthenticated = a2a_headers();
+        unauthenticated.remove("authorization");
+        assert_eq!(
+            a2a_send(State(s), unauthenticated, Json(request))
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
     }
     #[tokio::test]
     async fn authenticated_rpc_exposes_only_reads_and_rejects_execution() {

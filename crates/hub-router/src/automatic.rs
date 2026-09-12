@@ -9,11 +9,14 @@ use serde::{Deserialize, Serialize};
 pub enum ModelProvider {
     Local,
     Codex,
+    Api,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelTarget {
     pub provider: ModelProvider,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
     pub model: String,
     pub reasoning: Option<String>,
 }
@@ -27,6 +30,23 @@ impl ModelTarget {
                 .is_some_and(|e| e.trim().is_empty() || e.len() > 50)
         {
             bail!("モデル・reasoning の指定が不正です。");
+        }
+        match self.provider {
+            ModelProvider::Local if self.profile_id.as_deref().is_some_and(|id| id != "spark") => {
+                bail!("従来のローカルモデルは spark profile を使用してください。");
+            }
+            ModelProvider::Codex if self.profile_id.as_deref().is_some_and(|id| id != "codex") => {
+                bail!("Codexモデルは codex profile を使用してください。");
+            }
+            ModelProvider::Api
+                if self
+                    .profile_id
+                    .as_ref()
+                    .is_none_or(|id| id.trim().is_empty()) =>
+            {
+                bail!("APIモデルにはprovider profileが必要です。");
+            }
+            _ => {}
         }
         if self.provider == ModelProvider::Local && self.reasoning.is_some() {
             bail!("現在のローカルサービスは reasoning の切り替えに対応していません。");
@@ -46,12 +66,17 @@ pub struct AutoSettings {
     pub classifier: ModelTarget,
     pub levels: Vec<LevelAssignment>,
     pub fallback: Option<ModelTarget>,
+    #[serde(default)]
+    pub planner_default: Option<ModelTarget>,
+    #[serde(default)]
+    pub reviewer_default: Option<ModelTarget>,
     pub confirm_before_run: bool,
 }
 impl AutoSettings {
     pub fn initial(local_model: String, default_cloud: Option<ModelTarget>) -> Self {
         let local = ModelTarget {
             provider: ModelProvider::Local,
+            profile_id: Some("spark".into()),
             model: local_model,
             reasoning: None,
         };
@@ -68,6 +93,8 @@ impl AutoSettings {
                 })
                 .collect(),
             fallback: None,
+            planner_default: default_cloud.clone(),
+            reviewer_default: default_cloud,
             confirm_before_run: false,
         }
     }
@@ -83,6 +110,12 @@ impl AutoSettings {
         }
         if let Some(fallback) = &self.fallback {
             fallback.validate()?;
+        }
+        if let Some(planner) = &self.planner_default {
+            planner.validate()?;
+        }
+        if let Some(reviewer) = &self.reviewer_default {
+            reviewer.validate()?;
         }
         Ok(())
     }
@@ -150,6 +183,7 @@ mod tests {
     fn target(model: &str) -> ModelTarget {
         ModelTarget {
             provider: ModelProvider::Codex,
+            profile_id: Some("codex".into()),
             model: model.into(),
             reasoning: Some("high".into()),
         }
@@ -199,6 +233,7 @@ mod tests {
         value.difficulty = 1;
         let local = ModelTarget {
             provider: ModelProvider::Local,
+            profile_id: Some("spark".into()),
             model: "local".into(),
             reasoning: None,
         };

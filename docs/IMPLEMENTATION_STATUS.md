@@ -1,5 +1,19 @@
 # Implementation status — 2026-09-08 JST
 
+## 2026-09-12 multi-provider update
+
+Provider profiles, OpenAI-compatible Chat Completions, OpenAI Responses, Anthropic Messages, normalized cross-provider history, per-turn model targets, per-profile concurrency, sandboxed API workers, one-shot command approval, and automated separate-session review are implemented. Migrations 005 and 006 preserve existing Codex/Spark sessions while adding provider segments, messages, approvals, review runs, and provider-turn outcomes.
+
+All enabled writes now use the Manifest worktree/review lifecycle. Explicitly scoped direct requests are converted to a one-step reviewed task; unscoped Codex/API conversations are read-only. The retired direct-local and legacy Plan writers fail closed and do not replay retained work. See [API provider profiles](API_PROVIDERS.md).
+
+Current verification is local fixture evidence only. No real OpenAI or Anthropic generation request, account entitlement, billing state, or live Claude result is claimed.
+
+## 2026-09-12 A2A update
+
+Explicit task-to-worker, autonomous implementation, final-review, and staged-research handoffs now use A2A v1 Message envelopes with versioned Localoud data Parts. Native provider adapters remain in place, so Codex/OpenAI/Anthropic endpoints are not expected to parse raw A2A JSON.
+
+The authenticated loopback read service now also publishes a local Agent Card and an A2A v1 HTTP+JSON `message:send` endpoint for bounded read-only evidence access. Streaming, push notifications, remote HTTPS publication, A2A Task lifecycle operations, arbitrary remote-agent execution, and interoperability-suite certification are not claimed. See [A2A support](A2A.md).
+
 Spark uses **8bit**, per the user's amendment. This document separates implemented features from real-provider and native UI evidence.
 
 | Milestone | Evidence |

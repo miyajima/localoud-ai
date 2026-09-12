@@ -216,10 +216,18 @@ pub async fn send_composed_turn(
 ) -> Result<protocol_types::ProviderTurn, String> {
     let (_, project) = provider_thread(&thread_id, &state)?;
     validate_options(&project, Some(&thread_id), &mut options, &state).await?;
+    let id = crate::parse_thread(thread_id)?;
+    if crate::thread_provider(id, &state)?.starts_with("api:") {
+        return state
+            .api_sessions
+            .start(id, text, options)
+            .await
+            .map_err(|e| format!("{e:#}"));
+    }
     state
         .sessions()
         .await?
-        .start_with_options(crate::parse_thread(thread_id)?, text, options)
+        .start_with_options(id, text, options)
         .await
         .map_err(|e| format!("{e:#}"))
 }

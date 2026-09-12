@@ -231,22 +231,48 @@ impl LocalExecutor {
             title,
             status: "idle".into(),
         };
-        self.store
+        let store = self
+            .store
             .lock()
-            .map_err(|_| anyhow!("database lock poisoned"))?
-            .save_thread(&m)?;
-        self.store
-            .lock()
-            .map_err(|_| anyhow!("database lock poisoned"))?
-            .set_setting(&format!("thread_model:{}", m.id), self.provider.model_id())?;
+            .map_err(|_| anyhow!("database lock poisoned"))?;
+        store.save_thread(&m)?;
+        store.set_setting(&format!("thread_model:{}", m.id), self.provider.model_id())?;
+        let target = protocol_types::providers::ModelTarget {
+            profile_id: "spark".into(),
+            model_id: self.provider.model_id().into(),
+            effort: None,
+        };
+        store.set_session_model_policy(
+            m.id,
+            &protocol_types::providers::SessionModelPolicy {
+                default_target: target.clone(),
+                reviewer_target: None,
+                allow_turn_override: false,
+            },
+        )?;
+        if let Some(profile) = store.provider_profile("spark")? {
+            store.start_provider_segment(&hub_db::ProviderSegmentRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                thread_id: m.id,
+                target,
+                profile_revision: profile.revision,
+                provider_thread_id: Some(m.provider_thread_id.clone()),
+                ended: false,
+            })?;
+        }
         Ok(m)
     }
+    #[allow(unreachable_code)]
     pub async fn run(
         &self,
         id: HubThreadId,
         request: String,
         paths: Vec<String>,
     ) -> Result<LocalResult> {
+        let _ = (id, request, paths);
+        return Err(anyhow!(
+            "direct local writes are disabled; run the bounded edit in a reviewed worktree"
+        ));
         let _guard = self.lock.lock().await;
         let (mapping, root) = {
             let s = self
@@ -326,7 +352,7 @@ impl LocalExecutor {
 mod tests {
     use super::*;
     #[tokio::test]
-    async fn replacement_cannot_continue_a_task_pinned_to_another_local_model() -> Result<()> {
+    async fn legacy_direct_local_write_is_fail_closed() -> Result<()> {
         let dir = tempfile::tempdir()?;
         assert!(std::process::Command::new("git")
             .arg("init")
@@ -344,15 +370,11 @@ mod tests {
             lock: tokio::sync::Mutex::new(()),
         };
         let thread = executor.create(project.id, "test".into())?;
-        store
-            .lock()
-            .unwrap()
-            .set_setting(&format!("thread_model:{}", thread.id), "other/model")?;
         let error = executor
             .run(thread.id, "edit".into(), vec!["a.txt".into()])
             .await
             .unwrap_err();
-        assert!(error.to_string().contains("other/model"));
+        assert!(error.to_string().contains("reviewed worktree"));
         assert_eq!(
             std::fs::read_to_string(dir.path().join("a.txt"))?,
             "unchanged"

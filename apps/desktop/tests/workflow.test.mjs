@@ -7,18 +7,18 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import {JSDOM} from 'jsdom';
 import ts from 'typescript';
-import {appendModelOptions,fillReasoningSelect,readTarget,resolvedModel,modelForTarget} from '../src/model-controls.ts';
+import {appendModelOptions,fillReasoningSelect,profileForChoice,readTarget,resolvedModel,modelForTarget} from '../src/model-controls.ts';
 const source=(await readFile(new URL('../src/main.ts',import.meta.url),'utf8')).replace(/^import .*;\s*$/gm,'');
 const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText.replace(/export\s*\{\s*\};?/g,'');
 const reviewJs=ts.transpileModule((await readFile(new URL('../src/manifest-review.ts',import.meta.url),'utf8')).replace('export function','function'),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
-async function fixture({saved,existing=false,connected=true,duplicate=false,importStatus,importGate,importError,multipleProjects=false,browserOpen=true,autoPreview,planTarget,routeError,startupError}={}){
+async function fixture({saved,existing=false,connected=true,duplicate=false,importStatus,importGate,importError,multipleProjects=false,browserOpen=true,autoPreview,planTarget,routeError,startupError,profiles=[],apiModels=[]}={}){
  const dom=new JSDOM('<div id="app"></div>',{url:'https://workflow.fixture'});
  if(saved)dom.window.localStorage.setItem('astra-ui-v1',saved);
  dom.window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};dom.window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new dom.window.Event('close'));};
  const calls=[];const clipboard=[];const navigator={clipboard:{writeText:async text=>{if(state.copyError)throw Error(state.copyError);clipboard.push(text);}}};
  const project={id:'project',name:'Fixture',root:'/fixture'};
  const root={id:'root-session',project_id:project.id,provider:'workflow',provider_thread_id:'workflow:root',title:'入力を保持する',status:'idle'};
- const state={projects:multipleProjects?[project,{id:'other',name:'別プロジェクト',root:'/other'}]:[project],threads:existing?[root]:[],running:false,failReview:false,messages:existing?[{role:'user',text:'保存済みの依頼',key:'old-user'},{role:'assistant',text:'保存済みのプラン',key:'old-plan',label:'プラン · ChatGPT'}]:[],targets:existing?{plan:{model:'gpt-6-astra',reasoning:'high',chatgpt:true},review:{model:'gpt-6-astra',reasoning:'high',chatgpt:true},implement:{model:'codex-implementation',reasoning:'high',chatgpt:false}}:{},phase:'plan',model:'gpt-6-astra'};
+ const state={projects:multipleProjects?[project,{id:'other',name:'別プロジェクト',root:'/other'}]:[project],threads:existing?[root]:[],providerProfiles:profiles.map(profile=>({...profile})),running:false,failReview:false,messages:existing?[{role:'user',text:'保存済みの依頼',key:'old-user'},{role:'assistant',text:'保存済みのプラン',key:'old-plan',label:'プラン · ChatGPT'}]:[],targets:existing?{plan:{model:'gpt-6-astra',reasoning:'high',chatgpt:true},review:{model:'gpt-6-astra',reasoning:'high',chatgpt:true},implement:{model:'codex-implementation',reasoning:'high',chatgpt:false}}:{},phase:'plan',model:'gpt-6-astra'};
  if(startupError)state.fail={projects:startupError};
  const invoke=async(command,args)=>{
   calls.push({command,args});
@@ -26,7 +26,7 @@ async function fixture({saved,existing=false,connected=true,duplicate=false,impo
   if(state.fail?.[command])throw Error(state.fail[command]);
   if(state.responses&&Object.hasOwn(state.responses,command))return state.responses[command];
   switch(command){
-   case 'available_models':return {models:[{key:'local:fixture',label:'Local fixture',model:'local-fixture',local:true,reasoning:[],default_reasoning:null},{key:'codex:gpt-6-astra',label:'Astra on Codex',model:'gpt-6-astra',local:false,reasoning:['high'],default_reasoning:null},{key:'codex:codex-implementation',label:'Implementation',model:'codex-implementation',local:false,reasoning:['high','low'],default_reasoning:null}],warnings:[]};
+   case 'available_models':return {models:[{key:'local:fixture',label:'Local fixture',model:'local-fixture',local:true,reasoning:[],default_reasoning:null},{key:'codex:gpt-6-astra',label:'Astra on Codex',model:'gpt-6-astra',local:false,reasoning:['high'],default_reasoning:null},{key:'codex:codex-implementation',label:'Implementation',model:'codex-implementation',local:false,reasoning:['high','low'],default_reasoning:null},...apiModels],warnings:[]};
    case 'preview_auto_route':return autoPreview||{id:'route-1',revision:0,target:{provider:'codex',model:'codex-implementation',reasoning:'high'},reason:'routine',needs_plan:false,blocked:null,confirm_before_run:false};
    case 'auto_settings':return {levels:[{level:5,target:planTarget||{provider:'codex',model:'gpt-6-astra',reasoning:'high'}}]};
    case 'create_routed_task':{if(routeError)throw Error(routeError);const thread={id:'direct-task',project_id:project.id,provider:'codex',provider_thread_id:'provider-direct',title:args.request.text,status:'idle'};state.threads.push(thread);return {thread,target:{model:'codex-implementation',reasoning:'high'},route:{decision:{executor:'codex',reason:'explicit'}}};}
@@ -49,6 +49,11 @@ async function fixture({saved,existing=false,connected=true,duplicate=false,impo
    case 'archived_threads':return state.archived||[];
    case 'thread_models':return state.threads.some(t=>t.provider==='codex')?{'direct-task':'codex-implementation'}:{};
    case 'thread_reasoning':return {};
+   case 'thread_model_targets':return state.threads.some(t=>t.provider==='codex')?{'direct-task':{provider:'codex',profile_id:'codex',model:'codex-implementation',reasoning:null}}:{};
+   case 'provider_profiles':return state.providerProfiles;
+   case 'set_provider_profile':{const index=state.providerProfiles.findIndex(profile=>profile.id===args.profile.id);const saved={...args.profile,credential_present:false};if(index<0)state.providerProfiles.push(saved);else state.providerProfiles[index]=saved;return apiModels.filter(model=>model.profile_id===saved.id).map(model=>({id:model.model}));}
+   case 'run_provider_tool_canary':return {supported:true,profile_id:args.profileId,model_id:args.modelId};
+   case 'set_thread_model_target':return null;
    case 'workflow_snapshot':return {status:'legacy_read_only',running:state.running,messages:state.messages,phase:state.phase,model:state.model,targets:state.targets,handoff:state.phase==='review'?'要件・プラン・実装結果・作業差分':'これまでの会話'};
    case 'workflow_stop':state.running=false;return;
    case 'workflow_role_settings':return {plan:{model:'planner',reasoning:'medium'},review:{model:'reviewer',reasoning:'pro'}};
@@ -61,7 +66,7 @@ async function fixture({saved,existing=false,connected=true,duplicate=false,impo
   }
  };
  const noop=()=>{};
- const context={tabLabels,flowMarkup,welcomeMarkup,executionOverview,executionPlan,executionContext,executionUsage,focusMarkup,planningRequest,reviewRequest,recordMarkup,syncWorkers,applyWorkerEvent,mergeActivity,progressMarkup,changesMarkup,navigator,window:dom.window,document:dom.window.document,localStorage:dom.window.localStorage,console,Option:dom.window.Option,setTimeout,clearTimeout,setInterval:()=>0,clearInterval:noop,nativeInvoke:invoke,isTauri:()=>true,listen:async()=>noop,appendModelOptions,fillReasoningSelect,readTarget,resolvedModel,modelForTarget,markdown:s=>s,diffMarkup:s=>s,statusLabel:s=>s,planPreview:()=>'',setupManifestReview:()=>noop,setupMcpSettings:()=>noop,setupChatGptUsage:noop,setupBrowserWorkspace:()=>{const bar=dom.window.document.createElement('section');bar.id='workflow-bar';dom.window.document.body.append(bar);return {showBrowser:noop,showWorkspace:noop,isBrowserOpen:()=>browserOpen,setSidebarHidden:noop,setWorkflow:(html,action)=>{bar.innerHTML=html;bar.querySelectorAll('[data-flow-action]').forEach(b=>b.onclick=()=>action(b.dataset.flowAction));}}},setupMemory:noop,memoryPanel:()=>'',bindMemory:noop,setupAutoRouting:noop,showAutoPreview:preview=>calls.push({command:'showAutoPreview',args:preview}),openAutoSettings:noop,setupComposer:()=>({syncContext:noop,getMentions:()=>[],setMentions:noop,clear:noop,refreshThread:async()=>{},seedHistory:async()=>{},remember:async()=>{},beforeSend:async()=>true})};
+ const context={tabLabels,flowMarkup,welcomeMarkup,executionOverview,executionPlan,executionContext,executionUsage,focusMarkup,planningRequest,reviewRequest,recordMarkup,syncWorkers,applyWorkerEvent,mergeActivity,progressMarkup,changesMarkup,navigator,window:dom.window,document:dom.window.document,localStorage:dom.window.localStorage,console,Option:dom.window.Option,setTimeout,clearTimeout,setInterval:()=>0,clearInterval:noop,nativeInvoke:invoke,isTauri:()=>true,listen:async()=>noop,appendModelOptions,fillReasoningSelect,profileForChoice,readTarget,resolvedModel,modelForTarget,markdown:s=>s,diffMarkup:s=>s,statusLabel:s=>s,planPreview:()=>'',setupManifestReview:()=>noop,setupMcpSettings:()=>noop,setupChatGptUsage:noop,setupBrowserWorkspace:()=>{const bar=dom.window.document.createElement('section');bar.id='workflow-bar';dom.window.document.body.append(bar);return {showBrowser:noop,showWorkspace:noop,isBrowserOpen:()=>browserOpen,setSidebarHidden:noop,setWorkflow:(html,action)=>{bar.innerHTML=html;bar.querySelectorAll('[data-flow-action]').forEach(b=>b.onclick=()=>action(b.dataset.flowAction));}}},setupMemory:noop,memoryPanel:()=>'',bindMemory:noop,setupAutoRouting:noop,showAutoPreview:preview=>calls.push({command:'showAutoPreview',args:preview}),openAutoSettings:noop,setupComposer:()=>({syncContext:noop,getMentions:()=>[],setMentions:noop,clear:noop,refreshThread:async()=>{},seedHistory:async()=>{},remember:async()=>{},beforeSend:async()=>true})};
  for(const name of ['HTMLElement','HTMLButtonElement','HTMLSelectElement','HTMLInputElement','HTMLTextAreaElement','HTMLDialogElement','HTMLDetailsElement','HTMLAnchorElement','HTMLOptionElement','URL'])context[name]=dom.window[name];
  context.setupManifestReview=vm.runInNewContext(reviewJs+';setupManifestReview',context);
  const api=await vm.runInNewContext(`(async()=>{${js}\nawait refreshModels();return {render,newTask,choosePhase,send,sendAutonomous,selectThread,refreshWorkflow,refreshAutonomous,refreshDiff,refreshUsage,refreshContext,refreshThreads,applyEvent,selectedView,activeId:()=>activeThread};})()`,context);
@@ -149,6 +154,53 @@ test('project disclosure retains focus and unchanged task trees are not replaced
   const current=f.document.activeElement;f.api.render();assert.equal(f.document.activeElement,current);
  }finally{f.close();}
 });
+test('provider profile settings show missing credentials and preserve revisions on edit',async()=>{
+ const profile={id:'anthropic-main',name:'Anthropic Main',protocol:'anthropic_messages',base_url:'https://api.anthropic.com/v1',locality:'cloud',credential_env:'ANTHROPIC_API_KEY',max_concurrency:2,enabled:true,revision:3,credential_present:false};
+ const f=await fixture({profiles:[profile],apiModels:[{key:'api:anthropic-main:claude',label:'Anthropic Main / Claude',model:'claude',profile_id:'anthropic-main',protocol:'anthropic_messages',local:false,reasoning:['high'],tools:true,default_reasoning:null,is_default:false}]});try{
+  f.document.querySelector('#settings').click();await new Promise(resolve=>setTimeout(resolve,5));
+  assert.match(f.document.querySelector('#provider-profile-list').textContent,/ANTHROPIC_API_KEY: 未設定/);
+  f.document.querySelector('[data-provider-edit="anthropic-main"]').click();
+  assert.equal(f.document.querySelector('#provider-id').readOnly,true);
+  assert.equal(f.document.querySelector('#provider-revision').value,'3');
+  f.document.querySelector('#provider-name').value='Anthropic Updated';
+  f.document.querySelector('#provider-profile-form').dispatchEvent(new f.dom.window.Event('submit',{bubbles:true,cancelable:true}));
+  await new Promise(resolve=>setTimeout(resolve,10));
+  const save=f.calls.find(call=>call.command==='set_provider_profile');
+  assert.equal(save.args.profile.revision,4);
+  assert.equal(save.args.profile.credential_env,'ANTHROPIC_API_KEY');
+  assert.match(f.document.querySelector('#provider-profile-list').textContent,/Anthropic Updated/);
+ }finally{f.close();}
+});
+
+test('generic provider tool canary runs only after the explicit billed-call confirmation',async()=>{
+ const profile={id:'generic',name:'Generic',protocol:'open_ai_chat',base_url:'https://generic.example/v1',locality:'cloud',credential_env:'GENERIC_API_KEY',max_concurrency:1,enabled:true,revision:1,credential_present:true};
+ const model={key:'api:generic:model',label:'Generic / Model',model:'model',profile_id:'generic',protocol:'open_ai_chat',local:false,reasoning:[],tools:false,default_reasoning:null,is_default:false};
+ const f=await fixture({profiles:[profile],apiModels:[model]});try{
+  f.document.querySelector('#settings').click();await new Promise(resolve=>setTimeout(resolve,5));
+  const button=f.document.querySelector('[data-provider-canary="generic"]');
+  f.dom.window.confirm=()=>false;button.click();await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(f.calls.filter(call=>call.command==='run_provider_tool_canary').length,0);
+  f.dom.window.confirm=()=>true;button.click();await new Promise(resolve=>setTimeout(resolve,10));
+  const call=f.calls.find(item=>item.command==='run_provider_tool_canary');
+  assert.equal(call.args.profileId,'generic');assert.equal(call.args.modelId,'model');
+ }finally{f.close();}
+});
+
+test('changing an existing session model saves an exact next-turn API target without sending',async()=>{
+ const profile={id:'anthropic-main',name:'Anthropic Main',protocol:'anthropic_messages',base_url:'https://api.anthropic.com/v1',locality:'cloud',credential_env:'ANTHROPIC_API_KEY',max_concurrency:1,enabled:true,revision:1,credential_present:true};
+ const model={key:'api:anthropic-main:claude',label:'Anthropic Main / Claude',model:'claude',profile_id:'anthropic-main',protocol:'anthropic_messages',local:false,reasoning:['high'],tools:true,default_reasoning:null,is_default:false};
+ const f=await fixture({profiles:[profile],apiModels:[model]});try{
+  f.state.threads=[{id:'direct-task',project_id:'project',provider:'codex',provider_thread_id:'provider-direct',title:'Direct',status:'completed'}];
+  await f.api.refreshThreads();await f.api.selectThread('direct-task');
+  const sends=f.calls.filter(call=>call.command==='send_composed_turn').length;
+  f.select.value=model.key;f.select.dispatchEvent(new f.dom.window.Event('change',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,10));
+  const call=f.calls.find(item=>item.command==='set_thread_model_target');
+  assert.deepEqual(call.args.target,{provider:'api',profile_id:'anthropic-main',model:'claude',reasoning:null});
+  assert.equal(f.calls.filter(item=>item.command==='send_composed_turn').length,sends);
+  assert.match(f.document.querySelector('#notice').textContent,/次のターン/);
+ }finally{f.close();}
+});
+
 test('deleting history requires a task-specific second confirmation and closing cancels it',async()=>{
  const f=await directFixture();try{
   const open=()=>f.document.querySelector('#session-actions').click();
@@ -250,7 +302,7 @@ test('task purpose stays outside the scroller and logs keep closed state and out
   f.state.activity={workers:[{child_id:'child',events:[{sequence:1,event:{kind:'item_completed',text:'long output',details:{type:'command',command:'cat file',exit_code:0}}}]}],changes:[]};
   f.api.choosePhase('autonomous');await f.api.sendAutonomous('captured-plan','project');
   const focus=f.document.querySelector('#workflow-bar');assert.equal(f.document.querySelector('#content').contains(focus),false);
-  assert.ok(focus.querySelector('[data-flow-action="review"]'));assert.equal(f.document.querySelector('#overview-ids').open,false);
+  assert.equal(focus.querySelector('[data-flow-action="review"]'),null);assert.equal(f.document.querySelector('#overview-ids').open,false);
   assert.ok(!focus.textContent.includes('private_payload'));
   f.document.querySelector('[data-tab="Terminal"]').click();
   f.document.querySelector('#worker-log-one').open=false;
@@ -331,7 +383,7 @@ test('every Manifest tab is read-only and shows task-specific plan, context and 
   }
   assert.ok(!f.calls.some(c=>['task_graph','inspect_context','memory_candidates','model_usage'].includes(c.command)));
   assert.equal(f.document.querySelector('main>footer').hidden,true);
-  assert.equal(f.document.querySelectorAll('[data-flow-action="review"]').length,1);
+  assert.equal(f.document.querySelectorAll('[data-flow-action="review"]').length,0);
  }finally{f.close();}
 });
 test('project tree nests sessions under their owner and search can reveal another project',async()=>{
@@ -351,19 +403,12 @@ test('project tree nests sessions under their owner and search can reveal anothe
  }finally{f.close();}
 });
 
-test('review handoff copies the exact target and waits for explicit result import',async()=>{
+test('automated review wait never exposes a manual review handoff',async()=>{
  const f=await fixture({importStatus:'awaiting_review'});try{
   f.state.snapshot={artifact_version:'version-one',manifest:{manifest_id:'m',request:'検索画面を改善'}};
-  await f.api.sendAutonomous('captured-plan','project');const before=f.calls.filter(c=>c.command==='manifest_import_text').length;
-  f.document.querySelector('#workflow-bar [data-flow-action="review"]').click();await new Promise(r=>setTimeout(r,10));
-  assert.match(f.clipboard.at(-1),/Task ID: root-session/);assert.match(f.clipboard.at(-1),/Artifact version: version-one/);
-  assert.equal(f.calls.filter(c=>c.command==='manifest_import_text').length,before);
-  assert.equal(f.document.querySelector('[aria-current="step"]').textContent,'4レビュー');
-  assert.match(f.document.querySelector('#workflow-bar [data-flow-action="review"]').textContent,/再コピー/);
-  assert.equal(f.document.querySelector('.flow-actions button').dataset.flowAction,'import');
-  f.state.snapshot.artifact_version='version-two';await f.api.refreshAutonomous('root-session');
-  assert.equal(f.document.querySelector('#workflow-bar [data-flow-action="review"]').textContent,'レビュー依頼をコピー');
-  assert.equal(f.document.querySelector('.flow-actions button').dataset.flowAction,'review');
+  await f.api.sendAutonomous('captured-plan','project');
+  assert.equal(f.document.querySelector('[data-flow-action="review"]'),null);
+  assert.equal(f.clipboard.length,0);
   assert.ok(!f.calls.some(c=>/chatgpt_send|send_turn/.test(c.command)));
  }finally{f.close();}
 });
@@ -387,6 +432,18 @@ test('direct tasks send, accept steering and keep direct mode on the next task',
   f.api.newTask();assert.equal(f.document.querySelector('#operation [aria-pressed="true"]').dataset.operation,'implement');
   assert.equal(f.document.querySelector('main>footer').hidden,false);
   assert.ok(!f.calls.some(c=>/manifest_import|chatgpt_send/.test(c.command)));
+ }finally{f.close();}
+});
+
+test('an explicitly scoped write requests the reviewed worktree path',async()=>{
+ const f=await fixture();try{
+  f.document.querySelector('[data-operation="implement"]').click();
+  f.select.value='codex:codex-implementation';f.select.dispatchEvent(new f.dom.window.Event('change'));
+  f.document.querySelector('#known-files').value='src/name.ts';
+  f.input.value='名前の表示を直して';await f.api.send();
+  const request=f.calls.find(c=>c.command==='create_routed_task').args.request;
+  assert.equal(request.reviewedWrite,true);
+  assert.equal(request.knownFiles.join(','),'src/name.ts');
  }finally{f.close();}
 });
 
@@ -428,6 +485,7 @@ test('new request defaults to automatic routing even while the browser is open',
   f.input.value='修正をお願いします';await f.api.send();
   assert.equal(f.calls.filter(c=>c.command==='preview_auto_route').length,1);
   assert.equal(f.calls.find(c=>c.command==='create_routed_task').args.request.autoRouteId,'route-1');
+  assert.equal(f.calls.find(c=>c.command==='create_routed_task').args.request.reviewedWrite,false);
   assert.equal(f.calls.find(c=>c.command==='send_composed_turn').args.options.mode,'default');
  }finally{f.close();}
 });
@@ -441,7 +499,10 @@ test('planning decision starts configured planner in plan mode without model sel
   assert.equal(f.document.querySelector('#task-mode').value,'codex-plan');
   f.api.selectedView().messages.push({role:'assistant',text:'計画です',key:'plan'});f.api.render();
   const start=f.document.querySelector('#implement-plan');assert.equal(start.hidden,false);start.click();await new Promise(r=>setTimeout(r,10));
-  assert.equal(f.calls.filter(c=>c.command==='create_routed_task').length,1);assert.equal(f.calls.filter(c=>c.command==='send_composed_turn').at(-1).args.options.mode,'default');
+  assert.equal(f.calls.filter(c=>c.command==='create_routed_task').length,1);
+  assert.equal(f.calls.filter(c=>c.command==='send_composed_turn').length,1);
+  assert.equal(f.document.querySelector('#task-mode').value,'autonomous');
+  assert.match(f.input.value,/計画です/);
  }finally{f.close();}
 });
 test('confirmation preference and unavailable planner preserve the unsent request',async()=>{

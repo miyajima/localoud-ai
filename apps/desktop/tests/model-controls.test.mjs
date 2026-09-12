@@ -22,3 +22,16 @@ test('provider default is distinct from an explicit reasoning value and labels a
 test('a retired browser target never resolves to a Codex model with the same ID',()=>{
  const [model,effort]=controls();fillModelSelect(model,models,{provider:'chatgpt',model:'remote',reasoning:null});fillReasoningSelect(effort,models[1]);assert.equal(readTarget(model,effort,models),null);assert.ok(model.selectedOptions[0].disabled);
 });
+
+test('the same model ID on two API profiles remains profile-qualified and resolves exactly',()=>{
+ const providers=[
+  {key:'api:alpha:same',label:'Alpha / Same',model:'same',profile_id:'alpha',local:false,reasoning:['high'],tools:true,default_reasoning:null,is_default:false},
+  {key:'api:beta:same',label:'Beta / Same',model:'same',profile_id:'beta',local:false,reasoning:['high'],tools:true,default_reasoning:null,is_default:false},
+ ];
+ const [model,effort]=controls();
+ fillModelSelect(model,providers,{provider:'api',profile_id:'beta',model:'same',reasoning:'high'});
+ fillReasoningSelect(effort,providers[1],'high');
+ assert.equal(model.selectedOptions[0].textContent,'Beta / Same');
+ assert.deepEqual(readTarget(model,effort,providers),{provider:'api',profile_id:'beta',model:'same',reasoning:'high'});
+ assert.deepEqual(Array.from(model.options).filter(option=>option.value).map(option=>option.textContent),['Alpha / Same','Beta / Same']);
+});

@@ -24,3 +24,6 @@ main{height:100vh;min-height:0}#content{min-height:0}#memory-settings{padding:24
 #project-context-menu p{font-size:0.75rem;padding:8px;margin:0}
 .project-row .project-more{flex-shrink:0}
 #total-usage{border-top:1px solid #ddd;margin-top:24px;overflow:auto}
+.provider-profile{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--border,#d8d8d8)}
+.provider-profile>div{display:grid;gap:3px;min-width:0;overflow-wrap:anywhere}
+.provider-profile small{display:block;color:var(--muted,#666)}

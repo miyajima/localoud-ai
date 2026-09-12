@@ -14,6 +14,7 @@ hub-events = { path = "../hub-events" }
 hub-policy = { path = "../hub-policy" }
 hub-router = { path = "../hub-router" }
 provider-spark = { path = "../provider-spark" }
+provider-api = { path = "../provider-api" }
 serde.workspace = true
 serde_json.workspace = true
 cap-std = "3"
@@ -22,6 +23,6 @@ hub-context = { path = "../hub-context" }
 hub-worktree = { path = "../hub-worktree" }
 hub-scheduler = { path = "../hub-scheduler" }
 async-trait.workspace = true
+tempfile = "3"
 [dev-dependencies]
 provider-codex = { path = "../provider-codex" }
-tempfile = "3"

@@ -24,7 +24,7 @@ import {setupComposer} from './composer';
 import type {Mention} from './composer-model';
 let composer:ReturnType<typeof setupComposer>|undefined;
 let preparingComposer=false;
-import {appendModelOptions,fillReasoningSelect,readTarget,resolvedModel} from './model-controls';
+import {appendModelOptions,fillReasoningSelect,profileForChoice,readTarget,resolvedModel} from './model-controls';
 import type {ModelChoice,ModelTarget} from './model-controls';
 import {setupAutoRouting,showAutoPreview,openAutoSettings} from './auto-routing';
 import type {AutoPreview,AutoSettings} from './auto-routing';
@@ -38,7 +38,7 @@ async function invoke<T = unknown>(command: string, args?: Record<string, unknow
 }
 type Project = { id: string; name: string; root: string };
 type Thread = { id: string; project_id: string; provider_thread_id: string; provider: string; title: string; status: string };
-type AgentEvent = { thread_id: string | null; turn_id: string | null; item_id: string | null; kind: string; text: string };
+type AgentEvent = { thread_id: string | null; turn_id: string | null; item_id: string | null; kind: string; text: string; details?:({type:string;command?:string;exit_code?:number|null;[key:string]:unknown}|null) };
 type JournalEvent = { sequence: number; event: AgentEvent };
 type ChatMessage = { role: string; text: string; key: string; label?:string };
 type Snapshot = { active_turn: { id: string } | null; messages: { role: string; text: string }[] };
@@ -72,7 +72,7 @@ async function refreshAutonomous(id:string){
 async function loadAutonomous(id:string){
   const snapshot=await invoke<{thread:Thread;messages:ChatMessage[];steps:WorkerStep[];children?:{id:string;provider_thread?:{id:string}|null;turn?:{id:string}|null}[];artifact_version:string|null;source_head:string;iteration:number;final_diff:string|null;artifact:{path:string}|null;manifest?:{manifest_id:string;request:string;acceptance?:string[]};review?:{manifest_id:string;verdict:string;summary:string;findings:string[]}}>('autonomous_snapshot',{threadId:id});
   const v=view(id);v.messages=(snapshot.messages||[]).filter(m=>!m.role.endsWith('_evidence')).map((m,i)=>({...m,key:m.key||`autonomous-${i}`}));
-  v.running=['queued','running','integrating','dispatching','stopping'].includes(snapshot.thread.status);v.needsResume=['interrupted','failed','reconciliation_required'].includes(snapshot.thread.status);
+  v.running=['queued','running','integrating','dispatching','stopping'].includes(snapshot.thread.status);v.needsResume=['interrupted','failed','reconciliation_required','awaiting_review','needs_attention'].includes(snapshot.thread.status);
   v.route=snapshot.steps?.map(s=>`${s.step.title} · ${statusLabel(s.status)} · 難易度${s.step.level} · ${s.target.model}${s.target.reasoning?' / '+s.target.reasoning:''}`).join('\n')||'Manifestの実行記録';if(snapshot.final_diff!==null)v.diff=snapshot.final_diff;if(snapshot.artifact&&!v.running)v.messages.push({role:'assistant',text:`成果物の作業フォルダ: ${snapshot.artifact.path}`,key:'autonomous-artifact'});
   if(snapshot.artifact_version)v.messages.push({role:'assistant',key:'review-target',text:`レビュー対象ID: ${id}\n版: ${snapshot.artifact_version}\n基準revision: ${snapshot.source_head}\n試行: ${snapshot.iteration}\n状態: ${statusLabel(snapshot.thread.status)}`});
   const evidence=snapshot.steps.flatMap(s=>(s.verification||[]).map(e=>`${s.step.title}: ${e.status||'unknown'} · ${e.command||'ファイル照合'} · 終了コード ${e.exit_code??'不明／対象外'}\n対象版: ${e.target_revision||'不明'}\nログ: ${e.log_ref||'記録内'}\n${(e.output||'').slice(0,500)}`));
@@ -117,15 +117,15 @@ function selectedReasoning(){return (document.querySelector('#reasoning') as HTM
 function refreshComposerReasoning(){
   const select=document.querySelector<HTMLSelectElement>('#reasoning')!;
   if(!activeThread&&(document.querySelector('#preference') as HTMLSelectElement).value==='auto'){select.replaceChildren(new Option('Auto 設定を使用',''));select.disabled=true;return;}
-  const current=threads.find(t=>t.id===activeThread);
-  const model=activeThread&&!autonomousMode()?modelChoices.find(m=>m.model===threadModels[activeThread!]&&m.local===(current?.provider==='spark')):selectedModel();
+  const model=activeThread&&!autonomousMode()?modelForThread(activeThread):selectedModel();
   fillReasoningSelect(select,model,activeThread&&!autonomousMode()?threadReasoning[activeThread]||null:composerReasoning);
-  select.disabled ||= (!!activeThread&&!autonomousMode())||busy;
+  select.disabled ||= busy||!!selectedView()?.running||threads.find(t=>t.id===activeThread)?.provider==='spark';
 }
 type LocalConfig = {endpoint:string;model_id:string;display_name:string;quantization_bits:number};
-let modelChoices:ModelChoice[]=[], modelWarnings:string[]=[], threadModels:Record<string,string>={}, localConfig:LocalConfig|null=null;
+let modelChoices:ModelChoice[]=[], modelWarnings:string[]=[], threadModels:Record<string,string>={}, threadTargets:Record<string,ModelTarget>={}, localConfig:LocalConfig|null=null;
 let loadingModels=false;let modelRefresh:Promise<void>|null=null;let pendingPreference:string|undefined;
-function threadModelLabel(t:Thread|undefined){if(t?.provider==='autonomous')return 'Manifest worker';return t ? threadModels[t.id] || (t.provider==='spark'?'ローカルモデル（過去のタスク）':'モデル未取得') : '';}
+function modelForThread(id:string|null){const target=id?threadTargets[id]:null;return target?modelChoices.find(m=>profileForChoice(m)===(target.profile_id||(target.provider==='codex'?'codex':'spark'))&&m.model===target.model):undefined;}
+function threadModelLabel(t:Thread|undefined){if(t?.provider==='autonomous')return 'Manifest worker';const model=t?modelForThread(t.id):undefined;return t ? model?.label || threadModels[t.id] || (t.provider==='spark'?'ローカルモデル（過去のタスク）':'モデル未取得') : '';}
 function chatgptSelected(){return autonomousMode()||legacyThread();}
 function selectedModel(){return resolvedModel(modelChoices.find(m=>m.key===(document.querySelector('#preference') as HTMLSelectElement).value),(document.querySelector('#reasoning') as HTMLSelectElement).value||composerReasoning);}
 function planningMode(){return (document.querySelector('#task-mode') as HTMLSelectElement).value==='plan';}
@@ -152,7 +152,7 @@ function renderModelHint(){
   const m=selectedModel(), select=document.querySelector<HTMLSelectElement>('#preference')!;
   const hint=document.querySelector<HTMLElement>('#model-hint')!;
   hint.hidden=!!activeThread&&!loadingModels;
-  hint.textContent=autonomousMode()?'ChatGPT Web · 依頼をコピーして貼り付けます。計画の取り込み後に実行します。':loadingModels?'モデル一覧を確認中…':activeThread?'実行先: '+threadModelLabel(threads.find(t=>t.id===activeThread)):composerMode()==='codex-plan'?'Codexで計画を相談します。内容がよければ「この計画で実装」から進めます。':composerMode()==='goal'?'Codex · 入力した目標をゴールに設定して実行します。':planningMode()?'実行計画を作ります。実装は計画の確認後に開始します。':m?.local?'この端末で実行 · 対象ファイルを1〜2件、入力欄の下で指定してください。':select.value==='auto'?'おまかせ · 設定に沿って担当を選びます。大きな依頼は計画から始めます。':m?'Codexで実行 · '+m.label:'モデルを取得できません。接続設定で確認できます。';
+  hint.textContent=autonomousMode()?'ChatGPT Web · 計画の取り込み後に、専用worktreeで実装・別セッションレビューを行います。':loadingModels?'モデル一覧を確認中…':activeThread?'実行先: '+threadModelLabel(threads.find(t=>t.id===activeThread)):composerMode()==='codex-plan'?'選択したクラウドモデルで読み取り専用の計画相談を行います。実装は「計画して実装」から進めます。':composerMode()==='goal'?'Codex · 読み取り専用でゴールを相談します。実装は「計画して実装」から進めます。':planningMode()?'実行計画を作ります。実装は計画の確認後に開始します。':m?.local?'この端末でレビュー付き実装 · 対象ファイルを1〜2件、入力欄の下で指定してください。':select.value==='auto'?'おまかせ · 対象ファイル指定時はレビュー付き実装、未指定時は読み取り専用で相談します。':m?'対象ファイル指定時はレビュー付き実装、未指定時は読み取り専用で相談 · '+m.label:'モデルを取得できません。接続設定で確認できます。';
   const localFiles=document.querySelector<HTMLElement>('#local-scope');
   if(localFiles)localFiles.hidden=!(m?.local&&!autonomousMode()||threads.find(t=>t.id===activeThread)?.provider==='spark'||document.querySelector<HTMLInputElement>('#known-files')?.value.trim());
 }
@@ -163,7 +163,7 @@ function refreshModels():Promise<void>{
 }
 async function loadModels(){
   loadingModels=true;renderModelHint();
-  try{const result=await invoke<{models:ModelChoice[];warnings:string[]}>('available_models');modelChoices=result.models;modelWarnings=result.warnings;[threadModels,threadReasoning]=await Promise.all([invoke<Record<string,string>>('thread_models'),invoke<Record<string,string>>('thread_reasoning')]);updateModelOptions();}
+  try{const result=await invoke<{models:ModelChoice[];warnings:string[]}>('available_models');modelChoices=result.models;modelWarnings=result.warnings;[threadModels,threadReasoning,threadTargets]=await Promise.all([invoke<Record<string,string>>('thread_models'),invoke<Record<string,string>>('thread_reasoning'),invoke<Record<string,ModelTarget>>('thread_model_targets')]);updateModelOptions();}
   catch(e){error(String(e),{label:'再試行',run:()=>refreshModels()});}finally{loadingModels=false;render();}
 }
 type UiState = {project?:string|null;thread?:string|null;tab?:string;sidebarHidden?:boolean;defaultMode?:string;pins?:string[];drafts?:Record<string,Draft>;plans?:Record<string,string>;planningRequests?:Record<string,string>;reviewRequests?:Record<string,string>;expandedProjects?:string[];pinnedProjects?:string[]};
@@ -250,24 +250,27 @@ function formBusy(form:HTMLFormElement,value:boolean){
 const more=document.createElement('details');more.id='compose-more';more.innerHTML='<summary aria-label="入力オプション" title="入力オプション"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></summary><div class="compose-more-panel"></div>';
 document.querySelector('.executor-controls')!.prepend(more);
 document.querySelector('.compose')!.prepend(document.querySelector('#operation')!);
-document.querySelector('[data-operation="implement"]')!.textContent='実行する';
-document.querySelector('[data-operation="autonomous"]')!.textContent='ChatGPTで計画';
-more.querySelector('div')!.insertAdjacentHTML('beforeend','<label for="advanced-operation">追加の操作</label><select id="advanced-operation"><option value="">選択…</option><option value="implement">通常実行（選択モデル）</option><option value="codex-plan">Codexで相談</option><option value="goal">Codexでゴールを実行</option></select>');
+document.querySelector('[data-operation="implement"]')!.textContent='相談・対象実装';
+document.querySelector('[data-operation="autonomous"]')!.textContent='計画して実装';
+more.querySelector('div')!.insertAdjacentHTML('beforeend','<label for="advanced-operation">追加の操作</label><select id="advanced-operation"><option value="">選択…</option><option value="implement">相談／対象ファイルを実装</option><option value="codex-plan">選択モデルで計画を相談</option><option value="goal">Codexでゴールを相談</option></select>');
 document.querySelectorAll<HTMLButtonElement>('[data-operation]').forEach(button=>button.addEventListener('click',()=>{if(button.getAttribute('aria-pressed')!=='true')choosePhase(button.dataset.operation!);}));
 document.querySelector('#advanced-operation')!.addEventListener('change',e=>{const mode=(e.target as HTMLSelectElement).value;if(!mode||busy||selectedView()?.running)return;(document.querySelector('#task-mode') as HTMLSelectElement).value=mode;pendingPreference=undefined;composerReasoning=null;updateModelOptions('');saveDraft();render();more.open=false;});
 for(const id of ['auto-settings-button','refresh-models'])more.querySelector('div')!.append(document.getElementById(id)!);
 const localScope=document.createElement('div');localScope.id='local-scope';localScope.hidden=true;
 localScope.innerHTML='<label for="known-files">対象ファイル</label>';
 localScope.append(document.getElementById('known-files')!);document.querySelector('.compose-controls')!.before(localScope);
-const implementPlan=document.createElement('button');implementPlan.id='implement-plan';implementPlan.type='button';implementPlan.textContent='この計画で実装';implementPlan.hidden=true;
+const implementPlan=document.createElement('button');implementPlan.id='implement-plan';implementPlan.type='button';implementPlan.textContent='この計画を実行用に確認';implementPlan.hidden=true;
 document.querySelector('#execution-source')!.after(implementPlan);
-implementPlan.onclick=()=>{if(busy||selectedView()?.running||selectedView()?.needsResume||!activeThread)return;if(!setComposerMode('implement'))return;const input=document.querySelector<HTMLTextAreaElement>('#task-input')!;if(!input.value.trim())input.value='この計画に沿って実装し、必要な検証を行ってください。';void send();};
+implementPlan.onclick=()=>{if(busy||selectedView()?.running||selectedView()?.needsResume||!activeThread)return;const proposal=selectedView()?.messages.filter(message=>message.role==='assistant').at(-1)?.text||'この計画';newTask();chooseAutonomous();const input=document.querySelector<HTMLTextAreaElement>('#task-input')!;input.value=`次の案を実行可能なManifestとして確認し、対象範囲・合格条件・担当を明確にしてください。\n\n${proposal}`;render();focusComposer();};
   const browserWorkspace=setupBrowserWorkspace(invoke);
-const openManifestReview=setupManifestReview(invoke,sendAutonomous);
+const openManifestReview=setupManifestReview(invoke,sendAutonomous,()=>modelChoices);
 const quota=document.querySelector<HTMLElement>('#chatgpt-usage')!;document.querySelector('#settings-form')!.append(quota);
 const recordChatGptTurn=setupChatGptUsage(quota);
 if(isTauri())void listen<CompletedTurn>('chatgpt-turn-completed',event=>recordChatGptTurn(event.payload));
 document.querySelector('#settings-form')!.insertAdjacentHTML('beforeend','<section id="total-usage"></section>');
+const localSettingsFieldset=document.querySelector<HTMLFieldSetElement>('#settings-form fieldset')!;
+localSettingsFieldset.insertAdjacentHTML('afterend','<fieldset id="provider-settings"><legend>API providers</legend><p>APIキー値は保存しません。アプリ起動時に参照する環境変数名だけを登録します。profile保存時はモデル一覧の取得だけを行います。</p><div id="provider-profile-list"></div><button id="provider-profile-add" type="button">API providerを追加</button></fieldset>');
+document.body.insertAdjacentHTML('beforeend','<dialog id="provider-profile-dialog"><form id="provider-profile-form"><h2>API provider</h2><input id="provider-revision" type="hidden"><label for="provider-id">Profile ID</label><input id="provider-id" required pattern="[A-Za-z0-9_-]{1,80}" spellcheck="false"><label for="provider-name">表示名</label><input id="provider-name" required maxlength="120"><label for="provider-protocol">API形式</label><select id="provider-protocol"><option value="open_ai_chat">OpenAI互換 Chat Completions</option><option value="open_ai_responses">OpenAI Responses</option><option value="anthropic_messages">Anthropic Messages</option></select><label for="provider-locality">接続区分</label><select id="provider-locality"><option value="cloud">Cloud HTTPS</option><option value="local">Local loopback HTTP</option></select><label for="provider-base-url">API root URL</label><input id="provider-base-url" required spellcheck="false" placeholder="https://api.anthropic.com/v1"><label for="provider-credential-env">APIキーの環境変数名</label><input id="provider-credential-env" spellcheck="false" placeholder="ANTHROPIC_API_KEY"><label for="provider-concurrency">同時実行上限</label><input id="provider-concurrency" type="number" min="1" max="8" value="1" required><label><input id="provider-enabled" type="checkbox" checked>有効</label><p id="provider-profile-error" role="alert"></p><div class="dialog-actions"><button id="provider-profile-cancel" type="button">キャンセル</button><button type="submit" class="primary">接続確認して保存</button></div></form></dialog>');
 // The navigation toggle must remain outside the region it hides.
 let mobileSidebarOpen=false;
 const sidebarButton=document.querySelector<HTMLButtonElement>('#sidebar-toggle')!;
@@ -345,8 +348,12 @@ function render() {
   document.querySelector('main')!.classList.toggle('composing-task',!current&&activeTab==='Chat');
   const providerLabel = threadModelLabel(current);
   const modelSelect=document.querySelector<HTMLSelectElement>('#preference')!;
-  modelSelect.disabled = (!!activeThread&&!autonomousMode()) || busy;
-  if(current&&!autonomousMode()){const key=`thread:${current.id}`;let option=Array.from(modelSelect.options).find(o=>o.value===key);if(!option){option=new Option(threadModelLabel(current),key);modelSelect.add(option);}option.text=threadModelLabel(current);modelSelect.value=key;}
+  modelSelect.disabled = busy||!!v?.running||!!v?.needsResume||current?.provider==='spark'||autonomousMode();
+  if(current&&!autonomousMode()){
+    const selected=modelForThread(current.id);
+    if(selected)modelSelect.value=selected.key;
+    else {const key=`thread:${current.id}`;let option=Array.from(modelSelect.options).find(o=>o.value===key);if(!option){option=new Option(threadModelLabel(current),key);modelSelect.add(option);}option.text=threadModelLabel(current);modelSelect.value=key;}
+  }
   const status = document.querySelector<HTMLElement>('#status')!;
   status.textContent = importingManifest ? 'Manifest取り込み中…' : busy ? '処理中…' : v?.needsResume ? '状態確認が必要' : v?.running ? `${providerLabel} · 実行中` : current ? autonomousThread()?statusLabel(current.status):providerLabel : '';
   status.hidden=!status.textContent;
@@ -376,7 +383,7 @@ function render() {
   if(modelHealth.innerHTML!==healthMarkup){modelHealth.innerHTML=healthMarkup;modelHealth.querySelector('[data-model-health="refresh"]')?.addEventListener('click',()=>void refreshModels());modelHealth.querySelector('[data-model-health="settings"]')?.addEventListener('click',()=>document.querySelector<HTMLButtonElement>('#settings')!.click());}
   modelHealth.querySelectorAll<HTMLButtonElement>('button').forEach(b=>b.disabled=busy||loadingModels);
   modelPicker.hidden=autonomousMode();
-  const pickerModel=activeThread?modelChoices.find(m=>m.model===threadModels[activeThread!]):selectedModel();
+  const pickerModel=activeThread?modelForThread(activeThread):selectedModel();
   document.querySelector('#model-picker-name')!.textContent=(modelSelect.selectedOptions[0]?.textContent||'モデルを選択').replace(/^(GPT-\d+(?:\.\d+)?)-([A-Za-z])/, '$1 $2');
   const effort=document.querySelector<HTMLSelectElement>('#reasoning')!.value||pickerModel?.default_reasoning||'';
   document.querySelector('#model-picker-effort')!.textContent=pickerModel?.local||modelSelect.value==='auto'?'':({none:'なし',minimal:'最小',low:'軽',medium:'中',high:'高',xhigh:'最高',max:'最大',ultra:'最大'} as Record<string,string>)[effort]||effort;
@@ -495,7 +502,7 @@ function renderContent() {
   document.querySelector<HTMLButtonElement>('#copy-diff')?.addEventListener('click',e=>void copyText(v?.diff || '',e.currentTarget as HTMLButtonElement));
   bindMemory();
   document.querySelector('#capture-memory')?.addEventListener('click',async()=>{if(!activeThread||busy)return;const id=activeThread;busy=true;render();try{await invoke('extract_memory',{threadId:id});await refreshContext(id);}catch(e){error(String(e));}finally{busy=false;}});
-  document.querySelector('#astra-plan')?.addEventListener('click',()=>{newTask();(document.querySelector('#task-mode') as HTMLSelectElement).value='plan';updateModelOptions('');saveDraft();render();focusComposer();});
+  document.querySelector('#astra-plan')?.addEventListener('click',()=>{newTask();(document.querySelector('#task-mode') as HTMLSelectElement).value='codex-plan';updateModelOptions('');saveDraft();render();focusComposer();});
   document.querySelector('#final-review')?.addEventListener('click',()=>choosePhase('review'));
   document.querySelector('#diagnose')?.addEventListener('click',()=>void astraInsight('diagnose_task'));
   document.querySelector('#apply-recovery')?.addEventListener('click',async()=>{if(!activeThread||busy)return;busy=true;render();try{await invoke('apply_recovery',{threadId:activeThread});}catch(e){error(String(e));}finally{busy=false;render();}});
@@ -535,7 +542,15 @@ function applyEvent(record: JournalEvent, replay = false, deferred = false) {
   }
   if (e.kind === 'turn_started' && (!e.turn_id || !v.completedTurns?.has(e.turn_id))) { v.running = true; v.activeTurn=e.turn_id||undefined; thread.status = 'running'; }
   if (e.kind === 'turn_completed') { v.completedTurns??=new Set(); if(e.turn_id)v.completedTurns.add(e.turn_id); if(!e.turn_id||!v.activeTurn||v.activeTurn===e.turn_id){v.running=false;thread.status=e.text;} }
-  if (['error', 'approval_required'].includes(e.kind)) error(e.text);
+  if (e.kind === 'error') error(e.text);
+  if (!replay && e.kind === 'approval_required' && e.item_id) {
+    try {
+      const request=JSON.parse(e.text) as {executable:string;argv:string[];cwd:string;additional_permissions:string[]};
+      const prompt=`API workerが次のコマンドを一度だけ実行する承認を求めています。\n\n実行ファイル: ${request.executable}\nargv: ${JSON.stringify(request.argv)}\ncwd: ${request.cwd}\n追加権限: ${request.additional_permissions.join(', ')}\n\n承認しますか？`;
+      const approve=window.confirm(prompt);
+      void invoke('decide_api_tool_approval',{approvalId:e.item_id,approve}).catch(problem=>error(String(problem)));
+    } catch { error('承認要求の内容を検証できません。実行は保留されています。'); }
+  }
   if(!replay&&thread.id===activeThread&&activeTab==='Usage'&&['turn_completed','usage'].includes(e.kind))void refreshUsage();
   if(thread.id===activeThread&&['input_required','goal_updated','turn_completed'].includes(e.kind))void composer?.refreshThread();
   if (thread.id === activeThread&&!replay&&!deferred) render();
@@ -591,7 +606,7 @@ async function send(approvedRoute?:AutoPreview) {
   if(chatgptSelected()&&(cloudMode()||mentions.length||files.length)){error('ChatGPTでは通常の実装モードを使い、ファイル参照はCodexで行ってください。');return;}
   if(planningMode()&&mentions.length){error('参照・スキル等を使う計画は「プランモード（Codex）」で作成してください。');return;}
   if(!activeThread&&planningMode()){await astraPlan();void composer?.remember(text);return;}
-  const requiresCodex=cloudMode()||mentions.some(m=>m.kind!=='file');
+  const requiresCodex=composerMode()==='goal'||mentions.some(m=>m.kind!=='file');
   if(requiresCodex&&(activeThread||(document.querySelector('#preference') as HTMLSelectElement).value!=='auto')&&!(activeThread?threads.find(t=>t.id===activeThread)?.provider==='codex':selectedModel()&&!selectedModel()!.local)){error('このモード・スキル・プラグイン・サブエージェントの利用にはCodexのモデルを選択してください。');return;}
   if(selectedView()?.running&&mentions.length){error('参照を追加するときは、実行完了を待ってから送信してください。');return;}
   if(composerMode()==='goal'&&text.length>4000){error('ゴールは4000文字以内で指定してください。');return;}
@@ -608,22 +623,28 @@ async function send(approvedRoute?:AutoPreview) {
         approvedRoute=preview;
       }
       const autoPlan=key==='auto'&&!!approvedRoute?.needs_plan;
-      const autoExplore=key==='auto'&&!autoPlan&&approvedRoute?.level===null&&approvedRoute?.target?.provider==='codex';
+      const autoExplore=key==='auto'&&!autoPlan&&approvedRoute?.level===null&&['codex','api'].includes(approvedRoute?.target?.provider||'');
       let planTarget:ModelTarget|undefined;
       if(autoPlan){
         const config=await invoke<AutoSettings>('auto_settings');
-        planTarget=config.levels.find(row=>row.level===5)?.target;
-        if(!planTarget||planTarget.provider!=='codex')throw new Error('計画を作成するクラウドモデルが未設定です。「＋」の振り分け設定で難易度5のモデルを指定してください。');
-        choice=modelChoices.find(m=>!m.local&&m.model===planTarget!.model);
+        planTarget=config.planner_default||config.levels.find(row=>row.level===5)?.target;
+        if(!planTarget||planTarget.provider==='local')throw new Error('計画を作成するクラウドモデルが未設定です。「＋」の振り分け設定で難易度5のモデルを指定してください。');
+        choice=modelChoices.find(m=>profileForChoice(m)===(planTarget!.profile_id||(planTarget!.provider==='codex'?'codex':''))&&m.model===planTarget!.model);
         if(!choice)throw new Error('計画用モデルを利用できません。接続設定とモデル一覧を確認してください。');
         notice('まず計画を作成します。内容を確認してから実装へ進めます。');
       }
       if(!autoPlan)notice(autoExplore?'まず関連箇所を調査し、進め方を整理します。':'依頼を実行しています…');
       if(requiresCodex&&!autoPlan&&approvedRoute?.target?.provider==='local')throw new Error('この参照はCodexが必要です。「おまかせ」からクラウドモデルを指定してください。');
-      const result = await invoke<{thread:Thread;target:ModelTarget;route:{decision:{reason:string;executor:string}}}>('create_routed_task', { request:{projectId: activeProject, text, knownFiles:files, preference:autoPlan?'codex':key==='auto'?'auto':choice!.local?'spark':'codex',model:choice?.model??null,reasoning:autoPlan?planTarget!.reasoning:key==='auto'?null:selectedReasoning(),autoRouteId:autoPlan?null:approvedRoute?.id??null,autoRouteRevision:autoPlan?null:approvedRoute?.revision??null} });
+      const explicitProfile=choice?profileForChoice(choice):'';
+      const explicitPreference=explicitProfile==='spark'?'spark':explicitProfile==='codex'?'codex':'api';
+      const result = await invoke<{thread:Thread;target:ModelTarget;route:{decision:{reason:string;executor:string}};started:boolean}>('create_routed_task', { request:{projectId: activeProject, text, knownFiles:files, preference:autoPlan?(planTarget!.provider==='api'?'api':'codex'):key==='auto'?'auto':explicitPreference,profileId:(autoPlan?planTarget!.profile_id:(choice?profileForChoice(choice):null))??null,model:choice?.model??null,reasoning:autoPlan?planTarget!.reasoning:key==='auto'?null:selectedReasoning(),autoRouteId:autoPlan?null:approvedRoute?.id??null,autoRouteRevision:autoPlan?null:approvedRoute?.revision??null,reviewedWrite:!autoPlan&&!autoExplore&&files.length>0} });
       if(autoPlan||autoExplore)(document.querySelector('#task-mode') as HTMLSelectElement).value='codex-plan';
       const thread=result.thread; delete ui.drafts![draftKey()]; threads.unshift(thread); activeThread = thread.id; saveDraft(); rememberSelection(); view(thread.id).needsResume = false; view(thread.id).route=autoExplore?`調査から開始 · ${result.target.model}\n${approvedRoute!.reason}`:autoPlan?`計画から開始 · ${result.target.model}\n${approvedRoute!.blocked||approvedRoute!.reason}`:`${key==='auto'?'おまかせ · ':''}${result.target.model}\n${result.route.decision.reason}`;
-      threadModels[thread.id]=result.target.model;if(result.target.reasoning)threadReasoning[thread.id]=result.target.reasoning;
+      if(result.started&&thread.provider==='autonomous'){
+        (document.querySelector('#task-mode') as HTMLSelectElement).value='autonomous';
+        input.value='';composer?.clear();saveDraft();await refreshAutonomous(thread.id);return;
+      }
+      threadModels[thread.id]=result.target.model;threadTargets[thread.id]=result.target;if(result.target.reasoning)threadReasoning[thread.id]=result.target.reasoning;
       void invoke<Record<string,string>>('thread_models').then(models=>{threadModels=models;render();}).catch(e=>notice(String(e)));
     }
     const v = view(activeThread);
@@ -660,12 +681,63 @@ async function registerProject(path:string) {
   }
 }
 let settingsReady=false,settingsSaving=false,settingsLoading=false;
+type ProviderProfileStatus={id:string;name:string;protocol:'open_ai_chat'|'open_ai_responses'|'anthropic_messages'|'local_dedicated'|'codex_app_server';base_url:string|null;locality:'local'|'cloud';credential_env:string|null;max_concurrency:number;enabled:boolean;revision:number;credential_present:boolean};
+let providerProfiles:ProviderProfileStatus[]=[];
+function renderProviderProfiles(){
+ const list=document.querySelector<HTMLElement>('#provider-profile-list')!;
+ const editable=providerProfiles.filter(profile=>!['codex','spark'].includes(profile.id));
+ list.innerHTML=editable.length?editable.map(profile=>{const choices=modelChoices.filter(model=>profileForChoice(model)===profile.id);const needsCanary=['open_ai_chat','open_ai_responses'].includes(profile.protocol)&&(profile.base_url||'').replace(/\/$/,'')!=='https://api.openai.com/v1';return `<article class="provider-profile"><div><strong>${escape(profile.name)}</strong><small>${escape(profile.protocol)} · ${escape(profile.base_url||'')}</small><small>${profile.credential_env?`${escape(profile.credential_env)}: ${profile.credential_present?'設定済み':'未設定'}`:'認証なし'} · 同時実行 ${profile.max_concurrency} · ${profile.enabled?'有効':'無効'}</small>${choices.length?`<small>${choices.map(model=>`${escape(model.model)}: ${model.tools?'tool利用可':'read-only'}`).join(' · ')}</small>`:''}${needsCanary?`<label>tool canary対象モデル<select data-provider-canary-model="${escape(profile.id)}">${choices.map(model=>`<option value="${escape(model.model)}">${escape(model.model)}</option>`).join('')}</select></label><button type="button" data-provider-canary="${escape(profile.id)}" ${choices.length?'':'disabled'}>推論1回でtool機能を確認</button>`:''}</div><button type="button" data-provider-edit="${escape(profile.id)}">編集</button></article>`;}).join(''):'<p class="muted">API providerはまだありません。</p>';
+ list.querySelectorAll<HTMLButtonElement>('[data-provider-edit]').forEach(button=>button.onclick=()=>openProviderProfile(providerProfiles.find(profile=>profile.id===button.dataset.providerEdit)));
+ list.querySelectorAll<HTMLButtonElement>('[data-provider-canary]').forEach(button=>button.onclick=async()=>{const profileId=button.dataset.providerCanary!;const modelId=Array.from(list.querySelectorAll<HTMLSelectElement>('[data-provider-canary-model]')).find(select=>select.dataset.providerCanaryModel===profileId)?.value;if(!modelId)return;if(!window.confirm(`${profileId} / ${modelId} にtool canaryを1回送信します。API課金が発生する可能性があります。実行しますか？`))return;button.disabled=true;try{await invoke('run_provider_tool_canary',{profileId,modelId});notice(`${profileId} / ${modelId} のtool機能を確認しました。`);await refreshModels();renderProviderProfiles();}catch(e){error(String(e));}finally{button.disabled=false;}});
+}
+function openProviderProfile(profile?:ProviderProfileStatus){
+ const value=(id:string)=>(document.getElementById(id) as HTMLInputElement|HTMLSelectElement);
+ value('provider-revision').value=profile?String(profile.revision):'0';
+ value('provider-id').value=profile?.id||'';(value('provider-id') as HTMLInputElement).readOnly=!!profile;
+ value('provider-name').value=profile?.name||'';
+ value('provider-protocol').value=profile?.protocol||'anthropic_messages';
+ value('provider-locality').value=profile?.locality||'cloud';
+ value('provider-base-url').value=profile?.base_url||(profile?.protocol==='open_ai_responses'?'https://api.openai.com/v1':'https://api.anthropic.com/v1');
+ value('provider-credential-env').value=profile?.credential_env||(profile?.protocol==='open_ai_responses'?'OPENAI_API_KEY':'ANTHROPIC_API_KEY');
+ value('provider-concurrency').value=String(profile?.max_concurrency||1);
+ (document.getElementById('provider-enabled') as HTMLInputElement).checked=profile?.enabled??true;
+ document.getElementById('provider-profile-error')!.textContent='';
+ (document.getElementById('provider-profile-dialog') as HTMLDialogElement).showModal();
+}
+document.getElementById('provider-profile-add')!.addEventListener('click',()=>openProviderProfile());
+document.getElementById('provider-profile-cancel')!.addEventListener('click',()=>document.querySelector<HTMLDialogElement>('#provider-profile-dialog')!.close());
+document.getElementById('provider-protocol')!.addEventListener('change',()=>{
+ const protocol=(document.getElementById('provider-protocol') as HTMLSelectElement).value;
+ if(protocol==='anthropic_messages'){
+  (document.getElementById('provider-base-url') as HTMLInputElement).value='https://api.anthropic.com/v1';
+  (document.getElementById('provider-credential-env') as HTMLInputElement).value='ANTHROPIC_API_KEY';
+  (document.getElementById('provider-locality') as HTMLSelectElement).value='cloud';
+ }else if(protocol==='open_ai_responses'){
+  (document.getElementById('provider-base-url') as HTMLInputElement).value='https://api.openai.com/v1';
+  (document.getElementById('provider-credential-env') as HTMLInputElement).value='OPENAI_API_KEY';
+ }
+});
+document.getElementById('provider-profile-form')!.addEventListener('submit',async event=>{
+ event.preventDefault();const form=event.currentTarget as HTMLFormElement;if(!form.reportValidity())return;
+ const input=(id:string)=>(document.getElementById(id) as HTMLInputElement).value.trim();
+ const revision=Number(input('provider-revision'));
+ const profile={id:input('provider-id'),name:input('provider-name'),protocol:(document.getElementById('provider-protocol') as HTMLSelectElement).value,base_url:input('provider-base-url'),locality:(document.getElementById('provider-locality') as HTMLSelectElement).value,credential_env:input('provider-credential-env')||null,max_concurrency:Number(input('provider-concurrency')),enabled:(document.getElementById('provider-enabled') as HTMLInputElement).checked,revision:revision?revision+1:1};
+ formBusy(form,true);document.getElementById('provider-profile-error')!.textContent='';
+ try{
+  const models=await invoke<{id:string}[]>('set_provider_profile',{profile});
+  providerProfiles=await invoke<ProviderProfileStatus[]>('provider_profiles');renderProviderProfiles();
+  document.querySelector<HTMLDialogElement>('#provider-profile-dialog')!.close();
+  notice(`${profile.name}を保存しました。${models.length?` ${models.length}モデルを確認しました。`:''}`);void refreshModels();
+ }catch(e){document.getElementById('provider-profile-error')!.textContent=String(e);}
+ finally{formBusy(form,false);}
+});
 async function loadConnectionSettings(){
  if(settingsLoading)return;settingsLoading=true;settingsReady=false;
  const form=document.querySelector<HTMLFormElement>('#settings-form')!,summary=document.querySelector<HTMLElement>('#settings-error')!;
  formBusy(form,true);form.dataset.loading='true';document.querySelector<HTMLButtonElement>('#settings-cancel')!.disabled=false;form.querySelector<HTMLButtonElement>('[type="submit"]')!.textContent='読み込み中…';summary.textContent='';
  try{
-  const [local,path,config]=await Promise.all([invoke<LocalConfig>('local_model_settings'),invoke<string>('codex_binary'),invoke<{mode:string;model:string;reasoning:string|null}>('astra_settings')]);
+  const [local,path,config,profiles]=await Promise.all([invoke<LocalConfig>('local_model_settings'),invoke<string>('codex_binary'),invoke<{mode:string;model:string;reasoning:string|null}>('astra_settings'),invoke<ProviderProfileStatus[]>('provider_profiles')]);
+  providerProfiles=profiles;renderProviderProfiles();
   localConfig=local;for(const [id,value] of Object.entries({'local-name':local.display_name,'local-id':local.model_id,'local-endpoint':local.endpoint,'codex-path':path,'astra-mode':config.mode,'astra-model':config.model}))(document.getElementById(id) as HTMLInputElement|HTMLSelectElement).value=value;
   fillReasoningSelect(document.querySelector<HTMLSelectElement>('#astra-reasoning')!,modelChoices.find(m=>!m.local&&m.model===config.model),config.reasoning);settingsReady=true;
   form.querySelectorAll<HTMLInputElement>('input').forEach(field=>{field.removeAttribute('aria-invalid');document.getElementById(`${field.id}-error`)!.textContent='';});
@@ -714,7 +786,6 @@ composer=setupComposer({call:invoke,localOnly:chatgptSelected,project:()=>active
 setupAutoRouting({call:invoke,models:()=>modelChoices,refresh:refreshModels,busy:()=>busy,run:preview=>void send(preview),plan:preview=>void send(preview),notice});
 document.querySelector('#auto-settings-button')!.addEventListener('click',()=>void openAutoSettings());
 document.querySelector('#astra-model')!.addEventListener('input',()=>fillReasoningSelect(document.querySelector<HTMLSelectElement>('#astra-reasoning')!,modelChoices.find(m=>!m.local&&m.model===(document.querySelector('#astra-model') as HTMLInputElement).value)));
-document.querySelector('#reasoning')!.addEventListener('change',()=>{composerReasoning=selectedReasoning();saveDraft();render();});
 window.addEventListener('unhandledrejection', e => error(String(e.reason)));
 window.addEventListener('error', e => error(e.message));
 
@@ -873,7 +944,26 @@ document.addEventListener('keydown',e=>{
 });
 
 document.querySelector('#task-mode')!.addEventListener('change',()=>{pendingPreference=undefined;composerReasoning=null;updateModelOptions('');saveDraft();render();});
-document.querySelector('#preference')!.addEventListener('change',()=>{composerReasoning=null;refreshComposerReasoning();pendingPreference=(document.querySelector('#preference') as HTMLSelectElement).value;saveDraft();render();});
+async function saveActiveModelTarget(){
+  if(!activeThread||autonomousMode()||busy)return;
+  const target=readTarget(document.querySelector<HTMLSelectElement>('#preference')!,document.querySelector<HTMLSelectElement>('#reasoning')!,modelChoices);
+  if(!target){error('利用できるモデルとreasoningを選択してください。');return;}
+  if(target.provider==='local'){error('既存セッションはbounded localモデルへ切り替えられません。新しいタスクを作成してください。');return;}
+  const id=activeThread;busy=true;error('');render();
+  try{
+    await invoke('set_thread_model_target',{threadId:id,target});
+    threadTargets[id]=target;threadModels[id]=target.model;
+    if(target.reasoning)threadReasoning[id]=target.reasoning;else delete threadReasoning[id];
+    threads=await invoke<Thread[]>('threads');
+    notice(`次のターンは ${modelChoices.find(m=>profileForChoice(m)===(target.profile_id||(target.provider==='codex'?'codex':'spark'))&&m.model===target.model)?.label||target.model} を使います。`);
+  }catch(e){error(String(e));await refreshModels();}
+  finally{busy=false;render();}
+}
+document.querySelector('#preference')!.addEventListener('change',()=>{
+  composerReasoning=null;refreshComposerReasoning();pendingPreference=(document.querySelector('#preference') as HTMLSelectElement).value;
+  if(activeThread)void saveActiveModelTarget();else {saveDraft();render();}
+});
+document.querySelector('#reasoning')!.addEventListener('change',()=>{if(activeThread)void saveActiveModelTarget();else {composerReasoning=selectedReasoning();saveDraft();render();}});
 document.querySelector('#refresh-models')!.addEventListener('click',()=>void refreshModels());
 
 document.querySelector('#show-archived')!.addEventListener('click',()=>{showArchived=!showArchived;renderThreads();});

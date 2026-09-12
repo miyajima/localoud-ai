@@ -10,16 +10,12 @@ use std::time::{Duration, Instant};
 /// `Dedicated` is the historical Localoud contract. `OpenAiChat` adapts the
 /// common llama.cpp/OpenAI-compatible `/v1/chat/completions` API to the same
 /// structured provider interface.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalProtocol {
+    #[default]
     Dedicated,
     OpenAiChat,
-}
-impl Default for LocalProtocol {
-    fn default() -> Self {
-        Self::Dedicated
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

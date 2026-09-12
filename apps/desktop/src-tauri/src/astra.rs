@@ -17,7 +17,7 @@ pub struct Settings {
 pub fn astra_settings(state: tauri::State<AppState>) -> Result<Settings, String> {
     settings(&state)
 }
-fn settings(state: &AppState) -> Result<Settings, String> {
+pub(crate) fn settings(state: &AppState) -> Result<Settings, String> {
     let s = state.store.lock().map_err(|e| e.to_string())?;
     match s.setting("astra_settings").map_err(|e| e.to_string())? {
         Some(v) => serde_json::from_str(&v).map_err(|e| e.to_string()),

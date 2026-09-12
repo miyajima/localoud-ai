@@ -20,7 +20,9 @@ pub struct BrowserBounds {
 }
 
 fn valid_bounds(b: &BrowserBounds) -> bool {
-    [b.x, b.y, b.width, b.height, b.viewport_height].iter().all(|n| n.is_finite())
+    [b.x, b.y, b.width, b.height, b.viewport_height]
+        .iter()
+        .all(|n| n.is_finite())
         && b.x >= 0.0
         && b.y >= 0.0
         && b.width >= 1.0
@@ -31,7 +33,10 @@ fn valid_bounds(b: &BrowserBounds) -> bool {
 }
 
 #[tauri::command]
-pub async fn browser_layout(app: tauri::AppHandle, mut bounds: BrowserBounds) -> Result<(), String> {
+pub async fn browser_layout(
+    app: tauri::AppHandle,
+    mut bounds: BrowserBounds,
+) -> Result<(), String> {
     if !valid_bounds(&bounds) {
         return Err("invalid browser bounds".into());
     }
@@ -42,7 +47,11 @@ pub async fn browser_layout(app: tauri::AppHandle, mut bounds: BrowserBounds) ->
     {
         let window = app.get_window("main").ok_or("main window missing")?;
         let scale = window.scale_factor().map_err(|e| e.to_string())?;
-        let height = window.inner_size().map_err(|e| e.to_string())?.to_logical::<f64>(scale).height;
+        let height = window
+            .inner_size()
+            .map_err(|e| e.to_string())?
+            .to_logical::<f64>(scale)
+            .height;
         bounds.y += (height - bounds.viewport_height).max(0.0);
     }
     let view = match app.get_webview(LABEL) {
@@ -58,11 +67,13 @@ pub async fn browser_layout(app: tauri::AppHandle, mut bounds: BrowserBounds) ->
             .data_store_identifier(DATA_STORE)
             .initialization_script(include_str!("chatgpt-usage-observer.js"))
             .on_navigation(move |url| {
-                if url.scheme()=="localoud-usage" {
-                    if let Some(event)=usage_event(url) { let _=usage_app.emit_to("main","chatgpt-turn-completed",event); }
+                if url.scheme() == "localoud-usage" {
+                    if let Some(event) = usage_event(url) {
+                        let _ = usage_app.emit_to("main", "chatgpt-turn-completed", event);
+                    }
                     return false;
                 }
-                url.scheme()=="https"
+                url.scheme() == "https"
             })
             .on_new_window(move |url, features| {
                 if url.scheme() != "https" && url.as_str() != "about:blank" {
@@ -145,13 +156,32 @@ mod tests {
 }
 
 #[derive(Clone, serde::Serialize)]
-struct UsageEvent { id: String, model: String, duration: u64 }
+struct UsageEvent {
+    id: String,
+    model: String,
+    duration: u64,
+}
 fn usage_event(url: &tauri::Url) -> Option<UsageEvent> {
-    if url.host_str()!=Some("completed") { return None; }
-    let fields: std::collections::HashMap<_,_>=url.query_pairs().collect();
-    let id=fields.get("id")?.to_string();
-    let model=fields.get("model")?.to_string();
-    let duration=fields.get("duration")?.parse::<u64>().ok()?;
-    if id.is_empty() || id.len()>128 || !id.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'-'||b==b'_') || !matches!(model.as_str(),"astra"|"sol"|"unknown") || duration>86_400_000 { return None; }
-    Some(UsageEvent{id,model,duration})
+    if url.host_str() != Some("completed") {
+        return None;
+    }
+    let fields: std::collections::HashMap<_, _> = url.query_pairs().collect();
+    let id = fields.get("id")?.to_string();
+    let model = fields.get("model")?.to_string();
+    let duration = fields.get("duration")?.parse::<u64>().ok()?;
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        || !matches!(model.as_str(), "astra" | "sol" | "unknown")
+        || duration > 86_400_000
+    {
+        return None;
+    }
+    Some(UsageEvent {
+        id,
+        model,
+        duration,
+    })
 }

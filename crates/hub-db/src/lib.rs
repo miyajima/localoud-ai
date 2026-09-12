@@ -1,7 +1,70 @@
 use anyhow::{bail, Context, Result};
 use hub_core::{HubThreadId, Project, ProjectId, ThreadMapping};
 use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::Value;
 use std::path::Path;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderSegmentRecord {
+    pub id: String,
+    pub thread_id: HubThreadId,
+    pub target: protocol_types::providers::ModelTarget,
+    pub profile_revision: u64,
+    pub provider_thread_id: Option<String>,
+    pub ended: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnTargetRecord {
+    pub turn_id: String,
+    pub thread_id: HubThreadId,
+    pub segment_id: String,
+    pub target: protocol_types::providers::ModelTarget,
+    pub profile_revision: u64,
+    pub resolved_from: protocol_types::providers::TargetResolution,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderMessageRecord {
+    pub id: String,
+    pub thread_id: HubThreadId,
+    pub segment_id: Option<String>,
+    pub provider_turn_id: Option<String>,
+    pub role: protocol_types::providers::TranscriptRole,
+    pub content: Vec<protocol_types::providers::ContentBlock>,
+    pub provider_state: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderTurnOutcomeRecord {
+    pub turn_id: String,
+    pub thread_id: HubThreadId,
+    pub status: String,
+    pub stop_reason: Option<String>,
+    pub failure_kind: Option<String>,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolApprovalRecord {
+    pub id: String,
+    pub thread_id: HubThreadId,
+    pub turn_id: String,
+    pub digest: String,
+    pub request: Value,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReviewRunRecord {
+    pub id: String,
+    pub task_id: hub_core::TaskId,
+    pub executor_thread_id: HubThreadId,
+    pub reviewer_thread_id: HubThreadId,
+    pub artifact_hash: String,
+    pub verdict: String,
+    pub body: Value,
+}
 
 pub struct Store {
     conn: Connection,
@@ -12,7 +75,7 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if version > 4 {
+        if version > 6 {
             bail!("database version {version} is newer than this application");
         }
         if version == 0 {
@@ -40,6 +103,20 @@ impl Store {
             conn.execute_batch(concat!(
                 "BEGIN;",
                 include_str!("../../../migrations/004_lifecycle.sql"),
+                "COMMIT;"
+            ))?;
+        }
+        if version < 5 {
+            conn.execute_batch(concat!(
+                "BEGIN;",
+                include_str!("../../../migrations/005_providers.sql"),
+                "COMMIT;"
+            ))?;
+        }
+        if version < 6 {
+            conn.execute_batch(concat!(
+                "BEGIN;",
+                include_str!("../../../migrations/006_provider_outcomes.sql"),
                 "COMMIT;"
             ))?;
         }
@@ -111,18 +188,39 @@ impl Store {
         .collect()
     }
     pub fn rename_project(&self, id: ProjectId, name: &str) -> Result<()> {
-        let name=name.trim();
-        if name.is_empty() || name.chars().count()>120 { bail!("プロジェクト名は1〜120文字で入力してください。"); }
-        if self.conn.execute("UPDATE projects SET name=?2 WHERE id=?1 AND registered=1",params![id.to_string(),name])? != 1 { bail!("プロジェクトが見つかりません。"); }
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 120 {
+            bail!("プロジェクト名は1〜120文字で入力してください。");
+        }
+        if self.conn.execute(
+            "UPDATE projects SET name=?2 WHERE id=?1 AND registered=1",
+            params![id.to_string(), name],
+        )? != 1
+        {
+            bail!("プロジェクトが見つかりません。");
+        }
         Ok(())
     }
     pub fn archive_project_threads(&mut self, id: ProjectId) -> Result<()> {
-        let ids=self.threads()?.into_iter().filter(|t|t.project_id==id).map(|t|t.id).collect::<Vec<_>>();
+        let ids = self
+            .threads()?
+            .into_iter()
+            .filter(|t| t.project_id == id)
+            .map(|t| t.id)
+            .collect::<Vec<_>>();
         self.check_threads_idle(&ids)?;
-        if self.threads()?.iter().any(|t|t.project_id==id && matches!(t.status.as_str(),"queued"|"integrating"|"stopping")) { bail!("実行完了後に操作してください。"); }
-        let tx=self.conn.transaction()?;
-        tx.execute("UPDATE provider_threads SET archived=1 WHERE project_id=?1",[id.to_string()])?;
-        tx.commit()?; Ok(())
+        if self.threads()?.iter().any(|t| {
+            t.project_id == id && matches!(t.status.as_str(), "queued" | "integrating" | "stopping")
+        }) {
+            bail!("実行完了後に操作してください。");
+        }
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "UPDATE provider_threads SET archived=1 WHERE project_id=?1",
+            [id.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
     /// Removes only the app registration; repository files and task records remain intact.
     pub fn unregister_project(&self, id: ProjectId) -> Result<()> {
@@ -204,6 +302,466 @@ impl Store {
         self.conn.execute("INSERT INTO provider_threads(id,project_id,provider,provider_thread_id,title,status) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=CURRENT_TIMESTAMP",params![t.id.to_string(),t.project_id.to_string(),t.provider,t.provider_thread_id,t.title,t.status])?;
         Ok(())
     }
+    pub fn switch_thread_provider(
+        &self,
+        id: HubThreadId,
+        provider: &str,
+        provider_thread_id: &str,
+    ) -> Result<()> {
+        self.check_thread_idle(id)?;
+        anyhow::ensure!(
+            !provider.trim().is_empty() && !provider_thread_id.trim().is_empty(),
+            "provider mapping cannot be empty"
+        );
+        if self.conn.execute(
+            "UPDATE provider_threads SET provider=?2,provider_thread_id=?3,status='idle',updated_at=CURRENT_TIMESTAMP WHERE id=?1",
+            params![id.to_string(), provider, provider_thread_id],
+        )? != 1 {
+            bail!("thread mapping not found");
+        }
+        Ok(())
+    }
+    pub fn provider_profiles(&self) -> Result<Vec<protocol_types::providers::ProviderProfile>> {
+        use protocol_types::providers::{ProviderLocality, ProviderProfile, ProviderProtocol};
+        let mut query = self.conn.prepare("SELECT id,name,protocol,base_url,locality,credential_env,max_concurrency,enabled,revision FROM provider_profiles ORDER BY name,id")?;
+        let rows = query.query_map([], |row| {
+            let protocol = match row.get::<_, String>(2)?.as_str() {
+                "codex_app_server" => ProviderProtocol::CodexAppServer,
+                "local_dedicated" => ProviderProtocol::LocalDedicated,
+                "open_ai_chat" | "openai_chat" => ProviderProtocol::OpenAiChat,
+                "open_ai_responses" | "openai_responses" => ProviderProtocol::OpenAiResponses,
+                "anthropic_messages" => ProviderProtocol::AnthropicMessages,
+                value => {
+                    return Err(rusqlite::Error::FromSqlConversionFailure(
+                        2,
+                        rusqlite::types::Type::Text,
+                        format!("unknown provider protocol: {value}").into(),
+                    ))
+                }
+            };
+            let locality = match row.get::<_, String>(4)?.as_str() {
+                "local" => ProviderLocality::Local,
+                "cloud" => ProviderLocality::Cloud,
+                value => {
+                    return Err(rusqlite::Error::FromSqlConversionFailure(
+                        4,
+                        rusqlite::types::Type::Text,
+                        format!("unknown provider locality: {value}").into(),
+                    ))
+                }
+            };
+            Ok(ProviderProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                protocol,
+                base_url: row.get(3)?,
+                locality,
+                credential_env: row.get(5)?,
+                max_concurrency: row.get(6)?,
+                enabled: row.get(7)?,
+                revision: row.get(8)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+    pub fn provider_profile(
+        &self,
+        id: &str,
+    ) -> Result<Option<protocol_types::providers::ProviderProfile>> {
+        Ok(self
+            .provider_profiles()?
+            .into_iter()
+            .find(|profile| profile.id == id))
+    }
+    /// Creates revision 1 or replaces exactly the immediately preceding revision.
+    pub fn save_provider_profile(
+        &self,
+        profile: &protocol_types::providers::ProviderProfile,
+    ) -> Result<()> {
+        use protocol_types::providers::{ProviderLocality, ProviderProtocol};
+        profile.validate()?;
+        let current = self
+            .conn
+            .query_row(
+                "SELECT revision FROM provider_profiles WHERE id=?1",
+                [&profile.id],
+                |row| row.get::<_, u64>(0),
+            )
+            .optional()?;
+        match current {
+            None if profile.revision != 1 => bail!("new provider profile must start at revision 1"),
+            Some(revision) if profile.revision != revision + 1 => {
+                bail!("provider profile was modified; reload before saving")
+            }
+            _ => {}
+        }
+        let protocol = match profile.protocol {
+            ProviderProtocol::CodexAppServer => "codex_app_server",
+            ProviderProtocol::LocalDedicated => "local_dedicated",
+            ProviderProtocol::OpenAiChat => "openai_chat",
+            ProviderProtocol::OpenAiResponses => "openai_responses",
+            ProviderProtocol::AnthropicMessages => "anthropic_messages",
+        };
+        let locality = match profile.locality {
+            ProviderLocality::Local => "local",
+            ProviderLocality::Cloud => "cloud",
+        };
+        self.conn.execute("INSERT INTO provider_profiles(id,name,protocol,base_url,locality,credential_env,max_concurrency,enabled,revision) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(id) DO UPDATE SET name=excluded.name,protocol=excluded.protocol,base_url=excluded.base_url,locality=excluded.locality,credential_env=excluded.credential_env,max_concurrency=excluded.max_concurrency,enabled=excluded.enabled,revision=excluded.revision,updated_at=CURRENT_TIMESTAMP", params![profile.id,profile.name,protocol,profile.base_url,locality,profile.credential_env,profile.max_concurrency,profile.enabled,profile.revision])?;
+        Ok(())
+    }
+    pub fn set_session_model_policy(
+        &self,
+        thread: HubThreadId,
+        policy: &protocol_types::providers::SessionModelPolicy,
+    ) -> Result<()> {
+        policy.validate()?;
+        self.conn.execute("INSERT INTO session_model_policies(thread_id,body) VALUES (?1,?2) ON CONFLICT(thread_id) DO UPDATE SET body=excluded.body,updated_at=CURRENT_TIMESTAMP", params![thread.to_string(),serde_json::to_string(policy)?])?;
+        Ok(())
+    }
+    pub fn session_model_policy(
+        &self,
+        thread: HubThreadId,
+    ) -> Result<Option<protocol_types::providers::SessionModelPolicy>> {
+        self.conn
+            .query_row(
+                "SELECT body FROM session_model_policies WHERE thread_id=?1",
+                [thread.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|body| Ok(serde_json::from_str(&body)?))
+            .transpose()
+    }
+    pub fn start_provider_segment(&self, record: &ProviderSegmentRecord) -> Result<()> {
+        record.target.validate()?;
+        anyhow::ensure!(
+            !record.ended,
+            "new provider segment cannot already be ended"
+        );
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("UPDATE provider_segments SET ended_at=CURRENT_TIMESTAMP WHERE thread_id=?1 AND ended_at IS NULL", [record.thread_id.to_string()])?;
+        tx.execute("INSERT INTO provider_segments(id,thread_id,profile_id,profile_revision,model_id,effort,provider_thread_id) VALUES (?1,?2,?3,?4,?5,?6,?7)", params![record.id,record.thread_id.to_string(),record.target.profile_id,record.profile_revision,record.target.model_id,record.target.effort,record.provider_thread_id])?;
+        tx.commit()?;
+        Ok(())
+    }
+    pub fn active_provider_segment(
+        &self,
+        thread: HubThreadId,
+    ) -> Result<Option<ProviderSegmentRecord>> {
+        self.conn.query_row("SELECT id,profile_id,profile_revision,model_id,effort,provider_thread_id FROM provider_segments WHERE thread_id=?1 AND ended_at IS NULL ORDER BY started_at DESC,rowid DESC LIMIT 1", [thread.to_string()], |row| Ok(ProviderSegmentRecord { id: row.get(0)?, thread_id: thread, target: protocol_types::providers::ModelTarget { profile_id: row.get(1)?, model_id: row.get(3)?, effort: row.get(4)? }, profile_revision: row.get(2)?, provider_thread_id: row.get(5)?, ended: false })).optional().map_err(Into::into)
+    }
+    pub fn record_turn_target(&self, record: &TurnTargetRecord) -> Result<()> {
+        record.target.validate()?;
+        let resolved = serde_json::to_value(&record.resolved_from)?
+            .as_str()
+            .context("invalid target resolution")?
+            .to_owned();
+        self.conn.execute("INSERT INTO turn_model_targets(turn_id,thread_id,segment_id,profile_id,profile_revision,model_id,effort,resolved_from) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)", params![record.turn_id,record.thread_id.to_string(),record.segment_id,record.target.profile_id,record.profile_revision,record.target.model_id,record.target.effort,resolved])?;
+        Ok(())
+    }
+    pub fn turn_target(&self, turn_id: &str) -> Result<Option<TurnTargetRecord>> {
+        type TurnTargetRow = (String, String, String, u64, String, Option<String>, String);
+        let row: Option<TurnTargetRow> = self.conn.query_row("SELECT thread_id,segment_id,profile_id,profile_revision,model_id,effort,resolved_from FROM turn_model_targets WHERE turn_id=?1", [turn_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?))).optional()?;
+        row.map(
+            |(thread, segment, profile, revision, model, effort, resolved)| {
+                Ok(TurnTargetRecord {
+                    turn_id: turn_id.into(),
+                    thread_id: HubThreadId(thread.parse()?),
+                    segment_id: segment,
+                    target: protocol_types::providers::ModelTarget {
+                        profile_id: profile,
+                        model_id: model,
+                        effort,
+                    },
+                    profile_revision: revision,
+                    resolved_from: serde_json::from_value(serde_json::Value::String(resolved))?,
+                })
+            },
+        )
+        .transpose()
+    }
+    pub fn append_provider_message(&self, record: &ProviderMessageRecord) -> Result<()> {
+        anyhow::ensure!(!record.id.trim().is_empty(), "provider message ID is empty");
+        let role = serde_json::to_value(record.role)?
+            .as_str()
+            .context("invalid provider message role")?
+            .to_owned();
+        self.conn.execute(
+            "INSERT INTO provider_messages(id,thread_id,segment_id,provider_turn_id,role,body,provider_state) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                record.id,
+                record.thread_id.to_string(),
+                record.segment_id,
+                record.provider_turn_id,
+                role,
+                serde_json::to_string(&record.content)?,
+                record.provider_state.as_ref().map(serde_json::to_string).transpose()?,
+            ],
+        )?;
+        Ok(())
+    }
+    pub fn provider_messages(&self, thread: HubThreadId) -> Result<Vec<ProviderMessageRecord>> {
+        let mut query = self.conn.prepare(
+            "SELECT id,segment_id,provider_turn_id,role,body,provider_state FROM provider_messages WHERE thread_id=?1 ORDER BY created_at,rowid",
+        )?;
+        let rows = query.query_map([thread.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (id, segment_id, provider_turn_id, role, body, provider_state) = row?;
+            Ok(ProviderMessageRecord {
+                id,
+                thread_id: thread,
+                segment_id,
+                provider_turn_id,
+                role: serde_json::from_value(Value::String(role))?,
+                content: serde_json::from_str(&body)?,
+                provider_state: provider_state
+                    .map(|value| serde_json::from_str(&value))
+                    .transpose()?,
+            })
+        })
+        .collect()
+    }
+
+    pub fn record_provider_turn_outcome(&self, record: &ProviderTurnOutcomeRecord) -> Result<()> {
+        anyhow::ensure!(
+            matches!(
+                record.status.as_str(),
+                "completed" | "refused" | "failed" | "interrupted" | "unknown"
+            ),
+            "invalid provider turn outcome status"
+        );
+        anyhow::ensure!(
+            record
+                .stop_reason
+                .as_ref()
+                .is_none_or(|value| value.len() <= 200),
+            "provider stop reason is too long"
+        );
+        anyhow::ensure!(
+            record
+                .failure_kind
+                .as_ref()
+                .is_none_or(|value| value.len() <= 80),
+            "provider failure kind is too long"
+        );
+        anyhow::ensure!(
+            record
+                .detail
+                .as_ref()
+                .is_none_or(|value| value.len() <= 4_000),
+            "provider outcome detail is too long"
+        );
+        self.conn.execute(
+            "INSERT INTO provider_turn_outcomes(turn_id,thread_id,status,stop_reason,failure_kind,detail) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(turn_id) DO UPDATE SET status=excluded.status,stop_reason=excluded.stop_reason,failure_kind=excluded.failure_kind,detail=excluded.detail,updated_at=CURRENT_TIMESTAMP",
+            params![
+                record.turn_id,
+                record.thread_id.to_string(),
+                record.status,
+                record.stop_reason,
+                record.failure_kind,
+                record.detail
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn provider_turn_outcome(
+        &self,
+        turn_id: &str,
+    ) -> Result<Option<ProviderTurnOutcomeRecord>> {
+        self.conn
+            .query_row(
+                "SELECT thread_id,status,stop_reason,failure_kind,detail FROM provider_turn_outcomes WHERE turn_id=?1",
+                [turn_id],
+                |row| {
+                    let thread_id: String = row.get(0)?;
+                    Ok(ProviderTurnOutcomeRecord {
+                        turn_id: turn_id.into(),
+                        thread_id: HubThreadId(thread_id.parse().map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?),
+                        status: row.get(1)?,
+                        stop_reason: row.get(2)?,
+                        failure_kind: row.get(3)?,
+                        detail: row.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+    pub fn create_tool_approval(&self, record: &ToolApprovalRecord) -> Result<()> {
+        anyhow::ensure!(
+            record.status == "pending",
+            "new tool approval must be pending"
+        );
+        anyhow::ensure!(
+            !record.id.trim().is_empty()
+                && !record.turn_id.trim().is_empty()
+                && record.digest.len() == 64
+                && record.digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "tool approval identity is invalid"
+        );
+        self.conn.execute(
+            "INSERT INTO tool_approvals(id,thread_id,turn_id,digest,request,status) VALUES (?1,?2,?3,?4,?5,'pending')",
+            params![
+                record.id,
+                record.thread_id.to_string(),
+                record.turn_id,
+                record.digest,
+                serde_json::to_string(&record.request)?,
+            ],
+        )?;
+        Ok(())
+    }
+    pub fn tool_approval(&self, id: &str) -> Result<Option<ToolApprovalRecord>> {
+        let row: Option<(String, String, String, String, String)> = self
+            .conn
+            .query_row(
+                "SELECT thread_id,turn_id,digest,request,status FROM tool_approvals WHERE id=?1",
+                [id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        row.map(|(thread, turn_id, digest, request, status)| {
+            Ok(ToolApprovalRecord {
+                id: id.into(),
+                thread_id: HubThreadId(thread.parse()?),
+                turn_id,
+                digest,
+                request: serde_json::from_str(&request)?,
+                status,
+            })
+        })
+        .transpose()
+    }
+    pub fn decide_tool_approval(&self, id: &str, approve: bool) -> Result<()> {
+        let status = if approve { "approved" } else { "denied" };
+        if self.conn.execute(
+            "UPDATE tool_approvals SET status=?2,decided_at=CURRENT_TIMESTAMP WHERE id=?1 AND status='pending'",
+            params![id, status],
+        )? != 1
+        {
+            bail!("tool approval is missing or was already decided");
+        }
+        Ok(())
+    }
+    /// Atomically spends the approval. A second invocation cannot reuse it.
+    pub fn consume_tool_approval(
+        &self,
+        id: &str,
+        thread: HubThreadId,
+        turn_id: &str,
+        digest: &str,
+    ) -> Result<Value> {
+        let tx = self.conn.unchecked_transaction()?;
+        let request: Option<String> = tx
+            .query_row(
+                "SELECT request FROM tool_approvals WHERE id=?1 AND thread_id=?2 AND turn_id=?3 AND digest=?4 AND status='approved'",
+                params![id, thread.to_string(), turn_id, digest],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let request = request.context("matching one-shot tool approval is not approved")?;
+        if tx.execute(
+            "UPDATE tool_approvals SET status='consumed',consumed_at=CURRENT_TIMESTAMP WHERE id=?1 AND status='approved'",
+            [id],
+        )? != 1
+        {
+            bail!("tool approval was already consumed");
+        }
+        tx.commit()?;
+        Ok(serde_json::from_str(&request)?)
+    }
+    pub fn create_review_run(&self, record: &ReviewRunRecord) -> Result<()> {
+        anyhow::ensure!(
+            record.verdict == "pending",
+            "new review run must be pending"
+        );
+        anyhow::ensure!(
+            record.executor_thread_id != record.reviewer_thread_id,
+            "reviewer session must differ from executor session"
+        );
+        self.conn.execute(
+            "INSERT INTO review_runs(id,task_id,executor_thread_id,reviewer_thread_id,artifact_hash,verdict,body) VALUES (?1,?2,?3,?4,?5,'pending',?6)",
+            params![
+                record.id,
+                record.task_id.to_string(),
+                record.executor_thread_id.to_string(),
+                record.reviewer_thread_id.to_string(),
+                record.artifact_hash,
+                serde_json::to_string(&record.body)?,
+            ],
+        )?;
+        Ok(())
+    }
+    pub fn finish_review_run(
+        &self,
+        id: &str,
+        artifact_hash: &str,
+        verdict: &str,
+        body: &Value,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            matches!(verdict, "pass" | "rework" | "inconclusive"),
+            "invalid review verdict"
+        );
+        if self.conn.execute(
+            "UPDATE review_runs SET verdict=?3,body=?4,completed_at=CURRENT_TIMESTAMP WHERE id=?1 AND artifact_hash=?2 AND verdict='pending'",
+            params![id, artifact_hash, verdict, serde_json::to_string(body)?],
+        )? != 1
+        {
+            bail!("review run is missing, stale, or already completed");
+        }
+        Ok(())
+    }
+    pub fn review_runs(&self, task: hub_core::TaskId) -> Result<Vec<ReviewRunRecord>> {
+        let mut query = self.conn.prepare("SELECT id,executor_thread_id,reviewer_thread_id,artifact_hash,verdict,body FROM review_runs WHERE task_id=?1 ORDER BY created_at,rowid")?;
+        let rows = query.query_map([task.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (id, executor, reviewer, artifact_hash, verdict, body) = row?;
+            Ok(ReviewRunRecord {
+                id,
+                task_id: task,
+                executor_thread_id: HubThreadId(executor.parse()?),
+                reviewer_thread_id: HubThreadId(reviewer.parse()?),
+                artifact_hash,
+                verdict,
+                body: serde_json::from_str(&body)?,
+            })
+        })
+        .collect()
+    }
     /// A user's Manifest is consumed exactly once, atomically with its workflow state.
     /// A restart after this commit must reconcile the task, never replay the clipboard.
     pub fn accept_manifest(
@@ -216,10 +774,17 @@ impl Store {
     ) -> Result<()> {
         let tx = self.conn.transaction()?;
         let key = format!("manifest_receipt:{manifest_id}");
-        if tx.query_row("SELECT 1 FROM settings WHERE key=?1", [&key], |_| Ok(())).optional()?.is_some() {
+        if tx
+            .query_row("SELECT 1 FROM settings WHERE key=?1", [&key], |_| Ok(()))
+            .optional()?
+            .is_some()
+        {
             bail!("このManifestは取り込み済みです。保存されたタスクを確認してください。");
         }
-        tx.execute("INSERT INTO settings(key,value) VALUES (?1,?2)", params![key, manifest])?;
+        tx.execute(
+            "INSERT INTO settings(key,value) VALUES (?1,?2)",
+            params![key, manifest],
+        )?;
         tx.execute("INSERT INTO provider_threads(id,project_id,provider,provider_thread_id,title,status) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=CURRENT_TIMESTAMP", params![thread.id.to_string(),thread.project_id.to_string(),thread.provider,thread.provider_thread_id,thread.title,thread.status])?;
         tx.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![snapshot_key, snapshot])?;
         tx.commit()?;
@@ -476,7 +1041,7 @@ impl Store {
         let mut q=self.conn.prepare("SELECT u.id,u.provider,u.model,u.turn_id,u.prompt_tokens,u.cached_tokens,u.completion_tokens,u.estimated_cost,
           COALESCE(u.latency_ms,(SELECT CAST(ROUND((julianday(MIN(CASE WHEN e.kind='turn_completed' THEN e.created_at END))-julianday(MIN(CASE WHEN e.kind='turn_started' THEN e.created_at END)))*86400000) AS INTEGER) FROM events e WHERE json_extract(e.body,'$.turn_id')=u.turn_id AND u.provider='codex')),u.task_id
           FROM model_usage u WHERE ?1 IS NULL OR EXISTS (SELECT 1 FROM provider_threads t WHERE t.id=?1 AND ((u.turn_id IS NULL AND u.task_id IS NOT NULL AND u.task_id=t.task_id AND (SELECT COUNT(*) FROM provider_threads linked WHERE linked.task_id=u.task_id)=1) OR EXISTS (SELECT 1 FROM turns x WHERE x.thread_id=t.id AND x.provider_turn_id=u.turn_id) OR EXISTS (SELECT 1 FROM events e WHERE e.thread_id=t.id AND json_extract(e.body,'$.turn_id')=u.turn_id) OR EXISTS (SELECT 1 FROM provider_usage_snapshots p WHERE p.provider_thread_id=t.provider_thread_id AND p.turn_id=u.turn_id))) ORDER BY u.created_at DESC")?;
-        let rows = q.query_map([thread.map(|id|id.to_string())], |r| {
+        let rows = q.query_map([thread.map(|id| id.to_string())], |r| {
             Ok(hub_core::ModelUsageRecord {
                 id: r.get(0)?,
                 provider: r.get(1)?,
@@ -556,9 +1121,15 @@ impl Store {
     }
     /// Bounded, durable activity for a worker's current turn. Streaming deltas
     /// are omitted by the journal; use the live event bus for those instead.
-    pub fn recent_activity(&self, id: HubThreadId, turn: Option<&str>) -> Result<Vec<(i64, String)>> {
+    pub fn recent_activity(
+        &self,
+        id: HubThreadId,
+        turn: Option<&str>,
+    ) -> Result<Vec<(i64, String)>> {
         let mut q = self.conn.prepare("SELECT id,body FROM events WHERE thread_id=?1 AND (?2 IS NULL OR json_extract(body,'$.turn_id')=?2) AND kind IN ('message_completed','item_started','item_completed','error','turn_started','turn_completed','diff') ORDER BY id DESC LIMIT 60")?;
-        let rows = q.query_map(params![id.to_string(), turn], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let rows = q.query_map(params![id.to_string(), turn], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
         let mut events = rows.collect::<rusqlite::Result<Vec<_>>>()?;
         events.reverse();
         Ok(events)
@@ -640,23 +1211,61 @@ mod tests {
     use super::*;
     #[test]
     fn usage_is_scoped_before_reading_and_elapsed_time_is_derived() -> Result<()> {
-        let dir=tempfile::tempdir()?;
-        assert!(std::process::Command::new("git").arg("init").arg(dir.path()).output()?.status.success());
-        let store=Store::open(&dir.path().join("usage.db"))?;
-        let project=store.register_project(dir.path())?;
-        let mut ids=Vec::new();
+        let dir = tempfile::tempdir()?;
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg(dir.path())
+            .output()?
+            .status
+            .success());
+        let store = Store::open(&dir.path().join("usage.db"))?;
+        let project = store.register_project(dir.path())?;
+        let mut ids = Vec::new();
         for n in 0..2 {
-            let thread=ThreadMapping{id:HubThreadId::default(),project_id:project.id,provider:"codex".into(),provider_thread_id:format!("p{n}"),title:"test".into(),status:"completed".into()};
+            let thread = ThreadMapping {
+                id: HubThreadId::default(),
+                project_id: project.id,
+                provider: "codex".into(),
+                provider_thread_id: format!("p{n}"),
+                title: "test".into(),
+                status: "completed".into(),
+            };
             store.save_thread(&thread)?;
-            store.record_usage(&hub_core::ModelUsageRecord{id:format!("usage{n}"),provider:"codex".into(),model:"sol".into(),task_id:None,turn_id:Some(format!("turn{n}")),prompt_tokens:Some(10),cached_tokens:None,completion_tokens:Some(2),estimated_cost:None,latency_ms:None})?;
-            for (kind,time) in [("turn_started","2026-09-09 01:00:00.000"),("turn_completed","2026-09-09 01:00:02.500")] {
-                let seq=store.append_event(Some(&thread.provider_thread_id),kind,&serde_json::json!({"turn_id":format!("turn{n}")}).to_string())?;
-                store.conn.execute("UPDATE events SET created_at=?2 WHERE id=?1",params![seq,time])?;
+            store.record_usage(&hub_core::ModelUsageRecord {
+                id: format!("usage{n}"),
+                provider: "codex".into(),
+                model: "sol".into(),
+                task_id: None,
+                turn_id: Some(format!("turn{n}")),
+                prompt_tokens: Some(10),
+                cached_tokens: None,
+                completion_tokens: Some(2),
+                estimated_cost: None,
+                latency_ms: None,
+            })?;
+            for (kind, time) in [
+                ("turn_started", "2026-09-09 01:00:00.000"),
+                ("turn_completed", "2026-09-09 01:00:02.500"),
+            ] {
+                let seq = store.append_event(
+                    Some(&thread.provider_thread_id),
+                    kind,
+                    &serde_json::json!({"turn_id":format!("turn{n}")}).to_string(),
+                )?;
+                store.conn.execute(
+                    "UPDATE events SET created_at=?2 WHERE id=?1",
+                    params![seq, time],
+                )?;
             }
             ids.push(thread.id);
         }
-        assert_eq!(store.usage()?.len(),2);
-        for (n,id) in ids.into_iter().enumerate() {let rows=store.thread_usage(id)?;assert_eq!(rows.len(),1);assert_eq!(rows[0].id,format!("usage{n}"));assert_eq!(rows[0].latency_ms,Some(2500));}
+        assert_eq!(store.usage()?.len(), 2);
+        for (n, id) in ids.into_iter().enumerate() {
+            let rows = store.thread_usage(id)?;
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].id, format!("usage{n}"));
+            assert_eq!(rows[0].latency_ms, Some(2500));
+        }
         assert!(store.thread_usage(HubThreadId::default())?.is_empty());
         Ok(())
     }
@@ -781,6 +1390,210 @@ mod tests {
         let p = dir.path().join("hub.db");
         Connection::open(&p)?.execute_batch("PRAGMA user_version=99")?;
         assert!(Store::open(&p).is_err());
+        Ok(())
+    }
+    #[test]
+    fn provider_profiles_are_versioned_and_turn_targets_are_immutable() -> Result<()> {
+        use protocol_types::providers::{
+            ModelTarget, ProviderLocality, ProviderProfile, ProviderProtocol, SessionModelPolicy,
+            TargetResolution,
+        };
+        let dir = tempfile::tempdir()?;
+        let store = Store::open(&dir.path().join("hub.db"))?;
+        let project = ProjectId::default();
+        store.conn.execute(
+            "INSERT INTO projects(id,name,root) VALUES (?1,'fixture','/fixture')",
+            [project.to_string()],
+        )?;
+        let thread = ThreadMapping {
+            id: HubThreadId::default(),
+            project_id: project,
+            provider: "api".into(),
+            provider_thread_id: "logical".into(),
+            title: "fixture".into(),
+            status: "idle".into(),
+        };
+        store.save_thread(&thread)?;
+        let mut profile = ProviderProfile {
+            id: "anthropic-main".into(),
+            name: "Anthropic".into(),
+            protocol: ProviderProtocol::AnthropicMessages,
+            base_url: Some("https://api.anthropic.com".into()),
+            locality: ProviderLocality::Cloud,
+            credential_env: Some("ANTHROPIC_API_KEY".into()),
+            max_concurrency: 1,
+            enabled: true,
+            revision: 1,
+        };
+        store.save_provider_profile(&profile)?;
+        assert!(store.save_provider_profile(&profile).is_err());
+        profile.revision = 2;
+        profile.max_concurrency = 2;
+        store.save_provider_profile(&profile)?;
+        assert_eq!(store.provider_profile("anthropic-main")?.unwrap(), profile);
+
+        let target = ModelTarget {
+            profile_id: profile.id.clone(),
+            model_id: "claude-fixture".into(),
+            effort: Some("high".into()),
+        };
+        let policy = SessionModelPolicy {
+            default_target: target.clone(),
+            reviewer_target: None,
+            allow_turn_override: true,
+        };
+        store.set_session_model_policy(thread.id, &policy)?;
+        assert_eq!(store.session_model_policy(thread.id)?, Some(policy));
+        let segment = ProviderSegmentRecord {
+            id: "segment-1".into(),
+            thread_id: thread.id,
+            target: target.clone(),
+            profile_revision: 2,
+            provider_thread_id: None,
+            ended: false,
+        };
+        store.start_provider_segment(&segment)?;
+        assert_eq!(
+            store.active_provider_segment(thread.id)?,
+            Some(segment.clone())
+        );
+        let conflicting_segment = ProviderSegmentRecord {
+            target: ModelTarget {
+                model_id: "claude-other".into(),
+                ..target.clone()
+            },
+            ..segment.clone()
+        };
+        assert!(store.start_provider_segment(&conflicting_segment).is_err());
+        assert_eq!(
+            store.active_provider_segment(thread.id)?,
+            Some(segment.clone())
+        );
+        let turn = TurnTargetRecord {
+            turn_id: "turn-1".into(),
+            thread_id: thread.id,
+            segment_id: segment.id,
+            target,
+            profile_revision: 2,
+            resolved_from: TargetResolution::SessionOverride,
+        };
+        store.record_turn_target(&turn)?;
+        assert_eq!(store.turn_target("turn-1")?, Some(turn.clone()));
+        assert!(store.record_turn_target(&turn).is_err());
+        let outcome = ProviderTurnOutcomeRecord {
+            turn_id: turn.turn_id,
+            thread_id: thread.id,
+            status: "refused".into(),
+            stop_reason: Some("refusal".into()),
+            failure_kind: Some("refusal".into()),
+            detail: Some("policy".into()),
+        };
+        store.record_provider_turn_outcome(&outcome)?;
+        assert_eq!(store.provider_turn_outcome("turn-1")?, Some(outcome));
+        Ok(())
+    }
+
+    #[test]
+    fn provider_messages_approvals_and_reviews_are_durable_and_one_shot() -> Result<()> {
+        use protocol_types::providers::{ContentBlock, TranscriptRole};
+        let dir = tempfile::tempdir()?;
+        let store = Store::open(&dir.path().join("provider-state.db"))?;
+        let project = ProjectId::default();
+        let task = hub_core::TaskId::default();
+        store.conn.execute(
+            "INSERT INTO projects(id,name,root) VALUES (?1,'fixture','/fixture')",
+            [project.to_string()],
+        )?;
+        store.conn.execute(
+            "INSERT INTO tasks(id,project_id,status,body) VALUES (?1,?2,'running','{}')",
+            params![task.to_string(), project.to_string()],
+        )?;
+        let executor = ThreadMapping {
+            id: HubThreadId::default(),
+            project_id: project,
+            provider: "api:test".into(),
+            provider_thread_id: "executor".into(),
+            title: "executor".into(),
+            status: "running".into(),
+        };
+        let reviewer = ThreadMapping {
+            id: HubThreadId::default(),
+            provider_thread_id: "reviewer".into(),
+            title: "reviewer".into(),
+            ..executor.clone()
+        };
+        store.save_thread(&executor)?;
+        store.save_thread(&reviewer)?;
+
+        let message = ProviderMessageRecord {
+            id: "message-1".into(),
+            thread_id: executor.id,
+            segment_id: None,
+            provider_turn_id: Some("turn-1".into()),
+            role: TranscriptRole::Assistant,
+            content: vec![ContentBlock::Text {
+                text: "done".into(),
+            }],
+            provider_state: Some(serde_json::json!({"opaque":"same-segment-only"})),
+        };
+        store.append_provider_message(&message)?;
+        assert!(store.append_provider_message(&message).is_err());
+        assert_eq!(store.provider_messages(executor.id)?, vec![message]);
+
+        let approval = ToolApprovalRecord {
+            id: "approval-1".into(),
+            thread_id: executor.id,
+            turn_id: "turn-1".into(),
+            digest: "a".repeat(64),
+            request: serde_json::json!({"argv":["custom-check"]}),
+            status: "pending".into(),
+        };
+        store.create_tool_approval(&approval)?;
+        store.decide_tool_approval(&approval.id, true)?;
+        assert!(store.decide_tool_approval(&approval.id, true).is_err());
+        assert_eq!(
+            store.consume_tool_approval(&approval.id, executor.id, "turn-1", &"a".repeat(64))?,
+            approval.request
+        );
+        assert!(store
+            .consume_tool_approval(&approval.id, executor.id, "turn-1", &"a".repeat(64))
+            .is_err());
+
+        let review = ReviewRunRecord {
+            id: "review-1".into(),
+            task_id: task,
+            executor_thread_id: executor.id,
+            reviewer_thread_id: reviewer.id,
+            artifact_hash: "artifact-a".into(),
+            verdict: "pending".into(),
+            body: serde_json::json!({"status":"started"}),
+        };
+        store.create_review_run(&review)?;
+        assert!(store
+            .finish_review_run(
+                &review.id,
+                "artifact-b",
+                "pass",
+                &serde_json::json!({"summary":"stale"})
+            )
+            .is_err());
+        store.finish_review_run(
+            &review.id,
+            "artifact-a",
+            "pass",
+            &serde_json::json!({"summary":"ok"}),
+        )?;
+        let runs = store.review_runs(task)?;
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].verdict, "pass");
+        assert!(store
+            .finish_review_run(
+                &review.id,
+                "artifact-a",
+                "pass",
+                &serde_json::json!({"summary":"reused"})
+            )
+            .is_err());
         Ok(())
     }
 }

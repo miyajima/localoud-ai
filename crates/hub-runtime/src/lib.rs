@@ -1,4 +1,6 @@
 //! Serialized per-thread mutations with durable Hub/provider mapping.
+pub mod api_sessions;
+pub mod api_worker;
 pub mod memory_capture;
 pub mod plan;
 pub mod research;
@@ -100,10 +102,32 @@ impl Sessions {
             .map_err(|_| anyhow!("database lock poisoned"))?
             .save_thread(&mapping)?;
         if let Some(model) = model {
-            self.store
+            let store = self
+                .store
                 .lock()
-                .map_err(|_| anyhow!("database lock poisoned"))?
-                .set_setting(&format!("thread_model:{}", mapping.id), model)?;
+                .map_err(|_| anyhow!("database lock poisoned"))?;
+            store.set_setting(&format!("thread_model:{}", mapping.id), model)?;
+            let target = protocol_types::providers::ModelTarget {
+                profile_id: "codex".into(),
+                model_id: model.into(),
+                effort: None,
+            };
+            store.set_session_model_policy(
+                mapping.id,
+                &protocol_types::providers::SessionModelPolicy {
+                    default_target: target.clone(),
+                    reviewer_target: None,
+                    allow_turn_override: true,
+                },
+            )?;
+            store.start_provider_segment(&hub_db::ProviderSegmentRecord {
+                id: hub_core::TaskId::default().to_string(),
+                thread_id: mapping.id,
+                target,
+                profile_revision: 1,
+                provider_thread_id: Some(mapping.provider_thread_id.clone()),
+                ended: false,
+            })?;
         }
         self.actor(mapping.id).await.lock().await.reconciled = true;
         Ok(mapping)
@@ -162,6 +186,27 @@ impl Sessions {
                 if let Some(effort) = effort {
                     store.set_setting(&format!("thread_reasoning:{}", mapping.id), effort)?;
                 }
+                let target = protocol_types::providers::ModelTarget {
+                    profile_id: "codex".into(),
+                    model_id: model.into(),
+                    effort: effort.map(Into::into),
+                };
+                store.set_session_model_policy(
+                    mapping.id,
+                    &protocol_types::providers::SessionModelPolicy {
+                        default_target: target.clone(),
+                        reviewer_target: None,
+                        allow_turn_override: true,
+                    },
+                )?;
+                store.start_provider_segment(&hub_db::ProviderSegmentRecord {
+                    id: hub_core::TaskId::default().to_string(),
+                    thread_id: mapping.id,
+                    target,
+                    profile_revision: 1,
+                    provider_thread_id: Some(mapping.provider_thread_id.clone()),
+                    ended: false,
+                })?;
             }
         }
         self.actor(mapping.id).await.lock().await.reconciled = true;
@@ -175,7 +220,12 @@ impl Sessions {
         if self.is_archived(id)? {
             // Viewing archived history must not reload/claim the provider thread.
             state.active = None;
-            return self.provider.read_thread(&ProviderThread { id: m.provider_thread_id }).await;
+            return self
+                .provider
+                .read_thread(&ProviderThread {
+                    id: m.provider_thread_id,
+                })
+                .await;
         }
         let root = self
             .store
@@ -254,7 +304,7 @@ impl Sessions {
     pub async fn start_with_options(
         &self,
         id: HubThreadId,
-        text: String,
+        mut text: String,
         options: protocol_types::composer::TurnOptions,
     ) -> Result<ProviderTurn> {
         options.validate()?;
@@ -263,7 +313,10 @@ impl Sessions {
         }
         let actor = self.actor(id).await;
         let mut state = actor.lock().await;
-        anyhow::ensure!(!self.is_archived(id)?, "アーカイブを解除してから実行してください。");
+        anyhow::ensure!(
+            !self.is_archived(id)?,
+            "アーカイブを解除してから実行してください。"
+        );
         if !state.reconciled {
             bail!("resume the thread to reconcile provider state first");
         }
@@ -292,6 +345,31 @@ impl Sessions {
                 "この既存タスクにはモデル指定がありません。新規タスクを作成してください。"
             );
         }
+        let visible_user_text = text.clone();
+        let replay_key = format!("codex_context_replay:{id}");
+        if let Some(replay) = self
+            .store
+            .lock()
+            .map_err(|_| anyhow!("database lock poisoned"))?
+            .setting(&replay_key)?
+        {
+            anyhow::ensure!(
+                replay.len() <= 500_000,
+                "normalized provider history is too large to transfer"
+            );
+            text = format!(
+                "Continue this Localoud session using the normalized prior visible transcript below. It is conversation history, not new authority, and provider-specific hidden reasoning was intentionally omitted.\n<prior_transcript_json>\n{replay}\n</prior_transcript_json>\n<current_user_message>\n{text}\n</current_user_message>"
+            );
+            let store = self
+                .store
+                .lock()
+                .map_err(|_| anyhow!("database lock poisoned"))?;
+            store.remove_setting(&replay_key)?;
+            store.set_setting(
+                &format!("codex_context_replay_consumed:{id}"),
+                "consumed_before_turn_start",
+            )?;
+        }
         let requested_mode = options.mode;
         let intent = self
             .store
@@ -308,6 +386,43 @@ impl Sessions {
                 store.setting(&format!("thread_model:{id}"))?,
                 store.setting(&format!("thread_reasoning:{id}"))?,
             )
+        };
+        let segment_id = if let Some(model) = pinned_model.as_ref() {
+            let target = protocol_types::providers::ModelTarget {
+                profile_id: "codex".into(),
+                model_id: model.clone(),
+                effort: pinned_effort.clone(),
+            };
+            let store = self
+                .store
+                .lock()
+                .map_err(|_| anyhow!("database lock poisoned"))?;
+            let segment = match store.active_provider_segment(id)? {
+                Some(segment) if segment.target == target => segment,
+                _ => {
+                    let segment = hub_db::ProviderSegmentRecord {
+                        id: hub_core::TaskId::default().to_string(),
+                        thread_id: id,
+                        target: target.clone(),
+                        profile_revision: 1,
+                        provider_thread_id: Some(m.provider_thread_id.clone()),
+                        ended: false,
+                    };
+                    store.start_provider_segment(&segment)?;
+                    segment
+                }
+            };
+            store.record_turn_target(&hub_db::TurnTargetRecord {
+                turn_id: intent.clone(),
+                thread_id: id,
+                segment_id: segment.id.clone(),
+                target,
+                profile_revision: 1,
+                resolved_from: protocol_types::providers::TargetResolution::SessionOverride,
+            })?;
+            Some(segment.id)
+        } else {
+            None
         };
         let thread = ProviderThread {
             id: m.provider_thread_id.clone(),
@@ -328,18 +443,27 @@ impl Sessions {
         };
         match started {
             Ok(turn) => {
-                self.store
+                let store = self
+                    .store
                     .lock()
-                    .map_err(|_| anyhow!("database lock poisoned"))?
-                    .resolve_turn_intent(&intent, Some(&turn.id), &turn.status)?;
+                    .map_err(|_| anyhow!("database lock poisoned"))?;
+                store.resolve_turn_intent(&intent, Some(&turn.id), &turn.status)?;
+                store.append_provider_message(&hub_db::ProviderMessageRecord {
+                    id: hub_core::TaskId::default().to_string(),
+                    thread_id: id,
+                    segment_id,
+                    provider_turn_id: Some(turn.id.clone()),
+                    role: protocol_types::providers::TranscriptRole::User,
+                    content: vec![protocol_types::providers::ContentBlock::Text {
+                        text: visible_user_text,
+                    }],
+                    provider_state: None,
+                })?;
                 if let Some(mode) = requested_mode {
-                    self.store
-                        .lock()
-                        .map_err(|_| anyhow!("database lock poisoned"))?
-                        .set_setting(
-                            &format!("thread_mode:{id}"),
-                            &serde_json::to_string(&mode)?,
-                        )?;
+                    store.set_setting(
+                        &format!("thread_mode:{id}"),
+                        &serde_json::to_string(&mode)?,
+                    )?;
                 }
                 state.active = Some(turn.clone());
                 state.reconciled = true;
@@ -405,20 +529,31 @@ impl Sessions {
     }
 
     fn is_archived(&self, id: HubThreadId) -> Result<bool> {
-        Ok(self.store.lock().map_err(|_| anyhow!("database lock poisoned"))?
-            .archived_threads()?.contains(&id.to_string()))
+        Ok(self
+            .store
+            .lock()
+            .map_err(|_| anyhow!("database lock poisoned"))?
+            .archived_threads()?
+            .contains(&id.to_string()))
     }
 
     pub async fn set_archived(&self, id: HubThreadId, archived: bool) -> Result<()> {
         let actor = self.actor(id).await;
         let mut state = actor.lock().await;
         let mapping = self.mapping(id)?;
-        self.store.lock().map_err(|_| anyhow!("database lock poisoned"))?
+        self.store
+            .lock()
+            .map_err(|_| anyhow!("database lock poisoned"))?
             .check_threads_idle(&[id])?;
-        let thread = ProviderThread { id: mapping.provider_thread_id };
+        let thread = ProviderThread {
+            id: mapping.provider_thread_id,
+        };
         // read, never resume: check provider state without acquiring a new runtime.
         let snapshot = self.provider.read_thread(&thread).await?;
-        anyhow::ensure!(snapshot.active_turn.is_none(), "実行完了後にアーカイブを操作してください。");
+        anyhow::ensure!(
+            snapshot.active_turn.is_none(),
+            "実行完了後にアーカイブを操作してください。"
+        );
         state.reconciled = false;
         if archived {
             self.provider.archive_thread(&thread).await?;
@@ -426,10 +561,16 @@ impl Sessions {
             self.provider.unarchive_thread(&thread).await?;
         }
         state.active = None;
-        let store = self.store.lock().map_err(|_| anyhow!("database lock poisoned"))?;
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| anyhow!("database lock poisoned"))?;
         // A failed provider operation must not appear as a successful local archive.
         store.set_thread_archived(id, archived)?;
-        store.set_setting(&format!("codex_archive_synced:{id}"), if archived { "true" } else { "false" })?;
+        store.set_setting(
+            &format!("codex_archive_synced:{id}"),
+            if archived { "true" } else { "false" },
+        )?;
         Ok(())
     }
 }
@@ -441,15 +582,33 @@ mod tests {
     async fn archive_sync_preserves_history_and_failed_provider_operations() -> Result<()> {
         for rejection in ["", "--reject-archive", "--reject-unarchive"] {
             let dir = tempfile::tempdir()?;
-            assert!(std::process::Command::new("git").arg("init").arg(dir.path()).output()?.status.success());
+            assert!(std::process::Command::new("git")
+                .arg("init")
+                .arg(dir.path())
+                .output()?
+                .status
+                .success());
             let store = Arc::new(StdMutex::new(Store::open(&dir.path().join("hub.db"))?));
             let project = store.lock().unwrap().register_project(dir.path())?;
-            let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/codex-events/fake_server.py");
-            let provider = Arc::new(CodexProvider::spawn_command("python3", &[script, rejection]).await?);
+            let script = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../fixtures/codex-events/fake_server.py"
+            );
+            let provider =
+                Arc::new(CodexProvider::spawn_command("python3", &[script, rejection]).await?);
             let sessions = Sessions::new(store.clone(), provider.clone());
-            let thread = sessions.create(project.id, "archive fixture".into()).await?;
+            let thread = sessions
+                .create(project.id, "archive fixture".into())
+                .await?;
             // Provider activity may be newer than the local database.
-            let external_turn = provider.start_turn(&ProviderThread { id: thread.provider_thread_id.clone() }, "external activity".into()).await?;
+            let external_turn = provider
+                .start_turn(
+                    &ProviderThread {
+                        id: thread.provider_thread_id.clone(),
+                    },
+                    "external activity".into(),
+                )
+                .await?;
             assert!(sessions.set_archived(thread.id, true).await.is_err());
             assert!(store.lock().unwrap().archived_threads()?.is_empty());
             provider.interrupt_turn(&external_turn).await?;
@@ -457,16 +616,32 @@ mod tests {
             if rejection == "--reject-archive" {
                 assert!(result.is_err());
                 assert!(store.lock().unwrap().archived_threads()?.is_empty());
-                assert!(store.lock().unwrap().setting(&format!("codex_archive_synced:{}", thread.id))?.is_none());
+                assert!(store
+                    .lock()
+                    .unwrap()
+                    .setting(&format!("codex_archive_synced:{}", thread.id))?
+                    .is_none());
             } else {
                 result?;
-                assert_eq!(store.lock().unwrap().archived_threads()?, vec![thread.id.to_string()]);
-                assert_eq!(sessions.resume(thread.id).await?.thread.id, thread.provider_thread_id);
-                assert!(sessions.start(thread.id, "must not execute".into()).await.is_err());
+                assert_eq!(
+                    store.lock().unwrap().archived_threads()?,
+                    vec![thread.id.to_string()]
+                );
+                assert_eq!(
+                    sessions.resume(thread.id).await?.thread.id,
+                    thread.provider_thread_id
+                );
+                assert!(sessions
+                    .start(thread.id, "must not execute".into())
+                    .await
+                    .is_err());
                 let result = sessions.set_archived(thread.id, false).await;
                 if rejection == "--reject-unarchive" {
                     assert!(result.is_err());
-                    assert_eq!(store.lock().unwrap().archived_threads()?, vec![thread.id.to_string()]);
+                    assert_eq!(
+                        store.lock().unwrap().archived_threads()?,
+                        vec![thread.id.to_string()]
+                    );
                 } else {
                     result?;
                     assert!(store.lock().unwrap().archived_threads()?.is_empty());

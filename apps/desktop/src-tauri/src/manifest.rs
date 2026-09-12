@@ -145,18 +145,37 @@ pub struct ImportOutcome {
     imported: bool,
 }
 
-pub(crate) fn existing_task(store: &hub_db::Store, manifest_id: &str, project_id: &str) -> Result<Option<ThreadMapping>, String> {
-    let Some(receipt) = store.setting(&format!("manifest_receipt:{manifest_id}")).map_err(|e| e.to_string())? else { return Ok(None) };
+pub(crate) fn existing_task(
+    store: &hub_db::Store,
+    manifest_id: &str,
+    project_id: &str,
+) -> Result<Option<ThreadMapping>, String> {
+    let Some(receipt) = store
+        .setting(&format!("manifest_receipt:{manifest_id}"))
+        .map_err(|e| e.to_string())?
+    else {
+        return Ok(None);
+    };
     let receipt: Value = serde_json::from_str(&receipt).map_err(|e| e.to_string())?;
-    let id = receipt["thread_id"].as_str().ok_or("取り込み記録にタスクIDがありません")?;
-    let saved = store.setting(&format!("autonomous:{id}")).map_err(|e| e.to_string())?.ok_or("保存済みタスクが見つかりません")?;
-    let snapshot: crate::autonomous::AutonomousSnapshot = serde_json::from_str(&saved).map_err(|e| e.to_string())?;
+    let id = receipt["thread_id"]
+        .as_str()
+        .ok_or("取り込み記録にタスクIDがありません")?;
+    let saved = store
+        .setting(&format!("autonomous:{id}"))
+        .map_err(|e| e.to_string())?
+        .ok_or("保存済みタスクが見つかりません")?;
+    let snapshot: crate::autonomous::AutonomousSnapshot =
+        serde_json::from_str(&saved).map_err(|e| e.to_string())?;
     if snapshot.thread.project_id.to_string() != project_id {
         return Err("取り込み済みManifestのプロジェクトが一致しません".into());
     }
     // Reopen the saved record only. Never replace its Manifest or replay workers.
-    store.save_thread(&snapshot.thread).map_err(|e| e.to_string())?;
-    store.set_thread_archived(snapshot.thread.id, false).map_err(|e| e.to_string())?;
+    store
+        .save_thread(&snapshot.thread)
+        .map_err(|e| e.to_string())?;
+    store
+        .set_thread_archived(snapshot.thread.id, false)
+        .map_err(|e| e.to_string())?;
     Ok(Some(snapshot.thread))
 }
 
@@ -166,7 +185,10 @@ pub async fn manifest_import_clipboard(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<ImportOutcome, String> {
-    let text = app.clipboard().read_text().map_err(|e| format!("クリップボードを読めません: {e}"))?;
+    let text = app
+        .clipboard()
+        .read_text()
+        .map_err(|e| format!("クリップボードを読めません: {e}"))?;
     manifest_import_text(project_id, text, app, state).await
 }
 
@@ -188,7 +210,10 @@ pub fn manifest_preview_clipboard(
     project_id: String,
     app: tauri::AppHandle,
 ) -> Result<Manifest, String> {
-    let text = app.clipboard().read_text().map_err(|e| format!("クリップボードを読めません: {e}"))?;
+    let text = app
+        .clipboard()
+        .read_text()
+        .map_err(|e| format!("クリップボードを読めません: {e}"))?;
     parse_for_project(&text, &project_id)
 }
 
@@ -209,20 +234,26 @@ pub async fn manifest_import_text(
     {
         let store = state.store.lock().map_err(|e| e.to_string())?;
         if let Some(thread) = existing_task(&store, manifest_id, &project_id)? {
-            return Ok(ImportOutcome { thread, imported: false });
+            return Ok(ImportOutcome {
+                thread,
+                imported: false,
+            });
         }
     }
     let thread = match manifest {
         Manifest::Task(m) => crate::autonomous::import_task(m, app, state.clone()).await?,
         Manifest::Review(m) => crate::autonomous::import_review(m, app, state.clone()).await?,
     };
-    Ok(ImportOutcome { thread, imported: true })
+    Ok(ImportOutcome {
+        thread,
+        imported: true,
+    })
 }
 
 pub fn examples() -> Value {
     json!({
-        "instructions":"Return exactly one JSON object, kind task or review, version 1. Use project_id and full base_revision from project_get; use task_id and artifact_version from task_get for reviews. manifest_id must be unique. The user copies this object into Localoud; MCP never executes it. Every step needs acceptance checks. Difficulty levels 1..5 select the user's saved worker routes, never name a model. Level 1 requires low risk, 1-2 existing files, <100 changed lines. Paths are relative to the project. Dependencies reference step keys. Max 8 steps and 48KB per Manifest. For rework, target existing step keys and stay within their original owned_paths; downstream steps will rerun with updated inputs. Pass requires a complete review of the exact artifact and verification evidence; missing checks require inconclusive.",
-        "task":{"kind":"task","version":1,"manifest_id":"unique-task-id","project_id":"UUID from project_get","base_revision":"full HEAD from project_get","request":"User's request","acceptance":["Overall observable acceptance criteria"],"scope":["src/example.rs"],"steps":[{"key":"implement","title":"Implement the change","goal":"Concrete bounded task","dependencies":[],"level":2,"owned_paths":["src/example.rs"],"acceptance":["Run the relevant tests and report results"],"risk":"low","estimated_loc":50}]},
+        "instructions":"Return exactly one JSON object, kind task or review, version 1. Use project_id and full base_revision from project_get; use task_id and artifact_version from task_get for reviews. manifest_id must be unique. The user copies this object into Localoud; MCP never executes it. Every step needs acceptance checks. Difficulty levels 1..5 select the user's saved worker routes. Omit target_override unless the user supplied an exact Localoud provider/profile/model selection; the Localoud confirmation screen can set it before execution. Never invent provider IDs. Level 1 requires low risk, 1-2 existing files, <100 changed lines. Paths are relative to the project. Dependencies reference step keys. Max 8 steps and 48KB per Manifest. For rework, target existing step keys and stay within their original owned_paths; downstream steps will rerun with updated inputs. Pass requires a complete review of the exact artifact and verification evidence; missing checks require inconclusive.",
+        "task":{"kind":"task","version":1,"manifest_id":"unique-task-id","project_id":"UUID from project_get","base_revision":"full HEAD from project_get","request":"User's request","acceptance":["Overall observable acceptance criteria"],"scope":["src/example.rs"],"steps":[{"key":"implement","title":"Implement the change","goal":"Concrete bounded task","dependencies":[],"level":2,"target_override":null,"owned_paths":["src/example.rs"],"acceptance":["Run the relevant tests and report results"],"risk":"low","estimated_loc":50}]},
         "review":{"kind":"review","version":1,"manifest_id":"unique-review-id","project_id":"same project UUID","task_id":"task UUID from task_list","artifact_version":"exact version from task_get","verdict":"fail","summary":"Review conclusion","findings":["Evidence-backed finding"],"changes":[{"step_key":"implement","instruction":"Fix this issue and rerun the checks"}]},
         "pass":"Use verdict pass with changes [] after verifying every acceptance criterion. Localoud records the explicit review; it does not infer completion from ChatGPT."
     })

@@ -58,12 +58,15 @@ pub fn inspect_context(
     .map_err(|e| e.to_string())
 }
 #[tauri::command]
+#[allow(unreachable_code)]
 pub async fn run_plan(
     project_id: String,
     plan: ExecutionPlan,
     concurrency: usize,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<Task>, String> {
+    let _ = (&project_id, &plan, concurrency, &state);
+    return Err("旧Plan実行は別セッションレビューを保証できないため無効です。「ChatGPTで計画」から新しいManifest実行を開始してください。".into());
     let project = ProjectId(project_id.parse().map_err(|_| "invalid project ID")?);
     let (dag, briefs) = plan.compile(project).map_err(|e| e.to_string())?;
     if !(1..=8).contains(&concurrency) {
@@ -180,10 +183,13 @@ pub async fn run_plan(
 }
 
 #[tauri::command]
+#[allow(unreachable_code)]
 pub async fn resume_plan(
     project_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<Task>, String> {
+    let _ = (&project_id, &state);
+    return Err("旧Plan実行は再開できません。保存済み成果物を確認し、新しいManifestで未完了範囲を開始してください。".into());
     let project = ProjectId(project_id.parse().map_err(|_| "invalid project ID")?);
     let mut running = state.running_plans.lock().await;
     if running.contains(&project) {

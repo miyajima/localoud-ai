@@ -102,25 +102,46 @@ async fn manage_sessions(
         let mut i = 0;
         while i < ids.len() {
             let id = ids[i];
-            let thread = all.iter().find(|t| t.id == id).ok_or("セッションが見つかりません。")?;
+            let thread = all
+                .iter()
+                .find(|t| t.id == id)
+                .ok_or("セッションが見つかりません。")?;
             if running.contains(&thread.project_id) {
                 return Err("計画の実行が終了してから操作してください。".into());
             }
             if let Some(w) = crate::workflow::load(&store, &id.to_string())? {
                 for leg in [w.chatgpt, w.codex].into_iter().flatten() {
                     let leg = crate::parse_thread(leg)?;
-                    if !ids.contains(&leg) { ids.push(leg); }
+                    if !ids.contains(&leg) {
+                        ids.push(leg);
+                    }
                 }
             }
             for child in &all {
-                if store.setting(&format!("autonomous_parent:{}", child.id)).map_err(|e| e.to_string())?.as_deref() == Some(id.to_string().as_str())
-                    && !ids.contains(&child.id) {
+                if store
+                    .setting(&format!("autonomous_parent:{}", child.id))
+                    .map_err(|e| e.to_string())?
+                    .as_deref()
+                    == Some(id.to_string().as_str())
+                    && !ids.contains(&child.id)
+                {
                     ids.push(child.id);
                 }
             }
             i += 1;
         }
-        if all.iter().any(|t| ids.contains(&t.id) && matches!(t.status.as_str(), "queued" | "running" | "inProgress" | "dispatching" | "integrating" | "stopping")) {
+        if all.iter().any(|t| {
+            ids.contains(&t.id)
+                && matches!(
+                    t.status.as_str(),
+                    "queued"
+                        | "running"
+                        | "inProgress"
+                        | "dispatching"
+                        | "integrating"
+                        | "stopping"
+                )
+        }) {
             return Err("実行完了後に操作してください。".into());
         }
         store.check_threads_idle(&ids).map_err(|e| e.to_string())?;
@@ -129,10 +150,22 @@ async fn manage_sessions(
     // Children first. Keep the visible root available if any provider operation fails.
     ids.reverse();
     for id in ids {
-        let thread = all.iter().find(|t| t.id == id).ok_or("セッションが見つかりません。")?;
+        let thread = all
+            .iter()
+            .find(|t| t.id == id)
+            .ok_or("セッションが見つかりません。")?;
         if thread.provider == "codex" && action != "delete" {
-            state.sessions().await?.set_archived(id, action == "archive").await
-                .map_err(|e| format!("Codexとのアーカイブ同期に失敗しました（{}）: {e:#}", thread.title))?;
+            state
+                .sessions()
+                .await?
+                .set_archived(id, action == "archive")
+                .await
+                .map_err(|e| {
+                    format!(
+                        "Codexとのアーカイブ同期に失敗しました（{}）: {e:#}",
+                        thread.title
+                    )
+                })?;
         } else {
             let mut store = state.store.lock().map_err(|e| e.to_string())?;
             match action {
@@ -140,14 +173,17 @@ async fn manage_sessions(
                 "restore" => store.set_thread_archived(id, false),
                 "delete" => store.delete_thread(id),
                 _ => unreachable!(),
-            }.map_err(|e| e.to_string())?;
+            }
+            .map_err(|e| e.to_string())?;
         }
     }
     Ok(())
 }
 
 #[tauri::command]
-pub async fn sync_archived_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+pub async fn sync_archived_sessions(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<String>, String> {
     let _workflow = state.workflow_lock.lock().await;
     let pending = {
         let store = state.store.lock().map_err(|e| e.to_string())?;
@@ -155,8 +191,13 @@ pub async fn sync_archived_sessions(state: tauri::State<'_, AppState>) -> Result
         let mut pending = vec![];
         for thread in store.threads().map_err(|e| e.to_string())? {
             if archived.contains(&thread.id.to_string())
-                && store.setting(&format!("codex_archive_synced:{}", thread.id)).map_err(|e| e.to_string())?.as_deref() != Some("true")
-                && thread.provider == "codex" {
+                && store
+                    .setting(&format!("codex_archive_synced:{}", thread.id))
+                    .map_err(|e| e.to_string())?
+                    .as_deref()
+                    != Some("true")
+                && thread.provider == "codex"
+            {
                 pending.push(thread.id);
             }
         }
@@ -164,7 +205,9 @@ pub async fn sync_archived_sessions(state: tauri::State<'_, AppState>) -> Result
     };
     let mut failures = vec![];
     for id in pending {
-        if let Err(e) = manage_sessions(&[id], "archive", &state).await { failures.push(e); }
+        if let Err(e) = manage_sessions(&[id], "archive", &state).await {
+            failures.push(e);
+        }
     }
     Ok(failures)
 }
@@ -196,23 +239,59 @@ pub async fn manage_project(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<String>, String> {
     use tauri_plugin_opener::OpenerExt;
-    let id=hub_core::ProjectId(project_id.parse().map_err(|_| "invalid project ID")?);
-    let _workflow=state.workflow_lock.lock().await;
-    let project=state.store.lock().map_err(|e|e.to_string())?.projects().map_err(|e|e.to_string())?.into_iter().find(|p|p.id==id).ok_or("プロジェクトが見つかりません。")?;
+    let id = hub_core::ProjectId(project_id.parse().map_err(|_| "invalid project ID")?);
+    let _workflow = state.workflow_lock.lock().await;
+    let project = state
+        .store
+        .lock()
+        .map_err(|e| e.to_string())?
+        .projects()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|p| p.id == id)
+        .ok_or("プロジェクトが見つかりません。")?;
     match action.as_str() {
-        "rename" => state.store.lock().map_err(|e|e.to_string())?.rename_project(id,name.as_deref().ok_or("名前が必要です。")?).map_err(|e|e.to_string())?,
-        "reveal" => app.opener().open_path(project.root.to_string_lossy(),None::<&str>).map_err(|e|e.to_string())?,
+        "rename" => state
+            .store
+            .lock()
+            .map_err(|e| e.to_string())?
+            .rename_project(id, name.as_deref().ok_or("名前が必要です。")?)
+            .map_err(|e| e.to_string())?,
+        "reveal" => app
+            .opener()
+            .open_path(project.root.to_string_lossy(), None::<&str>)
+            .map_err(|e| e.to_string())?,
         "archive" => {
-            if state.running_plans.lock().await.contains(&id) { return Err("計画の実行完了後に操作してください。".into()); }
-            let ids = state.store.lock().map_err(|e|e.to_string())?.threads().map_err(|e|e.to_string())?.into_iter().filter(|t|t.project_id==id).map(|t|t.id).collect::<Vec<_>>();
+            if state.running_plans.lock().await.contains(&id) {
+                return Err("計画の実行完了後に操作してください。".into());
+            }
+            let ids = state
+                .store
+                .lock()
+                .map_err(|e| e.to_string())?
+                .threads()
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .filter(|t| t.project_id == id)
+                .map(|t| t.id)
+                .collect::<Vec<_>>();
             manage_sessions(&ids, "archive", &state).await?;
-        },
+        }
         "worktree" => {
-            let tree=hub_worktree::GitWorktrees::new(&project.root).map_err(|e|e.to_string())?.create(hub_core::TaskId::default(),"HEAD").await.map_err(|e|e.to_string())?;
-            let path=tree.path.to_string_lossy().to_string();
-            state.store.lock().map_err(|e|e.to_string())?.register_project(&tree.path).map_err(|e|e.to_string())?;
+            let tree = hub_worktree::GitWorktrees::new(&project.root)
+                .map_err(|e| e.to_string())?
+                .create(hub_core::TaskId::default(), "HEAD")
+                .await
+                .map_err(|e| e.to_string())?;
+            let path = tree.path.to_string_lossy().to_string();
+            state
+                .store
+                .lock()
+                .map_err(|e| e.to_string())?
+                .register_project(&tree.path)
+                .map_err(|e| e.to_string())?;
             return Ok(Some(path));
-        },
+        }
         _ => return Err("不明な操作です。".into()),
     }
     Ok(None)

@@ -34,6 +34,7 @@ pub struct Project {
 pub enum ExecutorKind {
     Spark,
     Codex,
+    Api,
     Astra,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +43,7 @@ pub enum ExecutorPreference {
     Auto,
     Spark,
     Codex,
+    Api,
     Astra,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -119,8 +119,10 @@ pub trait CodingAgentProvider: Send + Sync {
     fn events(&self) -> broadcast::Receiver<AgentEvent>;
 }
 
+pub mod a2a;
 pub mod composer;
 pub mod local;
+pub mod providers;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -142,6 +144,14 @@ pub enum EventDetails {
     Command {
         command: String,
         exit_code: Option<i32>,
+    },
+    Approval {
+        approval_id: String,
+        digest: String,
+        executable: String,
+        argv: Vec<String>,
+        cwd: String,
+        additional_permissions: Vec<String>,
     },
 }
 #[derive(Debug, Clone)]
