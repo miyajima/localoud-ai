@@ -12,7 +12,7 @@ mod plans;
 mod read_mcp;
 mod workflow;
 mod workspace_ui;
-use hub_core::{ExecutorKind, ExecutorPreference, ModelUsageRecord};
+use hub_core::{ExecutorKind, ExecutorPreference};
 use hub_core::{HubThreadId, Project, ProjectId, ThreadMapping};
 use hub_db::Store;
 use hub_events::{EventBus, JournalEvent};
@@ -496,21 +496,20 @@ async fn run_local(
 fn model_usage(
     thread_id: Option<String>,
     state: tauri::State<AppState>,
-) -> Result<Vec<ModelUsageRecord>, String> {
-    if let Some(id) = thread_id {
-        return state
-            .store
-            .lock()
-            .map_err(|e| e.to_string())?
-            .thread_usage(parse_thread(id)?)
-            .map_err(|e| e.to_string());
-    }
-    state
-        .store
-        .lock()
-        .map_err(|e| e.to_string())?
-        .usage()
-        .map_err(|e| e.to_string())
+) -> Result<Vec<serde_json::Value>, String> {
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    let rows = match thread_id {
+        Some(id) => store.thread_usage(parse_thread(id)?),
+        None => store.usage(),
+    }.map_err(|e| e.to_string())?;
+    let projects = store.usage_projects().map_err(|e| e.to_string())?;
+    rows.into_iter().map(|row| {
+        let mut value = serde_json::to_value(&row).map_err(|e| e.to_string())?;
+        let project = projects.get(&row.id);
+        value["project_id"] = serde_json::json!(project.map(|p| &p.0));
+        value["project_name"] = serde_json::json!(project.map(|p| &p.1));
+        Ok(value)
+    }).collect()
 }
 #[tauri::command]
 async fn summarize_task(
@@ -883,6 +882,8 @@ fn main() {
                     manifest::manifest_import_text,
                     embedded_browser::browser_layout,
                     embedded_browser::browser_reload,
+                    embedded_browser::browser_back,
+                    embedded_browser::browser_home,
                     autonomous::autonomous_snapshot,
                     autonomous::autonomous_activity,
                     autonomous::autonomous_stop,

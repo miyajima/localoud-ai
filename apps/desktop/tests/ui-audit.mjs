@@ -34,6 +34,7 @@ async function fixture(options={},kind='direct') {
     case 'threads':return [thread];
     case 'available_models':return {models:[model],warnings:[]};
     case 'thread_models':return {'task-1':model.model};
+    case 'thread_model_targets':return {};
     case 'thread_reasoning':return {'task-1':'medium'};
     case 'archived_threads':case 'sync_archived_sessions':case 'event_history':case 'prompt_history':case 'task_graph':return [];
     case 'completion_settings':return {enabled:false};
@@ -43,10 +44,12 @@ async function fixture(options={},kind='direct') {
     case 'resume_task':return {active_turn:null,messages:[{role:'user',text:'検索結果の見出しと説明を読みやすくしてください。キーボード操作も維持してください。'},{role:'assistant',text:'## 変更内容\n\n見出しと説明の間隔を整え、キーボードのフォーカスを維持しました。\n\n- 検索結果を読みやすく表示\n- 長いURLも画面内で折り返し\n- テストで基本操作を確認\n\n```ts\nconst label = "検索結果";\n```\n\nテスト用の表示です。実際のファイルは変更していません。'}]};
     case 'worker_insights':return {review:null,recovery:null};
     case 'repo_diff':return 'diff --git a/search.ts b/search.ts\n--- a/search.ts\n+++ b/search.ts\n@@ -1 +1 @@\n-const spacing = 4;\n+const spacing = 12;';
-    case 'model_usage':return [{provider:'codex',model:'fixture-model',prompt_tokens:1200,completion_tokens:340,cached_tokens:null,latency_ms:1600}];
+    case 'model_usage':return [{project_id:'fixture',project_name:'Localoud',provider:'codex',model:'fixture-model',prompt_tokens:1200,completion_tokens:340,cached_tokens:null,latency_ms:1600}];
     case 'inspect_context':return null;
     case 'memory_candidates':return {candidates:[]};
     case 'local_model_settings':return {display_name:'Local fixture',model_id:'fixture-local',endpoint:'http://127.0.0.1:9999',quantization_bits:4};
+    case 'provider_profiles':return [];
+    case 'mcp_settings':case 'set_mcp_settings':return {config:args.config||{enabled:true,project_ids:['fixture'],connection:{kind:'secure_tunnel',tunnel_id:'fixture-tunnel'}},running:true,error:null,local_endpoint:'http://127.0.0.1:8792/mcp'};
     case 'codex_binary':return '/usr/local/bin/codex';
     case 'astra_settings':return {mode:'disabled',model:'fixture-model',reasoning:null};
     case 'autonomous_snapshot':return {thread,messages:[{role:'user',text:thread.title}],steps:[{step:{key:'implementation',title:'検索結果を改善',goal:'見出しと説明の余白を整える',level:3,owned_paths:['src/search.ts'],acceptance:['キーボード操作を維持'],dependencies:[]},status:'completed',target:{model:'fixture-model',reasoning:'medium'},child_id:'child-1',capsule:'保存済みの実行指示です。',verification:[{status:'pass',command:'npm test',exit_code:0,target_revision:'fixture-revision',log_ref:'fixture-log',output:'テスト成功（画面検証用データ）'}],usage:[{prompt_tokens:1200,completion_tokens:340,latency_ms:1600}]}],children:[{id:'child-1',provider_thread:{id:'child-provider'}}],artifact_version:'fixture-revision',source_head:'fixture-base',iteration:1,final_diff:null,artifact:{path:'/workspace/fixture-worktree'},manifest:{manifest_id:'fixture-manifest',request:thread.title,acceptance:['読みやすさとキーボード操作を両立する']},review:{manifest_id:'fixture-review',verdict:'pass',summary:'画面検証用の保存記録です。実際のLLM実行は行っていません。',findings:[]}};
@@ -92,6 +95,17 @@ try{
   await f.page.locator('#settings').click();
   await f.page.locator('#local-name').inputValue();
   await inspect(f.page,`desktop-${mode}-settings`);
+  await f.page.locator('[data-settings-page="mcp"]').click();
+  await f.page.locator('#mcp-projects input').waitFor();
+  check('MCP checkbox and label align',await f.page.locator('#mcp-projects label').evaluate(label=>{const a=label.querySelector('input').getBoundingClientRect(),b=label.querySelector('span').getBoundingClientRect();return Math.abs(a.y+a.height/2-b.y-b.height/2)<2;}));
+  await inspect(f.page,`desktop-${mode}-settings-mcp`);
+  await f.page.locator('#mcp-projects input').uncheck();
+  await f.page.locator('[data-settings-page="usage"]').click();
+  check('Usage identifies its project',await f.page.locator('#total-usage tbody td').first().textContent()==='Localoud');
+  await inspect(f.page,`desktop-${mode}-settings-usage`);
+  await f.page.locator('[data-settings-page="mcp"]').click();
+  check('Switching settings preserves unpublished checkbox edits',!await f.page.locator('#mcp-projects input').isChecked());
+  await f.page.locator('[data-settings-page="connection"]').click();
   await f.page.locator('#settings-cancel').click();
   for(const tab of ['Plan','Diff','Agents','Terminal','Context']){
    await f.page.locator(`[data-tab="${tab}"]`).click();
@@ -185,7 +199,8 @@ try{
  check('100 streaming updates are rendered in one batch',stream.contentChanges===1&&stream.treeChanges===0&&stream.final);
  check('Streaming preserves the focused message action',stream.focus==='0');
  results.push({name:'stream-burst',...stream,violations:[],smallText:[],smallTargets:[],width:1280,scrollWidth:1280});
- check('The fixture made no unexpected native calls',!(await p.locator('#error').textContent()).includes('AUDIT BLOCKED'));
+ const nativeError=await p.locator('#error').textContent();
+ check(`The fixture made no unexpected native calls: ${nativeError}`,!nativeError.includes('AUDIT BLOCKED'));
  assert.deepEqual(f.errors,[]);await f.context.close();
 }finally{await writeFile(`${output}/report.json`,JSON.stringify({screens:results,checks},null,2));await browser.close();await server?.close();}
 if(!process.argv.includes('--baseline')){

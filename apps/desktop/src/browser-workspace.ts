@@ -15,11 +15,11 @@ export function setupBrowserWorkspace(invoke: Invoke) {
   header.after(shell);
 
   const toggle = document.createElement('button'); toggle.id = 'browser-toggle'; toggle.type = 'button';
-  toggle.textContent = 'ChatGPTで相談'; toggle.title = 'ChatGPTを開く ⌘⇧B';
+  toggle.textContent = 'ChatGPTに相談'; toggle.title = 'ChatGPTを開く ⌘⇧B';
   toggle.setAttribute('aria-controls', 'browser-panel'); toggle.setAttribute('aria-haspopup', 'dialog'); header.append(toggle);
   const overlay = document.createElement('div'); overlay.id = 'browser-overlay'; overlay.hidden = true;
   const panel = document.createElement('section'); panel.id = 'browser-panel'; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-labelledby', 'browser-title');
-  panel.innerHTML = '<div class="browser-toolbar"><div><strong id="browser-title">ChatGPT Web</strong><span>計画・相談・レビュー</span></div><button id="browser-reload" type="button" aria-label="ChatGPTを再読み込み" title="再読み込み"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M13 6A5 5 0 1 0 14 9"/><path d="M13 3v3h-3"/></svg></button><button id="browser-close" type="button">作業に戻る <span aria-hidden="true">×</span></button></div><div id="chatgpt-usage"></div><div id="browser-surface"><p id="browser-error" role="alert" aria-live="assertive"></p></div><section id="browser-handoff" aria-label="Localoudとの受け渡し" hidden></section>';
+  panel.innerHTML = '<div class="browser-toolbar"><div><strong id="browser-title">ChatGPT Web</strong><span>計画・相談・レビュー</span></div><button id="browser-back" type="button" title="前のページに戻る">← 戻る</button><button id="browser-home" type="button">ChatGPTホーム</button><button id="browser-reload" type="button" aria-label="ChatGPTを再読み込み" title="再読み込み"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M13 6A5 5 0 1 0 14 9"/><path d="M13 3v3h-3"/></svg></button><button id="browser-close" type="button">作業に戻る <span aria-hidden="true">×</span></button></div><div id="chatgpt-usage"></div><div id="browser-surface"><p id="browser-error" role="alert" aria-live="assertive"></p></div><section id="browser-handoff" aria-label="Localoudとの受け渡し" hidden></section>';
   overlay.append(panel); document.body.append(overlay);
   const divider = document.createElement('div'); divider.id = 'sidebar-divider'; divider.tabIndex = 0;
   divider.setAttribute('role', 'separator'); divider.setAttribute('aria-label', 'プロジェクト一覧の幅'); divider.setAttribute('aria-orientation', 'vertical'); main.before(divider);
@@ -63,6 +63,27 @@ export function setupBrowserWorkspace(invoke: Invoke) {
     }
     reflect();
   }
+  document.addEventListener('contextmenu', event => event.preventDefault());
+  const guide = document.createElement('dialog');
+  guide.id = 'chatgpt-paste-guide';
+  guide.innerHTML = '<h2>ChatGPTへの依頼をコピーしました</h2><p>クリップボードに依頼を入れました。ChatGPT Webのチャット欄にペーストして送信してください。</p><p id="chatgpt-return-guide"></p><div class="dialog-actions"><button type="button" id="guide-close">閉じる</button><button type="button" id="guide-open" class="primary">ChatGPTを開く</button></div>';
+  document.body.append(guide);
+  guide.querySelector('#guide-close')!.addEventListener('click', () => guide.close());
+  guide.querySelector('#guide-open')!.addEventListener('click', () => { guide.close(); showBrowser(); });
+  function showCopiedRequestGuide(kind: 'plan' | 'review') {
+    closeBrowser();
+    guide.querySelector('#chatgpt-return-guide')!.textContent = `回答が来たら、回答内の${kind === 'plan' ? '計画' : 'レビュー結果'}のJSONをコピーし、画面下部の「${kind === 'plan' ? 'コピーした計画を確認' : 'コピーした結果を確認'}」を押してください。内容を確認してLocaloudに取り込めます。`;
+    guide.showModal();
+  }
+  for (const action of ['back', 'home']) {
+    const button = panel.querySelector<HTMLButtonElement>(`#browser-${action}`)!;
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try { await invoke(`browser_${action}`); }
+      catch (e) { panel.querySelector('#browser-error')!.textContent = `移動できませんでした。 ${String(e)}`; }
+      finally { button.disabled = false; }
+    });
+  }
   toggle.addEventListener('click', showBrowser);
   panel.querySelector('#browser-close')!.addEventListener('click', closeBrowser);
   overlay.addEventListener('click', e => { if (e.target === overlay) closeBrowser(); });
@@ -95,7 +116,7 @@ export function setupBrowserWorkspace(invoke: Invoke) {
   new ResizeObserver(() => void layout()).observe(panel.querySelector('#browser-surface')!);
   window.addEventListener('resize', reflect); reflect();
   return {
-    showWorkspace: closeBrowser, showBrowser, hideBrowser: closeBrowser, isBrowserOpen: () => !overlay.hidden,
+    showWorkspace: closeBrowser, showBrowser, showCopiedRequestGuide, hideBrowser: closeBrowser, isBrowserOpen: () => !overlay.hidden,
     setSidebarHidden: (value: boolean) => { app.classList.toggle('sidebar-hidden', value); const button = app.querySelector('#sidebar-toggle'); button?.setAttribute('aria-expanded', String(!value)); button?.setAttribute('aria-label', value ? 'プロジェクト一覧を表示' : 'プロジェクト一覧を閉じる'); reflect(); },
     setWorkflow: (markup: string, action: (name: string) => void) => {
       if (workflow.innerHTML === markup) return; workflow.innerHTML = markup;

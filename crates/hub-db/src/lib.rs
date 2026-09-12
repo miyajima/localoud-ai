@@ -1034,6 +1034,25 @@ impl Store {
     pub fn usage(&self) -> Result<Vec<hub_core::ModelUsageRecord>> {
         self.scoped_usage(None)
     }
+    /// Attribute only records with one evidenced project; never use the active UI project.
+    pub fn usage_projects(&self) -> Result<std::collections::HashMap<String, (String, String)>> {
+        let mut query = self.conn.prepare(
+            "WITH links AS (
+                SELECT u.id, t.project_id FROM model_usage u JOIN tasks t ON t.id=u.task_id
+                UNION
+                SELECT u.id, t.project_id FROM model_usage u JOIN provider_threads t
+                ON (u.task_id IS NOT NULL AND t.task_id=u.task_id)
+                OR (u.provider=t.provider AND u.turn_id IS NOT NULL AND (
+                    EXISTS (SELECT 1 FROM turns x WHERE x.thread_id=t.id AND x.provider_turn_id=u.turn_id)
+                    OR EXISTS (SELECT 1 FROM events e WHERE e.thread_id=t.id AND json_extract(e.body,'$.turn_id')=u.turn_id)
+                    OR EXISTS (SELECT 1 FROM provider_usage_snapshots s WHERE s.provider_thread_id=t.provider_thread_id AND s.turn_id=u.turn_id)
+                ))
+            ) SELECT l.id, p.id, p.name FROM links l JOIN projects p ON p.id=l.project_id
+              GROUP BY l.id HAVING COUNT(DISTINCT l.project_id)=1"
+        )?;
+        let rows = query.query_map([], |row| Ok((row.get(0)?, (row.get(1)?, row.get(2)?))))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
     pub fn thread_usage(&self, id: HubThreadId) -> Result<Vec<hub_core::ModelUsageRecord>> {
         self.scoped_usage(Some(id))
     }
@@ -1259,7 +1278,28 @@ mod tests {
             }
             ids.push(thread.id);
         }
-        assert_eq!(store.usage()?.len(), 2);
+        let attributed = store.usage_projects()?;
+        assert_eq!(attributed.len(), 2);
+        assert_eq!(attributed["usage0"].0, project.id.to_string());
+        assert_eq!(attributed["usage1"].1, project.name);
+        // A second project sharing an ambiguous provider turn must not inherit attribution.
+        let other_dir = tempfile::tempdir()?;
+        assert!(std::process::Command::new("git").args(["init", "-q"]).arg(other_dir.path()).status()?.success());
+        let other = store.register_project(other_dir.path())?;
+        let other_thread = ThreadMapping {
+            id: HubThreadId::default(), project_id: other.id, provider: "codex".into(),
+            provider_thread_id: "other-provider".into(), title: "other".into(), status: "completed".into(),
+        };
+        store.save_thread(&other_thread)?;
+        store.append_event(Some("other-provider"), "turn_completed", r#"{"turn_id":"turn0"}"#)?;
+        assert!(!store.usage_projects()?.contains_key("usage0"));
+        store.record_usage(&hub_core::ModelUsageRecord {
+            id: "unattributed".into(), provider: "local".into(), model: "local".into(), task_id: None,
+            turn_id: None, prompt_tokens: None, cached_tokens: None, completion_tokens: None,
+            estimated_cost: None, latency_ms: None,
+        })?;
+        assert!(!store.usage_projects()?.contains_key("unattributed"));
+        assert_eq!(store.usage()?.len(), 3);
         for (n, id) in ids.into_iter().enumerate() {
             let rows = store.thread_usage(id)?;
             assert_eq!(rows.len(), 1);

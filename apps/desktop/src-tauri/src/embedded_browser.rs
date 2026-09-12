@@ -2,6 +2,8 @@
 use serde::Deserialize;
 use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl};
 
+const DISABLE_CONTEXT_MENU: &str = "window.addEventListener('contextmenu', event => event.preventDefault(), true);";
+
 const LABEL: &str = "chatgpt-browser";
 // Stable, app-specific WKWebsiteDataStore; never imports another browser's cookies.
 const DATA_STORE: [u8; 16] = *b"LocaloudChatGPT1";
@@ -65,6 +67,7 @@ pub async fn browser_layout(
                 WebviewUrl::External("https://chatgpt.com/".parse().map_err(|e| format!("{e}"))?),
             )
             .data_store_identifier(DATA_STORE)
+            .initialization_script(DISABLE_CONTEXT_MENU)
             .initialization_script(include_str!("chatgpt-usage-observer.js"))
             .on_navigation(move |url| {
                 if url.scheme() == "localoud-usage" {
@@ -84,6 +87,7 @@ pub async fn browser_layout(
                     tauri::WebviewWindowBuilder::new(&popup_app, label, WebviewUrl::External(url))
                         .title("ChatGPT — Browser")
                         .data_store_identifier(DATA_STORE)
+            .initialization_script(DISABLE_CONTEXT_MENU)
                         .window_features(features)
                         .on_navigation(|url| {
                             url.scheme() == "https" || url.as_str() == "about:blank"
@@ -132,6 +136,22 @@ pub async fn browser_reload(app: tauri::AppHandle) -> Result<(), String> {
     app.get_webview(LABEL)
         .ok_or("ブラウザを開いてください")?
         .reload()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn browser_back(app: tauri::AppHandle) -> Result<(), String> {
+    app.get_webview(LABEL)
+        .ok_or("ブラウザを開いてください")?
+        .eval("window.history.back()")
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn browser_home(app: tauri::AppHandle) -> Result<(), String> {
+    app.get_webview(LABEL)
+        .ok_or("ブラウザを開いてください")?
+        .navigate("https://chatgpt.com/".parse().map_err(|e| format!("{e}"))?)
         .map_err(|e| e.to_string())
 }
 

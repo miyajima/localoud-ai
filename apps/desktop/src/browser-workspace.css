@@ -69,3 +69,7 @@ body.browser-open #app.sidebar-hidden .sidebar-heading .brand{display:none}
 #app .composing-task .compose{padding:18px;border-radius:12px;box-shadow:0 5px 20px #25334308}
 #app .composing-task #task-input{min-height:110px;font-size:0.875rem;line-height:1.7}
 @container(max-width:500px){#app .composing-task .welcome-flow h2{font-size:1.5625rem}.model-picker-panel{width:min(280px,75cqw)}.flow-next{flex-direction:column;align-items:stretch}.flow-actions{justify-content:flex-start}.footnote{flex-wrap:wrap;line-height:1.5}}
+
+#chatgpt-paste-guide{max-width:520px;width:calc(100vw - 48px)}
+#chatgpt-paste-guide p{line-height:1.8}
+.browser-toolbar{flex-wrap:wrap;min-height:56px;height:auto;gap:8px;padding-block:8px}

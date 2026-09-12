@@ -21,7 +21,7 @@ export function flowMarkup(f:Flow){
   if(halted)actions=action('resume','再開・状態を確認',true);
   else if(f.hasTask&&index===1&&f.running!==false)actions=action('stop',f.stopping?'停止中…':'停止',false,f.stopping);
  }else if(!f.hasTask){
-  next=f.planningRequested?'依頼をコピーしました。ChatGPTで相談し、計画をコピーしてください。':'依頼を書いて、ChatGPTで計画を作ります。';
+  next=f.planningRequested?'依頼をChatGPTのチャット欄にペーストして送信し、回答の計画JSONをコピーして「コピーした計画を確認」を押してください。':'依頼を書いて、ChatGPTで計画を作ります。';
   actions=action('write',f.planningRequested?'依頼を編集':'依頼を書く',!f.planningRequested)+action('import',f.importing?'取り込み中…':'コピーした計画を確認',f.planningRequested);
  }else if(halted){next='実行が中断しています。状態を確認して再開してください。';actions=action('resume','再開・状態を確認',true);}
  else if(index===2){next=f.status==='queued'?'計画を取り込みました。開始を待っています。':f.status==='stopping'?'停止処理中です。確定を待っています。':f.iteration&&f.iteration>1?'修正内容を実装・検証しています。完了すると再レビューへ進みます。':'計画に沿って実装・検証しています。完了するとレビューへ進みます。';actions=action('stop',f.stopping||f.status==='stopping'?'停止中…':'停止',false,f.stopping||f.status==='stopping');}

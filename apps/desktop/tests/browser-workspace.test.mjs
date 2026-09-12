@@ -51,3 +51,25 @@ test('handoff actions retain selected task and lock during import',async()=>{
   const divider=f.doc.querySelector('#sidebar-divider');divider.dispatchEvent(new f.dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(f.dom.window.localStorage.getItem('localoud-sidebar-width'),'250');
  }finally{f.dom.window.close();}
 });
+
+test('copied request instructions precede ChatGPT and navigation stays accessible',async()=>{
+ const f=fixture();try{
+  f.ui.showCopiedRequestGuide('plan');await f.settle();
+  assert.equal(f.doc.querySelector('#chatgpt-paste-guide').open,true);
+  assert.equal(f.doc.querySelector('#browser-overlay').hidden,true);
+  assert.match(f.doc.querySelector('#chatgpt-return-guide').textContent,/コピーした計画を確認/);
+  f.doc.querySelector('#guide-open').click();await f.settle();
+  assert.equal(f.doc.querySelector('#chatgpt-paste-guide').open,false);
+  assert.equal(f.visible(),true);
+  f.doc.querySelector('#browser-back').click();await f.settle();
+  f.doc.querySelector('#browser-home').click();await f.settle();
+  assert.ok(f.calls.some(c=>c.command==='browser_back'));
+  assert.ok(f.calls.some(c=>c.command==='browser_home'));
+  f.ui.showCopiedRequestGuide('review');
+  assert.match(f.doc.querySelector('#chatgpt-return-guide').textContent,/コピーした結果を確認/);
+  f.doc.querySelector('#guide-close').click();await f.settle();
+  assert.equal(f.doc.querySelector('#browser-overlay').hidden,true);
+  const event=new f.dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true});
+  f.doc.body.dispatchEvent(event);assert.equal(event.defaultPrevented,true);
+ }finally{f.dom.window.close();}
+});
