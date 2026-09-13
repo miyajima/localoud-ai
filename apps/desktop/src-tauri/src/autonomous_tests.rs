@@ -1,5 +1,24 @@
 use super::*;
 
+#[test]
+fn command_log_redacts_without_aborting_worker_evidence() {
+    let raw = "example: api_key=synthetic-test-value\nverification failed";
+    let (log, redacted) = command_log(raw).unwrap();
+    assert!(redacted);
+    assert!(!log.contains("synthetic-test-value"));
+    assert!(log.contains("verification failed"));
+    assert!(bounded(raw.into(), REVIEW_LIMIT).is_err());
+}
+
+#[test]
+fn command_log_preserves_plain_output_and_size_limit() {
+    assert_eq!(
+        command_log("exit 1: missing file").unwrap(),
+        ("exit 1: missing file".into(), false)
+    );
+    assert!(command_log(&"x".repeat(REVIEW_LIMIT + 1)).is_err());
+}
+
 fn step(key: &str, paths: &[&str], dependencies: &[&str]) -> PlanStep {
     PlanStep {
         key: key.into(),
@@ -333,6 +352,40 @@ fn capsules_are_bounded_and_exclude_orchestration_and_unrelated_outputs() {
     w.steps[0].output = Some("あ".repeat(CAPSULE_LIMIT / 3));
     assert!(capsule(&w, 1).is_err());
 }
+#[test]
+fn dependency_capsule_keeps_failures_without_copying_large_command_logs() {
+    let mut tasks = vec![
+        task(step(
+            "baseline",
+            &["reports/baseline.md", "reports/verification.json"],
+            &[],
+        )),
+        task(step("audit", &["reports/audit.md"], &["baseline"])),
+    ];
+    completed(&mut tasks[0]);
+    tasks[0].verification = (0..99).map(|i| json!({
+        "status": if i < 95 { "passed" } else if i < 97 { "failed" } else if i == 97 { "not_run" } else { "unknown" },
+        "output": "large log text".repeat(1000),
+        "command": "fixture command",
+        "log_ref": format!("verification_log:fixture:{i}")
+    })).collect();
+    let w = workflow(tasks);
+    let original = w.steps[0].verification.clone();
+    let payload = capsule(&w, 1).unwrap();
+    assert!(payload.len() < CAPSULE_LIMIT);
+    assert!(!payload.contains(&"large log text".repeat(1000)));
+    let envelope: protocol_types::a2a::Message = serde_json::from_str(&payload).unwrap();
+    let dependency = &envelope.parts[0].data.as_ref().unwrap()["dependencies"][0];
+    assert_eq!(dependency["verification"]["records"], 99);
+    assert_eq!(dependency["verification"]["passed"], 95);
+    assert_eq!(dependency["verification"]["failed"], 2);
+    assert_eq!(dependency["verification"]["not_run"], 1);
+    assert_eq!(dependency["verification"]["unknown"], 1);
+    assert_eq!(dependency["verification"]["acceptance_status"], "unknown");
+    assert_eq!(dependency["artifacts"][1], "reports/verification.json");
+    assert_eq!(w.steps[0].verification, original);
+}
+
 #[tokio::test]
 async fn stop_prevents_dispatch_and_interrupts_inflight_work() {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -822,4 +875,19 @@ fn progress_history_filters_other_turns_and_stream_placeholders() {
     assert_eq!(events.len(), 2);
     assert!(events[0].1.contains("inspect"));
     assert!(events[1].1.contains("editing file"));
+}
+
+#[test]
+fn context_measurements_are_explicit_estimates_and_soft_targets() {
+    let metrics = context_metrics("あ".repeat(100).as_str(), "ああああ", 1, CAPSULE_LIMIT);
+    assert_eq!(metrics["after_bytes"], 12);
+    assert_eq!(metrics["after_estimated_tokens"], 2);
+    assert_eq!(metrics["over_target"], true);
+    assert!(bounded("x".repeat(49 * 1024), CAPSULE_LIMIT).is_ok());
+    assert!(metrics["provider_context_limit"].is_null());
+    let evidence =
+        compact_evidence(&json!({"status":"failed","exit_code":1,"output":"x".repeat(3000)}));
+    assert_eq!(evidence["status"], "failed");
+    assert_eq!(evidence["exit_code"], 1);
+    assert_eq!(evidence["output_excerpted"], true);
 }

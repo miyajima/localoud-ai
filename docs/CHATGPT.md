@@ -17,7 +17,7 @@
 
 ## Manifestと実行条件
 
-正確なJSON例はMCPの `handoff_schema` から取得できます。Task Manifestは `kind: task`、`version: 1`、一意の `manifest_id`、登録済み `project_id`、完全なGit `base_revision`、依頼、受け入れ条件、scope、step・依存・難易度を含みます。最大48KB、最大8stepです。
+正確なJSON例はMCPの `handoff_schema` から取得できます。Task Manifestは `kind: task`、`version: 1`、一意の `manifest_id`、登録済み `project_id`、完全なGit `base_revision`、依頼、受け入れ条件、scope、step・依存・難易度を含みます。最大256KiB、最大8stepです。
 
 開始時には基準revisionとcleanなソースcheckoutを要求します（Localoud管理の `.agent-worktrees` を除く）。各workerは独立worktreeで作業し、元checkoutへ自動マージしません。5段階ルーティングはworkerだけに適用し、実行開始時のモデル・思考量設定を固定します。ローカルworkerは難易度1・低リスク・既存1〜2ファイル・100変更行未満に限定します。
 

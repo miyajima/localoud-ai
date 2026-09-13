@@ -17,7 +17,10 @@ use std::{
 use tauri::Manager;
 
 type Result<T> = std::result::Result<T, String>;
-const CAPSULE_LIMIT: usize = 48 * 1024;
+const PLAN_LIMIT: usize = 256 * 1024;
+const CAPSULE_LIMIT: usize = 256 * 1024;
+const WORKER_TOKEN_TARGET: usize = 16_000;
+const REVIEW_TOKEN_TARGET: usize = 32_000;
 const REVIEW_LIMIT: usize = 512 * 1024;
 const DEADLINE: Duration = Duration::from_secs(1800);
 static LIVE: OnceLock<Mutex<HashSet<HubThreadId>>> = OnceLock::new();
@@ -263,8 +266,8 @@ fn conflict(a: &PlanStep, b: &PlanStep) -> bool {
         .any(|x| b.owned_paths.iter().any(|y| overlap(x, y)))
 }
 pub(crate) fn parse_plan(text: &str) -> Result<Vec<PlanStep>> {
-    if text.len() > CAPSULE_LIMIT {
-        return Err("plan exceeds 48 KB".into());
+    if text.len() > PLAN_LIMIT {
+        return Err("plan exceeds 256 KiB".into());
     }
     let plan: Plan = serde_json::from_str(text.trim()).map_err(err)?;
     if plan.steps.is_empty() || plan.steps.len() > 8 {
@@ -355,6 +358,80 @@ fn ancestors(steps: &[StepState], i: usize) -> Vec<usize> {
         .filter_map(|(j, s)| needed.contains(&s.step.key).then_some(j))
         .collect()
 }
+fn compact_evidence(record: &Value) -> Value {
+    let mut result = record.clone();
+    if let Some(output) = record["output"].as_str() {
+        let excerpt: String = output.chars().take(2000).collect();
+        result["output"] = json!(excerpt);
+        result["output_excerpted"] = json!(output.chars().count() > 2000);
+    }
+    result
+}
+// A reproducible planning estimate, not a tokenizer or provider measurement.
+fn context_metrics(before: &str, after: &str, target: usize, limit: usize) -> Value {
+    let estimate = after.chars().count().div_ceil(3);
+    json!({
+        "schema_version":1, "strategy":"artifact_references_and_evidence_excerpts_v1",
+        "before_bytes":before.len(), "after_bytes":after.len(),
+        "bytes_saved":before.len() as i64 - after.len() as i64,
+        "before_estimated_tokens":before.chars().count().div_ceil(3),
+        "after_estimated_tokens":estimate, "estimate_method":"unicode_scalar_count_div_3_ceil",
+        "token_target":target, "over_target":estimate > target, "hard_byte_limit":limit,
+        "provider_context_limit":null,
+        "measurement_scope":"serialized_application_payload_only",
+        "note":"Soft target only. Excludes system prompts, tools, history and subsequent reads. Provider usage is recorded separately; size reduction is not measured token or latency savings."
+    })
+}
+fn save_context_metrics(
+    state: &AppState,
+    w: &AutonomousSnapshot,
+    key: &str,
+    before: &str,
+    after: &str,
+    target: usize,
+    limit: usize,
+) -> Result<()> {
+    let mut metrics = context_metrics(before, after, target, limit);
+    metrics["iteration"] = json!(w.iteration);
+    metrics["step_key"] = json!(key);
+    metrics["observed_at_unix_ms"] = json!(observed_ms());
+    state
+        .store
+        .lock()
+        .map_err(err)?
+        .set_setting(
+            &format!("context_metrics:{}:{}:{key}", w.thread.id, w.iteration),
+            &metrics.to_string(),
+        )
+        .map_err(err)
+}
+fn unabridged_capsule(payload: &str, w: &AutonomousSnapshot) -> Result<String> {
+    let mut envelope: Value = serde_json::from_str(payload).map_err(err)?;
+    if let Some(dependencies) = envelope["parts"][0]["data"]["dependencies"].as_array_mut() {
+        for dependency in dependencies {
+            if let Some(step) = w.steps.iter().find(|s| dependency["key"] == s.step.key) {
+                dependency["verification"] = json!(step.verification);
+                dependency
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("attention_evidence");
+            }
+        }
+    }
+    serde_json::to_string(&envelope).map_err(err)
+}
+fn dependency_verification_summary(records: &[Value]) -> Value {
+    let count = |status: &str| records.iter().filter(|v| v["status"] == status).count();
+    let passed = count("passed");
+    let failed = count("failed");
+    let not_run = count("not_run");
+    json!({
+        "records": records.len(), "passed": passed, "failed": failed,
+        "not_run": not_run, "unknown": records.len() - passed - failed - not_run,
+        "acceptance_status": "unknown",
+        "details": "Full command logs remain in the Localoud task history, not in this capsule. Counts are recorded command/evidence statuses, not acceptance proof. Inspect the dependency artifacts in this worktree for findings and verification details; report missing evidence rather than inferring success."
+    })
+}
 fn capsule(w: &AutonomousSnapshot, i: usize) -> Result<String> {
     let dependencies: Vec<_> = w.steps[i]
         .step
@@ -369,7 +446,10 @@ fn capsule(w: &AutonomousSnapshot, i: usize) -> Result<String> {
             if s.status != "completed" {
                 return Err("dependency did not succeed");
             }
-            Ok(json!({"key":d,"outcome":s.output,"verification":s.verification}))
+            Ok(json!({"key":d,"outcome":s.output,
+                "artifacts":s.step.owned_paths,
+                "verification":dependency_verification_summary(&s.verification),
+                "attention_evidence":s.verification.iter().filter(|v| v["status"] != "passed").map(compact_evidence).collect::<Vec<_>>()}))
         })
         .collect::<std::result::Result<_, &str>>()
         .map_err(err)?;
@@ -413,6 +493,13 @@ fn bounded(text: String, limit: usize) -> Result<String> {
         Ok(text)
     }
 }
+// Command output is evidence, not a dispatch payload. Sanitize before storing
+// it so incidental examples or sensitive output cannot abort a running worker.
+fn command_log(text: &str) -> Result<(String, bool)> {
+    let sanitized = hub_policy::redact(text);
+    let redacted = sanitized != text;
+    Ok((bounded(sanitized, REVIEW_LIMIT)?, redacted))
+}
 async fn git(root: &Path, args: &[&str]) -> Result<String> {
     let mut command = tokio::process::Command::new("git");
     command
@@ -450,7 +537,7 @@ pub async fn import_task(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<ThreadMapping> {
-    bounded(manifest.request.clone(), CAPSULE_LIMIT)?;
+    bounded(manifest.request.clone(), PLAN_LIMIT)?;
     let request = AutonomousRequest {
         project_id: manifest.project_id.clone(),
         text: manifest.request.clone(),
@@ -1178,7 +1265,7 @@ fn parse_automated_review(text: &str, steps: &[StepState]) -> Result<AutomatedRe
     Ok(output)
 }
 
-fn review_payload(w: &AutonomousSnapshot, diff: &str, version: &str) -> Result<String> {
+fn review_payload_raw(w: &AutonomousSnapshot, diff: &str, version: &str) -> Result<String> {
     let manifest = w.manifest.as_ref().ok_or("review manifest is missing")?;
     let payload = json!({
         "goal": manifest.request,
@@ -1213,7 +1300,22 @@ fn review_payload(w: &AutonomousSnapshot, diff: &str, version: &str) -> Result<S
             .collect(),
     )
     .map_err(err)?;
-    bounded(serde_json::to_string(&message).map_err(err)?, REVIEW_LIMIT)
+    serde_json::to_string(&message).map_err(err)
+}
+fn review_payload(w: &AutonomousSnapshot, diff: &str, version: &str) -> Result<String> {
+    let mut envelope: Value =
+        serde_json::from_str(&review_payload_raw(w, diff, version)?).map_err(err)?;
+    let data = &mut envelope["parts"][0]["data"];
+    data["evidence_policy"] = json!("Command output excerpts are explicitly marked. Original logs remain in Localoud. If supplied evidence cannot establish acceptance, return inconclusive; never infer success from counts or missing output.");
+    if let Some(steps) = data["steps"].as_array_mut() {
+        for step in steps {
+            if let Some(records) = step["verification"].as_array() {
+                step["verification"] =
+                    json!(records.iter().map(compact_evidence).collect::<Vec<_>>());
+            }
+        }
+    }
+    bounded(serde_json::to_string(&envelope).map_err(err)?, REVIEW_LIMIT)
 }
 
 async fn codex_review_turn(
@@ -1295,6 +1397,15 @@ async fn automated_review(
             return Ok(false);
         }
     };
+    save_context_metrics(
+        state,
+        &w,
+        "final_review",
+        &review_payload_raw(&w, diff, version)?,
+        &payload,
+        REVIEW_TOKEN_TARGET,
+        REVIEW_LIMIT,
+    )?;
     let reviewer_id = HubThreadId::default();
     let logical_turn_id = TaskId::default().to_string();
     let mut codex_thread = None;
@@ -1986,6 +2097,16 @@ async fn worker(state: &AppState, id: HubThreadId, i: usize) -> Result<()> {
         }
     }
     let payload = capsule(&w, i)?;
+    let before = unabridged_capsule(&payload, &w)?;
+    save_context_metrics(
+        state,
+        &w,
+        &s.step.key,
+        &before,
+        &payload,
+        WORKER_TOKEN_TARGET,
+        CAPSULE_LIMIT,
+    )?;
     update(state, id, |w| w.steps[i].capsule = Some(payload.clone()))?;
     let manager = GitWorktrees::new(&w.source_root).map_err(err)?;
     let worktree = manager
@@ -2546,6 +2667,17 @@ async fn codex_worker(
     data.insert("working_directory".into(), json!(worktree.path));
     handoff.validate().map_err(err)?;
     let payload = bounded(serde_json::to_string(&handoff).map_err(err)?, CAPSULE_LIMIT)?;
+    let snapshot = read(state, id)?;
+    let before = unabridged_capsule(&payload, &snapshot)?;
+    save_context_metrics(
+        state,
+        &snapshot,
+        &s.step.key,
+        &before,
+        &payload,
+        WORKER_TOKEN_TARGET,
+        CAPSULE_LIMIT,
+    )?;
     update(state, id, |w| w.steps[i].capsule = Some(payload.clone()))?;
     let provider = crate::models::codex_provider(state).await?;
     let mut events = provider.events();
@@ -2681,14 +2813,14 @@ async fn codex_worker(
                         read(state, id)?.steps[i].step.key,
                         read(state, id)?.steps[i].verification.len()
                     );
-                    let full_log = bounded(event.text.clone(), REVIEW_LIMIT)?;
+                    let (full_log, output_redacted) = command_log(&event.text)?;
                     state
                         .store
                         .lock()
                         .map_err(err)?
                         .set_setting(&log_ref, &full_log)
                         .map_err(err)?;
-                    let evidence = json!({"kind":"command","status":match exit_code {Some(0)=>"passed",Some(_)=>"failed",None=>"unknown"},"success":*exit_code==Some(0),"command":command,"exit_code":exit_code,"started_at_unix_ms":command_starts.remove(&event.item_id),"finished_at_unix_ms":observed_ms(),"clock":"Localoud event receipt time","target_revision":revision,"revision_observation":"filesystem snapshot after command-completed event; not an attestation of the exact revision during command execution","execution_revision_verified":false,"base_revision":worktree.base_sha,"worktree":worktree.path,"log_ref":log_ref,"output":event.text.chars().take(8000).collect::<String>(),"output_truncated":event.text.chars().count()>8000,"acceptance_status":"unknown"});
+                    let evidence = json!({"kind":"command","status":match exit_code {Some(0)=>"passed",Some(_)=>"failed",None=>"unknown"},"success":*exit_code==Some(0),"command":command,"exit_code":exit_code,"started_at_unix_ms":command_starts.remove(&event.item_id),"finished_at_unix_ms":observed_ms(),"clock":"Localoud event receipt time","target_revision":revision,"revision_observation":"filesystem snapshot after command-completed event; not an attestation of the exact revision during command execution","execution_revision_verified":false,"base_revision":worktree.base_sha,"worktree":worktree.path,"log_ref":log_ref,"output":full_log.chars().take(8000).collect::<String>(),"output_truncated":full_log.chars().count()>8000,"output_redacted":output_redacted,"acceptance_status":"unknown"});
                     update(state, id, |w| w.steps[i].verification.push(evidence))?;
                 }
                 _ => {}
