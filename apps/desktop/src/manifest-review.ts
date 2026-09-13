@@ -1,6 +1,7 @@
+import {taskGraph,bindTaskGraphs} from './task-graph.ts';
 type Target = {provider:'local'|'codex'|'api';profile_id?:string|null;model:string;reasoning:string|null};
 type Choice = {key:string;label:string;model:string;profile_id?:string;local:boolean;reasoning:string[]};
-type Step = {key:string;title:string; goal:string; level:number; owned_paths:string[]; acceptance:string[];target_override?:Target|null};
+type Step = {dependencies?:string[];key:string;title:string; goal:string; level:number; owned_paths:string[]; acceptance:string[];target_override?:Target|null};
 type Manifest = {kind:'task'; project_id:string; request:string; scope:string[]; acceptance:string[]; steps:Step[]} | {kind:'review'; project_id:string; task_id:string; verdict:'pass'|'fail'|'inconclusive'; summary:string; findings:string[]; changes:{step_key:string;instruction:string}[]};
 type Invoke = <T = unknown>(command:string,args?:Record<string,unknown>)=>Promise<T>;
 const esc=(s:string)=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
@@ -47,7 +48,8 @@ export function setupManifestReview(call:Invoke,commit:(text:string,projectId:st
    if(m.project_id!==project.id)throw Error('選択中のプロジェクトと計画が一致しません。');
    if(m.kind==='task'){
     dialog.querySelector('#manifest-review-title')!.textContent='この計画で進めますか？';
-    preview.innerHTML=`<p class="manifest-goal">${esc(m.request)}</p><h3>変更する範囲</h3>${list(m.scope)}<h3>完了の条件</h3>${list(m.acceptance)}<h3>実行する作業 · ${m.steps.length}件</h3><ol>${m.steps.map((s,index)=>`<li><strong>${esc(s.title)}</strong><p>${esc(s.goal)}</p><small>${esc(s.owned_paths.join('、'))}</small><label>実行モデル<select data-step-model="${index}"><option value="">難易度 ${s.level} の設定を使用</option></select></label><label>Reasoning<select data-step-reasoning="${index}" disabled><option value="">既定</option></select></label><details><summary>この作業の完了条件</summary>${list(s.acceptance)}</details></li>`).join('')}</ol><p class="muted">明示したモデルはこの実行だけに固定されます。未指定の作業は難易度別の設定を使います。</p>`;
+    preview.innerHTML=`<p class="manifest-goal">${esc(m.request)}</p>${taskGraph(m.steps.map(step=>({step,status:'pending'})),{preview:true,id:'preview-graph'})}<h3>変更する範囲</h3>${list(m.scope)}<h3>完了の条件</h3>${list(m.acceptance)}<h3>実行する作業 · ${m.steps.length}件</h3><ol>${m.steps.map((s,index)=>`<li><strong>${esc(s.title)}</strong><p>${esc(s.goal)}</p><small>${esc(s.owned_paths.join('、'))}</small><label>実行モデル<select data-step-model="${index}"><option value="">難易度 ${s.level} の設定を使用</option></select></label><label>Reasoning<select data-step-reasoning="${index}" disabled><option value="">既定</option></select></label><details><summary>この作業の完了条件</summary>${list(s.acceptance)}</details></li>`).join('')}</ol><p class="muted">明示したモデルはこの実行だけに固定されます。未指定の作業は難易度別の設定を使います。</p>`;
+    bindTaskGraphs(preview);
     m.steps.forEach((step,index)=>{
      const model=dialog.querySelector<HTMLSelectElement>(`[data-step-model="${index}"]`)!;
      const reasoning=dialog.querySelector<HTMLSelectElement>(`[data-step-reasoning="${index}"]`)!;

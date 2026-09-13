@@ -1,0 +1,27 @@
+{
+  "checks": [
+    "preview never dispatches workers",
+    "desktop preview shows all dependency columns",
+    "graph-preview-desktop: sidebar rows do not overlap",
+    "graph-preview-narrow: sidebar rows do not overlap",
+    "no browser errors"
+  ],
+  "results": [
+    {
+      "name": "graph-preview-desktop",
+      "width": 1280,
+      "scrollWidth": 1280,
+      "smallText": [],
+      "smallTargets": [],
+      "violations": []
+    },
+    {
+      "name": "graph-preview-narrow",
+      "width": 390,
+      "scrollWidth": 390,
+      "smallText": [],
+      "smallTargets": [],
+      "violations": []
+    }
+  ]
+}

@@ -182,12 +182,15 @@ kbd { border: 0; border-radius: 4px; color: var(--ui-muted); font-size: 0.75rem;
 .project-group .project-more { flex: 0 0 25px; min-height: 26px; padding: 3px 5px; color: var(--ui-muted); font-size: 0.9375rem; }
 .project-tasks { margin: 1px 0 6px 10px; padding-left: 7px; border-left: 1px solid color-mix(in srgb, var(--ui-accent) 30%, var(--ui-line)); }
 .project-tasks .thread-row { min-height: 27px; }
-.project-tasks .thread { min-height: 27px; padding: 4px 21px 4px 7px; border-radius: var(--ui-radius-sm); color: var(--ui-text); font-size: 0.75rem; }
+.project-tasks .thread { min-height: 27px; padding: 4px 49px 4px 7px; border-radius: var(--ui-radius-sm); color: var(--ui-text); font-size: 0.75rem; }
 .project-tasks .thread span { line-height: 1.35; }
 .project-tasks .thread small { margin-top: 2px; font-size: 0.75rem; }
 .project-tasks .thread-row:hover .thread { background: rgba(118, 118, 128, .10); }
 .project-tasks .thread-row.selected .thread, .project-tasks .thread.selected { color: var(--ui-accent-strong); background: var(--ui-sidebar-active); }
-.pin-thread { min-height: 24px; padding: 2px 5px; color: var(--ui-muted); }
+.pin-thread, .session-more { min-width: 24px; min-height: 24px; padding: 2px 5px; color: var(--ui-muted); }
+.pin-thread { right: 24px; }
+.session-more { position: absolute; right: 0; opacity: 0; }
+.thread-row:hover .session-more, .thread-row.selected .session-more, .session-more:focus-visible { opacity: 1; }
 .thread .state-running, .thread .state-inProgress { color: var(--ui-accent-strong); }
 .thread .state-completed { color: var(--ui-success); }
 .thread .state-failed { color: var(--ui-danger); }
@@ -438,6 +441,7 @@ dialog fieldset { border-color: var(--ui-line) !important; border-radius: var(--
 #app .project-group .project-toggle,
 #app .project-group .project-more,
 #app .pin-thread,
+#app .session-more,
 #app #compose-more > summary { min-width: 28px; min-height: 28px; }
 #app #compose-more > summary { width: 30px; height: 30px; }
 #content, #projects, .read-output, .worker-card pre, .patch-scroll { scrollbar-color: var(--ui-scrollbar-thumb) transparent; }
@@ -498,7 +502,7 @@ kbd, #app .new kbd { font-size: .75rem; opacity: 1; }
 #app .section-title { font-size: .75rem; letter-spacing: .02em; }
 #app .command-trigger, #app #task-filter, #app .project-group .project, #app .project-tasks .thread, #app .settings { font-size: .8125rem; min-height: var(--ui-control); }
 #app .project-tasks .thread small, #app .project-tasks .side-empty { font-size: .75rem; }
-#app .thread-row .pin-thread { position: static; opacity: 1; flex: 0 0 auto; }
+#app .thread-row :is(.pin-thread,.session-more) { position: static; opacity: 1; flex: 0 0 auto; }
 #app .thread-row .thread { padding-right: .375rem; }
 #app .copy-message { opacity: 1; min-height: 1.5rem; }
 #app .flow-title > strong { font-size: 1rem; line-height: 1.5; }

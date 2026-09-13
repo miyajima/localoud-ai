@@ -67,7 +67,7 @@ pub fn parse(text: &str) -> Result<Manifest, String> {
     } else {
         text
     };
-    let manifest: Manifest =
+    let mut manifest: Manifest =
         serde_json::from_str(text).map_err(|e| format!("ManifestのJSON形式が不正です: {e}"))?;
     let (version, id, project) = match &manifest {
         Manifest::Task(m) => (m.version, &m.manifest_id, &m.project_id),
@@ -87,7 +87,7 @@ pub fn parse(text: &str) -> Result<Manifest, String> {
         );
     }
     let _ = hub_core::ProjectId(project.parse().map_err(|_| "project_idが不正です")?);
-    match &manifest {
+    match &mut manifest {
         Manifest::Task(m) => {
             if !revision(&m.base_revision)
                 || m.request.trim().is_empty()
@@ -108,6 +108,8 @@ pub fn parse(text: &str) -> Result<Manifest, String> {
             }) {
                 return Err("stepのowned_pathsがManifestのscopeを超えています".into());
             }
+            // Preview and execution must share the scheduler's ownership ordering.
+            m.steps = steps;
         }
         Manifest::Review(m) => {
             let _ = hub_core::HubThreadId(m.task_id.parse().map_err(|_| "task_idが不正です")?);
@@ -294,6 +296,24 @@ mod tests {
         assert!(parse_for_project(&captured, project).is_ok());
         assert!(parse_for_project(&captured, &hub_core::ProjectId::default().to_string()).is_err());
         assert!(parse_for_project("not a plan", project).is_err());
+    }
+    #[test]
+    fn preview_contains_the_same_ownership_edges_as_execution() {
+        let mut v = task();
+        let first = v["steps"][0].clone();
+        let mut second = first.clone();
+        second["key"] = json!("followup");
+        v["steps"] = json!([first, second]);
+        let Manifest::Task(preview) = parse(&v.to_string()).unwrap() else {
+            panic!("task")
+        };
+        assert_eq!(preview.steps[1].dependencies, vec!["implement"]);
+        let executed =
+            crate::autonomous::parse_plan(&json!({"steps": preview.steps}).to_string()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&preview.steps).unwrap(),
+            serde_json::to_value(executed).unwrap()
+        );
     }
     #[test]
     fn rejects_contradictory_review_and_invalid_ids() {

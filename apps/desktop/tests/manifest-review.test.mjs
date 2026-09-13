@@ -1,3 +1,4 @@
+import {taskGraph,bindTaskGraphs} from '../src/task-graph.ts';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
@@ -5,7 +6,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import {JSDOM} from 'jsdom';
 
-const source=(await readFile(new URL('../src/manifest-review.ts',import.meta.url),'utf8')).replace('export function','function');
+const source=(await readFile(new URL('../src/manifest-review.ts',import.meta.url),'utf8')).replace(/^import .*task-graph.*\n/m,'').replace('export function','function');
 const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 const task=()=>({kind:'task',project_id:'project',request:'確認した依頼',scope:['src/task.ts'],acceptance:['入力が残る'],steps:[{key:'keep',title:'入力を保持',goal:'下書きを保存',level:2,owned_paths:['src/task.ts'],acceptance:['画面を戻しても入力が残る']}]});
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
@@ -14,7 +15,7 @@ function fixture(read,commit,models=()=>[]){
  const dom=new JSDOM('<body></body>');
  dom.window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
  dom.window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
- const setup=vm.runInNewContext(js+';setupManifestReview',{document:dom.window.document});
+ const setup=vm.runInNewContext(js+';setupManifestReview',{document:dom.window.document,taskGraph,bindTaskGraphs});
  const imports=[],reads=[];let returned=0;
  const open=setup(async(command,args)=>{reads.push({command,args});return read();},async(text,id)=>{imports.push({text,id});if(commit)await commit();},models);
  const doc=dom.window.document;

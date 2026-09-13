@@ -1,0 +1,73 @@
+{
+  "checks": [
+    "concurrent workers",
+    "selection persists after polling",
+    "graph-desktop-light: sidebar rows do not overlap",
+    "graph-desktop-dark: sidebar rows do not overlap",
+    "graph-narrow-dark: sidebar rows do not overlap",
+    "graph-enlarged-text: sidebar rows do not overlap",
+    "graph-plan: sidebar rows do not overlap",
+    "preview never dispatches workers",
+    "graph-preview-desktop: sidebar rows do not overlap",
+    "graph-preview-narrow: sidebar rows do not overlap",
+    "no browser errors"
+  ],
+  "results": [
+    {
+      "name": "graph-desktop-light",
+      "width": 1280,
+      "scrollWidth": 1280,
+      "smallText": [],
+      "smallTargets": [],
+      "violations": []
+    },
+    {
+      "name": "graph-desktop-dark",
+      "width": 1280,
+      "scrollWidth": 1280,
+      "smallText": [],
+      "smallTargets": [],
+      "violations": []
+    },
+    {
+      "name": "graph-narrow-dark",
+      "width": 390,
+      "scrollWidth": 390,
+      "smallText": [],
+      "smallTargets": [],
+      "violations": []
+    },
+    {
+      "name": "graph-enlarged-text",
+      "width": 1280,
+      "scrollWidth": 1280,
+      "smallText": [],
+      "smallTargets": [],
+      "violations": []
+    },
+    {
+      "name": "graph-plan",
+      "width": 1280,
+      "scrollWidth": 1280,
+      "smallText": [],
+      "smallTargets": [],
+      "violations": []
+    },
+    {
+      "name": "graph-preview-desktop",
+      "width": 1280,
+      "scrollWidth": 1280,
+      "smallText": [],
+      "smallTargets": [],
+      "violations": []
+    },
+    {
+      "name": "graph-preview-narrow",
+      "width": 390,
+      "scrollWidth": 390,
+      "smallText": [],
+      "smallTargets": [],
+      "violations": []
+    }
+  ]
+}

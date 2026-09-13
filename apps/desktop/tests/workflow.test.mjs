@@ -1,6 +1,7 @@
 import {tabLabels,flowMarkup,welcomeMarkup,executionOverview,executionPlan,executionContext,executionUsage} from '../src/workflow-ui.ts';
 import {focusMarkup,planningRequest,reviewRequest,recordMarkup} from '../src/task-focus.ts';
 import {syncWorkers,applyWorkerEvent,mergeActivity,progressMarkup,changesMarkup} from '../src/worker-progress.ts';
+import {taskGraph,bindTaskGraphs} from '../src/task-graph.ts';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
@@ -10,7 +11,7 @@ import ts from 'typescript';
 import {appendModelOptions,fillReasoningSelect,profileForChoice,readTarget,resolvedModel,modelForTarget} from '../src/model-controls.ts';
 const source=(await readFile(new URL('../src/main.ts',import.meta.url),'utf8')).replace(/^import .*;\s*$/gm,'');
 const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText.replace(/export\s*\{\s*\};?/g,'');
-const reviewJs=ts.transpileModule((await readFile(new URL('../src/manifest-review.ts',import.meta.url),'utf8')).replace('export function','function'),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+const reviewJs=ts.transpileModule((await readFile(new URL('../src/manifest-review.ts',import.meta.url),'utf8')).replace(/^import .*;\s*$/gm,'').replace('export function','function'),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 async function fixture({saved,existing=false,connected=true,duplicate=false,importStatus,importGate,importError,multipleProjects=false,browserOpen=true,autoPreview,planTarget,routeError,startupError,profiles=[],apiModels=[]}={}){
  const dom=new JSDOM('<div id="app"></div>',{url:'https://workflow.fixture'});
  if(saved)dom.window.localStorage.setItem('astra-ui-v1',saved);
@@ -66,7 +67,7 @@ async function fixture({saved,existing=false,connected=true,duplicate=false,impo
   }
  };
  const noop=()=>{};
- const context={tabLabels,flowMarkup,welcomeMarkup,executionOverview,executionPlan,executionContext,executionUsage,focusMarkup,planningRequest,reviewRequest,recordMarkup,syncWorkers,applyWorkerEvent,mergeActivity,progressMarkup,changesMarkup,navigator,window:dom.window,document:dom.window.document,localStorage:dom.window.localStorage,console,Option:dom.window.Option,setTimeout,clearTimeout,setInterval:()=>0,clearInterval:noop,nativeInvoke:invoke,isTauri:()=>true,listen:async()=>noop,appendModelOptions,fillReasoningSelect,profileForChoice,readTarget,resolvedModel,modelForTarget,markdown:s=>s,diffMarkup:s=>s,statusLabel:s=>s,planPreview:()=>'',setupManifestReview:()=>noop,setupMcpSettings:()=>noop,setupChatGptUsage:noop,setupBrowserWorkspace:()=>{const bar=dom.window.document.createElement('section');bar.id='workflow-bar';dom.window.document.body.append(bar);return {showBrowser:noop,showWorkspace:noop,isBrowserOpen:()=>browserOpen,setSidebarHidden:noop,setWorkflow:(html,action)=>{bar.innerHTML=html;bar.querySelectorAll('[data-flow-action]').forEach(b=>b.onclick=()=>action(b.dataset.flowAction));}}},setupMemory:noop,memoryPanel:()=>'',bindMemory:noop,setupAutoRouting:noop,showAutoPreview:preview=>calls.push({command:'showAutoPreview',args:preview}),openAutoSettings:noop,setupComposer:()=>({syncContext:noop,getMentions:()=>[],setMentions:noop,clear:noop,refreshThread:async()=>{},seedHistory:async()=>{},remember:async()=>{},beforeSend:async()=>true})};
+ const context={tabLabels,flowMarkup,welcomeMarkup,executionOverview,executionPlan,executionContext,executionUsage,focusMarkup,planningRequest,reviewRequest,recordMarkup,syncWorkers,applyWorkerEvent,mergeActivity,progressMarkup,changesMarkup,taskGraph,bindTaskGraphs,navigator,window:dom.window,document:dom.window.document,localStorage:dom.window.localStorage,console,Option:dom.window.Option,setTimeout,clearTimeout,setInterval:()=>0,clearInterval:noop,nativeInvoke:invoke,isTauri:()=>true,listen:async()=>noop,appendModelOptions,fillReasoningSelect,profileForChoice,readTarget,resolvedModel,modelForTarget,markdown:s=>s,diffMarkup:s=>s,statusLabel:s=>s,planPreview:()=>'',setupSettingsNavigation:()=>({mcp:dom.window.document.createElement('div'),select:noop,setMcpLoader:noop}),setupManifestReview:()=>noop,setupMcpSettings:()=>noop,setupChatGptUsage:noop,setupBrowserWorkspace:()=>{const bar=dom.window.document.createElement('section');bar.id='workflow-bar';dom.window.document.body.append(bar);return {showBrowser:noop,showWorkspace:noop,showCopiedRequestGuide:noop,isBrowserOpen:()=>browserOpen,setSidebarHidden:noop,setWorkflow:(html,action)=>{bar.innerHTML=html;bar.querySelectorAll('[data-flow-action]').forEach(b=>b.onclick=()=>action(b.dataset.flowAction));}}},setupMemory:noop,memoryPanel:()=>'',bindMemory:noop,setupAutoRouting:noop,showAutoPreview:preview=>calls.push({command:'showAutoPreview',args:preview}),openAutoSettings:noop,setupComposer:()=>({syncContext:noop,getMentions:()=>[],setMentions:noop,clear:noop,refreshThread:async()=>{},seedHistory:async()=>{},remember:async()=>{},beforeSend:async()=>true})};
  for(const name of ['HTMLElement','HTMLButtonElement','HTMLSelectElement','HTMLInputElement','HTMLTextAreaElement','HTMLDialogElement','HTMLDetailsElement','HTMLAnchorElement','HTMLOptionElement','URL'])context[name]=dom.window[name];
  context.setupManifestReview=vm.runInNewContext(reviewJs+';setupManifestReview',context);
  const api=await vm.runInNewContext(`(async()=>{${js}\nawait refreshModels();return {render,newTask,choosePhase,send,sendAutonomous,selectThread,refreshWorkflow,refreshAutonomous,refreshDiff,refreshUsage,refreshContext,refreshThreads,applyEvent,selectedView,activeId:()=>activeThread};})()`,context);
@@ -201,10 +202,14 @@ test('changing an existing session model saves an exact next-turn API target wit
  }finally{f.close();}
 });
 
-test('deleting history requires a task-specific second confirmation and closing cancels it',async()=>{
+test('session actions are available from the selected header and each sidebar row',async()=>{
  const f=await directFixture();try{
+  const rowAction=f.document.querySelector('[data-thread-menu="direct-task"]');
+  assert.ok(rowAction);assert.match(rowAction.getAttribute('aria-label'),/セッション操作/);
+  rowAction.click();assert.ok(f.document.querySelector('#lifecycle-dialog').hasAttribute('open'));
+  f.document.querySelector('#lifecycle-close').click();
   const open=()=>f.document.querySelector('#session-actions').click();
-  const remove=()=>Array.from(f.document.querySelectorAll('#lifecycle-actions button')).find(b=>b.textContent.includes('履歴を削除'));
+  const remove=()=>Array.from(f.document.querySelectorAll('#lifecycle-actions button')).find(b=>b.textContent.includes('セッションを削除'));
   open();remove().click();assert.equal(f.calls.filter(c=>c.command==='manage_session').length,0);
   assert.match(f.document.querySelector('#lifecycle-description').textContent,/検証する/);
   f.document.querySelector('#lifecycle-close').click();open();
@@ -376,7 +381,7 @@ test('every Manifest tab is read-only and shows task-specific plan, context and 
   await f.api.sendAutonomous('captured-plan','project');
   for(const tab of ['Chat','Plan','Diff','Agents','Terminal','Context','Usage']){
    f.document.querySelector(`[data-tab="${tab}"]`).click();await new Promise(r=>setTimeout(r,10));
-   assert.equal(f.document.querySelectorAll('#content button,#content textarea,#content select,#content input').length,0,tab+' has an operation');
+   assert.equal(f.document.querySelectorAll('#content button:not([data-graph-node]),#content textarea,#content select,#content input').length,0,tab+' has an operation');
    if(tab==='Plan'){assert.match(f.document.querySelector('#content').textContent,/入力を保持する/);assert.match(f.document.querySelector('#content').textContent,/受け入れ条件/);}
    if(tab==='Context')assert.match(f.document.querySelector('#content').textContent,/他の作業には変更しない/);
    if(tab==='Usage')assert.match(f.document.querySelector('#content').textContent,/17/);

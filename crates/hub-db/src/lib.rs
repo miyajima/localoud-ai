@@ -284,14 +284,32 @@ impl Store {
         for prefix in [
             "thread_model:",
             "thread_reasoning:",
+            "thread_mode:",
             "chatgpt_messages:",
             "chatgpt_conversation:",
             "chatgpt_turn:",
             "workflow:",
+            "autonomous:",
+            "autonomous_parent:",
+            "outcome:",
+            "review:",
+            "review_scope:",
+            "recovery:",
+            "recovery_consumed:",
+            "memory_candidates:",
+            "memory_candidate_scope:",
+            "memory_saved:",
+            "api_transcript:",
+            "api_active_turn:",
+            "codex_context_replay:",
+            "codex_context_replay_consumed:",
+            "codex_archive_synced:",
+            "context_metrics:",
         ] {
+            let key = format!("{prefix}{id}");
             tx.execute(
-                "DELETE FROM settings WHERE key=?1",
-                [format!("{prefix}{id}")],
+                "DELETE FROM settings WHERE key=?1 OR key LIKE ?2",
+                params![key, format!("{prefix}{id}:%")],
             )?;
         }
         tx.execute("DELETE FROM provider_threads WHERE id=?1", [id.to_string()])?;
@@ -1344,9 +1362,15 @@ mod tests {
         assert_eq!(store.threads()?.len(), 1);
         let key = format!("chatgpt_messages:{}", thread.id);
         store.set_setting(&key, "private transcript")?;
+        let autonomous_key = format!("autonomous:{}", thread.id);
+        let review_key = format!("review:{}:iteration", thread.id);
+        store.set_setting(&autonomous_key, "private execution state")?;
+        store.set_setting(&review_key, "private review")?;
         store.delete_thread(thread.id)?;
         assert!(store.threads()?.is_empty());
         assert_eq!(store.setting(&key)?, None);
+        assert_eq!(store.setting(&autonomous_key)?, None);
+        assert_eq!(store.setting(&review_key)?, None);
         assert_eq!(
             std::fs::read_to_string(dir.path().join("keep.txt"))?,
             "preserved"
