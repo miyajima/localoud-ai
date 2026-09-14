@@ -4,6 +4,158 @@ use provider_spark::{LocalServiceConfig, SparkProvider};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+fn visible_conversation_messages(
+    records: Vec<hub_db::ProviderMessageRecord>,
+) -> Result<Vec<protocol_types::local::ConversationMessage>, String> {
+    use protocol_types::{
+        local::{ConversationMessage, ConversationRole},
+        providers::{ContentBlock, TranscriptRole},
+    };
+    let mut messages = Vec::new();
+    for record in records {
+        let role = match record.role {
+            TranscriptRole::System => continue,
+            TranscriptRole::User => ConversationRole::User,
+            TranscriptRole::Assistant => ConversationRole::Assistant,
+            TranscriptRole::Tool => ConversationRole::Tool,
+        };
+        let mut text = String::new();
+        let mut call_id: Option<String> = None;
+        for block in record.content {
+            match block {
+                ContentBlock::Text { text: value } => text.push_str(&value),
+                ContentBlock::Refusal {
+                    category,
+                    text: value,
+                } => text.push_str(
+                    value
+                        .as_deref()
+                        .or(category.as_deref())
+                        .unwrap_or("Provider refused the request."),
+                ),
+                ContentBlock::ToolResult {
+                    tool_use_id,
+                    text: value,
+                    is_error: _,
+                } => {
+                    if call_id.as_ref().is_some_and(|id| id != &tool_use_id) {
+                        return Err("1件の会話メッセージに複数のtool call結果があります。".into());
+                    }
+                    call_id = Some(tool_use_id);
+                    text.push_str(&value);
+                }
+                ContentBlock::ToolUse { .. } => {}
+            }
+        }
+        if text.trim().is_empty() {
+            continue;
+        }
+        let is_tool = role == ConversationRole::Tool;
+        messages.push(ConversationMessage {
+            id: record.id,
+            role,
+            text,
+            call_id: is_tool.then_some(call_id).flatten(),
+            completed: is_tool.then_some(true),
+            // Provider ToolResult only exposes is_error; it is not proof of a
+            // command exit code and must not become verified execution evidence.
+            exit_code: None,
+        });
+    }
+    Ok(messages)
+}
+
+fn selected_section_text(
+    selection: &hub_context::handoff::Selection,
+    section: hub_context::handoff::Section,
+) -> Vec<String> {
+    selection
+        .groups
+        .iter()
+        .filter(|group| group.section == section)
+        .flat_map(|group| &group.source_ids)
+        .filter_map(|source_id| {
+            selection
+                .sources
+                .iter()
+                .find(|source| &source.id == source_id)
+                .map(|source| source.text.clone())
+        })
+        .collect()
+}
+
+async fn prepare_codex_context_capsule(
+    id: hub_core::HubThreadId,
+    project: hub_core::ProjectId,
+    state: &AppState,
+) -> Result<Option<String>, String> {
+    use hub_context::handoff::Section;
+    use hub_core::{ContextBudget, TaskId};
+    let messages = visible_conversation_messages(
+        state
+            .store
+            .lock()
+            .map_err(|e| e.to_string())?
+            .provider_messages(id)
+            .map_err(|e| e.to_string())?,
+    )?;
+    if messages.is_empty() {
+        return Ok(None);
+    }
+    hub_context::handoff::validate_conversation_input(&messages)
+        .map_err(|e| format!("会話をカプセル化できません: {e}"))?;
+    let generated = {
+        let _guard = state.local.lock.lock().await;
+        state
+            .local
+            .provider
+            .draft_conversation_handoff(&messages)
+            .await
+            .map_err(|e| {
+                format!("ローカルLLMの会話分類に失敗しました。全文は送信していません: {e:#}")
+            })?
+    };
+    state
+        .local
+        .record_usage(&generated.usage, None)
+        .map_err(|e| e.to_string())?;
+    let handoff =
+        hub_context::handoff::from_conversation_draft(&messages, generated.output, 36_000)
+            .map_err(|e| {
+                format!("ローカルLLMの会話分類を検証できません。全文は送信していません: {e}")
+            })?;
+    let selection = handoff.select().map_err(|e| e.to_string())?;
+    let goal = selected_section_text(&selection, Section::Purpose).join("\n");
+    let acceptance = selected_section_text(&selection, Section::Completion);
+    let constraints = selected_section_text(&selection, Section::Constraints);
+    let capsule = hub_context::prepare_capsule(
+        TaskId::default(),
+        project,
+        goal,
+        acceptance,
+        constraints,
+        vec![handoff.context_item().map_err(|e| e.to_string())?],
+        ContextBudget {
+            initial_tokens: 16_000,
+            max_total_tokens: 24_000,
+            max_single_retrieval_tokens: 2_000,
+        },
+    )
+    .map_err(|e| format!("検証済み会話カプセルが予算を超えています: {e}"))?;
+    let message = protocol_types::a2a::data_message(
+        TaskId::default().to_string(),
+        Some(id.to_string()),
+        None,
+        serde_json::to_value(capsule).map_err(|e| e.to_string())?,
+        protocol_types::a2a::CONTEXT_CAPSULE_MEDIA_TYPE,
+        vec![],
+    )
+    .map_err(|e| e.to_string())?;
+    serde_json::to_string(&message)
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
 pub fn ensure_builtin_profiles(
     store: &hub_db::Store,
     local: &LocalServiceConfig,
@@ -744,6 +896,10 @@ pub async fn set_thread_model_target(
             if snapshot.active_turn.is_some() {
                 return Err("実行中ターンのモデルは変更できません。".into());
             }
+            // Build and validate the handoff before creating a new provider
+            // thread. Failure must not silently fall back to the full transcript.
+            let context_capsule =
+                prepare_codex_context_capsule(id, mapping.project_id, &state).await?;
             let root = state
                 .store
                 .lock()
@@ -755,20 +911,21 @@ pub async fn set_thread_model_target(
                 .start_thread_with_model(root, &target.model)
                 .await
                 .map_err(|e| format!("{e:#}"))?;
-            let replay = serde_json::to_string(
-                &state
-                    .api_sessions
-                    .normalized_transcript(id)
-                    .map_err(|e| e.to_string())?,
-            )
-            .map_err(|e| e.to_string())?;
             let store = state.store.lock().map_err(|e| e.to_string())?;
             store
                 .switch_thread_provider(id, "codex", &remote.id)
                 .map_err(|e| e.to_string())?;
             store
-                .set_setting(&format!("codex_context_replay:{id}"), &replay)
+                .remove_setting(&format!("codex_context_replay:{id}"))
                 .map_err(|e| e.to_string())?;
+            store
+                .remove_setting(&format!("codex_context_capsule:{id}"))
+                .map_err(|e| e.to_string())?;
+            if let Some(context_capsule) = context_capsule {
+                store
+                    .set_setting(&format!("codex_context_capsule:{id}"), &context_capsule)
+                    .map_err(|e| e.to_string())?;
+            }
             store
                 .set_setting(&format!("thread_model:{id}"), &target.model)
                 .map_err(|e| e.to_string())?;
@@ -988,6 +1145,57 @@ mod tests {
         official.credential_env = Some("OPENAI_API_KEY".into());
         assert!(!requires_tool_canary(&official));
         assert!(tool_canary_passed(&store, &official, "model-a").unwrap());
+    }
+
+    #[test]
+    fn context_transfer_uses_visible_text_and_rederives_tool_provenance() {
+        use protocol_types::{
+            local::ConversationRole,
+            providers::{ContentBlock, TranscriptRole},
+        };
+        let thread = hub_core::HubThreadId::default();
+        let record = |id: &str, role, content| hub_db::ProviderMessageRecord {
+            id: id.into(),
+            thread_id: thread,
+            segment_id: None,
+            provider_turn_id: None,
+            role,
+            content,
+            provider_state: None,
+        };
+        let messages = visible_conversation_messages(vec![
+            record(
+                "system",
+                TranscriptRole::System,
+                vec![ContentBlock::Text {
+                    text: "hidden provider instruction".into(),
+                }],
+            ),
+            record(
+                "user",
+                TranscriptRole::User,
+                vec![ContentBlock::Text {
+                    text: "Keep this exact constraint".into(),
+                }],
+            ),
+            record(
+                "tool",
+                TranscriptRole::Tool,
+                vec![ContentBlock::ToolResult {
+                    tool_use_id: "call-1".into(),
+                    text: "tests passed".into(),
+                    is_error: false,
+                }],
+            ),
+        ])
+        .unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, ConversationRole::User);
+        assert_eq!(messages[0].text, "Keep this exact constraint");
+        assert_eq!(messages[1].role, ConversationRole::Tool);
+        assert_eq!(messages[1].call_id.as_deref(), Some("call-1"));
+        assert_eq!(messages[1].completed, Some(true));
+        assert_eq!(messages[1].exit_code, None);
     }
 
     #[test]

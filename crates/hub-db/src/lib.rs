@@ -301,6 +301,8 @@ impl Store {
             "memory_saved:",
             "api_transcript:",
             "api_active_turn:",
+            "codex_context_capsule:",
+            "codex_context_capsule_consumed:",
             "codex_context_replay:",
             "codex_context_replay_consumed:",
             "codex_archive_synced:",

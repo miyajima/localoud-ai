@@ -15,7 +15,7 @@ macOSではMetalが見えるセッションからサービスを起動してく�
 
 - `GET /health`: 実際にロードしたモデル、設定された量子化、デバイス、revision。
 - `POST /v1/generate`: `model`（不一致は推論前に拒否）、`task`、`messages`、JSON `schema`、`max_tokens`、`temperature`。
-- 対応task: `difficulty`（5段階評価）、`route`、`draft_context`、`implement`、`summarize`、`review`、`retrieval_query`、`memory_extract`。Reasoningはこのローカルサービスで固定され、リクエストごとの切り替えには対応しません。
+- 対応task: `difficulty`（5段階評価）、`route`、`draft_context`、`draft_handoff`、`implement`、`summarize`、`review`、`retrieval_query`、`memory_extract`。`draft_handoff` は決定論的検証に渡す会話の原文引用候補を生成します。Reasoningはこのローカルサービスで固定され、リクエストごとの切り替えには対応しません。
 - 出力JSONはparseして検証します。これは生成後のschema検証であり、文法制約付きデコードを意味しません。不正な出力は422で拒否します。推論中は429を返します。RustプロバイダーはMLXリクエストの重複を避けるため、プロセス内の呼び出しを直列化します。検証エラーでは、生成したpayloadを公開せず、長さを制限したschema診断だけを返します。
 - MLXを所有する専用推論threadは1本です。入力は8192 token、出力は4096 tokenに制限します。
 - サービスにはshellやファイル編集のtoolはありません。Rust Hubが、適用前に提案された完全一致の置換と選択されたパスを検証します。

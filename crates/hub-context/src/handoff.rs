@@ -3,8 +3,16 @@
 //! source blocks (including code) instead of guessing sentence dependencies.
 use anyhow::{bail, Result};
 use hub_core::ContextItem;
+use protocol_types::local::{
+    ConversationHandoffDraft, ConversationMessage, ConversationRole, HandoffCandidate,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+
+// Keep the local request below the bundled service's 8K-token prompt ceiling,
+// including schema and extraction instructions.
+pub const MAX_CONVERSATION_BYTES: usize = 20_000;
+pub const MIN_EXTRACTION_CONFIDENCE: f64 = 0.75;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -69,6 +77,175 @@ pub struct Selection {
     pub groups: Vec<Group>,
     pub outcomes: Vec<Outcome>,
     pub omitted_background_groups: Vec<String>,
+}
+
+pub fn validate_conversation_input(messages: &[ConversationMessage]) -> Result<()> {
+    if messages.is_empty() || messages.len() > 256 {
+        bail!("conversation handoff needs 1-256 visible messages");
+    }
+    if serde_json::to_vec(messages)?.len() > MAX_CONVERSATION_BYTES {
+        bail!("conversation exceeds local extraction budget; narrow it explicitly");
+    }
+    let mut ids = BTreeSet::new();
+    for message in messages {
+        if message.id.trim().is_empty()
+            || message.id.len() > 500
+            || message.text.trim().is_empty()
+            || !ids.insert(message.id.as_str())
+        {
+            bail!("conversation contains an invalid or duplicate visible message");
+        }
+        match message.role {
+            ConversationRole::Tool => {
+                if message.call_id.as_deref().is_none_or(str::is_empty) {
+                    bail!("tool conversation message is missing its call ID");
+                }
+            }
+            _ if message.call_id.is_some()
+                || message.completed.is_some()
+                || message.exit_code.is_some() =>
+            {
+                bail!("non-tool conversation message contains tool outcome metadata");
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn section(value: &str) -> Result<Section> {
+    match value {
+        "purpose" => Ok(Section::Purpose),
+        "constraints" => Ok(Section::Constraints),
+        "decisions" => Ok(Section::Decisions),
+        "current_state" => Ok(Section::CurrentState),
+        "unresolved" => Ok(Section::Unresolved),
+        "completion" => Ok(Section::Completion),
+        "background" => Ok(Section::Background),
+        _ => bail!("conversation handoff candidate has an unknown section"),
+    }
+}
+
+fn conversation_role(role: &ConversationRole) -> Role {
+    match role {
+        ConversationRole::User => Role::User,
+        ConversationRole::Assistant => Role::Assistant,
+        ConversationRole::Tool => Role::Tool,
+    }
+}
+
+fn candidate_source_id(candidate: &HandoffCandidate) -> String {
+    format!("evidence:{}", candidate.id)
+}
+
+/// Convert an untrusted local-model extraction into the existing deterministic
+/// handoff contract. Quotes, roles, chronology, corrections and tool outcomes
+/// are all checked against the visible source transcript before packing.
+pub fn from_conversation_draft(
+    messages: &[ConversationMessage],
+    draft: ConversationHandoffDraft,
+    max_bytes: usize,
+) -> Result<Handoff> {
+    validate_conversation_input(messages)?;
+    if draft.candidates.len() < 6 || draft.candidates.len() > 64 {
+        bail!("conversation handoff extraction needs 6-64 candidates");
+    }
+    let message_positions: BTreeMap<_, _> = messages
+        .iter()
+        .enumerate()
+        .map(|(index, message)| (message.id.as_str(), index))
+        .collect();
+    let messages_by_id: BTreeMap<_, _> = messages
+        .iter()
+        .map(|message| (message.id.as_str(), message))
+        .collect();
+    let mut candidate_ids = BTreeSet::new();
+    for candidate in &draft.candidates {
+        if candidate.id.trim().is_empty()
+            || candidate.id.len() > 120
+            || !candidate_ids.insert(candidate.id.as_str())
+            || !candidate.confidence.is_finite()
+            || candidate.confidence < MIN_EXTRACTION_CONFIDENCE
+            || candidate.confidence > 1.0
+        {
+            bail!(
+                "conversation handoff contains an invalid, duplicate or low-confidence candidate"
+            );
+        }
+        let source = messages_by_id
+            .get(candidate.source_message_id.as_str())
+            .ok_or_else(|| anyhow::anyhow!("conversation handoff references an unknown message"))?;
+        if candidate.quote.trim().is_empty() || !source.text.contains(&candidate.quote) {
+            bail!("conversation handoff quote does not match the visible source exactly");
+        }
+        let candidate_position = message_positions[candidate.source_message_id.as_str()];
+        for corrected in &candidate.corrects {
+            let corrected = draft
+                .candidates
+                .iter()
+                .find(|value| &value.id == corrected)
+                .ok_or_else(|| anyhow::anyhow!("conversation correction target is missing"))?;
+            let corrected_position = message_positions
+                .get(corrected.source_message_id.as_str())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("conversation correction references an unknown message")
+                })?;
+            if *corrected_position >= candidate_position {
+                bail!("conversation correction must point to an earlier message");
+            }
+        }
+    }
+    let mut ordered = draft.candidates;
+    ordered.sort_by_key(|candidate| message_positions[candidate.source_message_id.as_str()]);
+    let mut outcomes: BTreeMap<String, Outcome> = BTreeMap::new();
+    let mut sources = Vec::with_capacity(ordered.len());
+    let mut groups = Vec::with_capacity(ordered.len());
+    for candidate in ordered {
+        let message = messages_by_id[candidate.source_message_id.as_str()];
+        if let Some(call_id) = &message.call_id {
+            let outcome = Outcome {
+                call_id: call_id.clone(),
+                completed: message.completed.unwrap_or(false),
+                exit_code: message.exit_code,
+            };
+            if let Some(existing) = outcomes.get(call_id) {
+                if existing.completed != outcome.completed
+                    || existing.exit_code != outcome.exit_code
+                {
+                    bail!("conversation contains conflicting tool call outcomes");
+                }
+            } else {
+                outcomes.insert(call_id.clone(), outcome);
+            }
+        }
+        let verified_outcome = matches!(message.role, ConversationRole::Tool)
+            && message.completed == Some(true)
+            && message.exit_code == Some(0);
+        let source_id = candidate_source_id(&candidate);
+        sources.push(Evidence {
+            id: source_id.clone(),
+            role: conversation_role(&message.role),
+            reference: format!("message:{}", message.id),
+            text: candidate.quote,
+            call_id: message.call_id.clone(),
+        });
+        groups.push(Group {
+            id: candidate.id,
+            section: section(&candidate.section)?,
+            source_ids: vec![source_id],
+            depends_on: candidate.depends_on,
+            corrects: candidate.corrects,
+            verified_outcome,
+        });
+    }
+    let handoff = Handoff {
+        sources,
+        groups,
+        outcomes: outcomes.into_values().collect(),
+        max_bytes,
+    };
+    handoff.select()?;
+    Ok(handoff)
 }
 impl Handoff {
     pub fn select(&self) -> Result<Selection> {

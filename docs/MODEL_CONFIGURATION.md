@@ -69,7 +69,7 @@ LOCAL_MODEL_CONFIG=/absolute/path/to/model.json \
 
 - 専用 API: `GET /health` → `status: "ready"`, `model`, `quantization_bits`; `POST /v1/generate` ← `model`, `task`, `messages`, `schema`, `max_tokens`, `temperature`; 成功応答 → `output`（要求 schema を満たす JSON）, `usage.prompt_tokens`, `usage.completion_tokens`, `latency_ms`, `model`, `quantization_bits`
 - OpenAI 互換 API: `GET /health` が `status: "ok"` または `"ready"`、`GET /v1/models` に指定したモデル ID（`meta.ftype` または ID の `Q8_0` / `q8` / `f16` などから量子化を検出）、`POST /v1/chat/completions` に構造化 JSON を要求
-- どちらの経路も `difficulty`, `route`, `draft_context`, `implement`, `summarize`, `review`, `retrieval_query`, `memory_extract`, `input_completion` を同じ `LocalModelProvider` 操作へ変換します。OpenAI Responses API（`/v1/responses`）だけのサービスは対象外です。互換性のため内部 crate 名・永続 provider key は `spark` を保持しますが、表示・照合・使用量のモデル名は固定していません。
+- どちらの経路も `difficulty`, `route`, `draft_context`, `draft_handoff`, `implement`, `summarize`, `review`, `retrieval_query`, `memory_extract`, `input_completion` を同じ `LocalModelProvider` 操作へ変換します。`draft_handoff` は会話の原文引用と分類候補だけを生成し、採用可否は既存の決定論的Handoff検証が判断します。OpenAI Responses API（`/v1/responses`）だけのサービスは対象外です。互換性のため内部 crate 名・永続 provider key は `spark` を保持しますが、表示・照合・使用量のモデル名は固定していません。
 
 ## 今回の確認
 

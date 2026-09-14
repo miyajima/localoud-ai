@@ -1,4 +1,7 @@
 use hub_context::handoff::*;
+use protocol_types::local::{
+    ConversationHandoffDraft, ConversationMessage, ConversationRole, HandoffCandidate,
+};
 
 fn fixture() -> Handoff {
     let sections = [
@@ -149,4 +152,75 @@ fn malformed_correction_target_returns_error_without_panicking() {
     assert!(h.select().is_err());
     h.groups[5].source_ids = vec!["missing".into()];
     assert!(h.select().is_err());
+}
+
+fn conversation_fixture() -> (Vec<ConversationMessage>, ConversationHandoffDraft) {
+    let sections = [
+        "purpose",
+        "constraints",
+        "decisions",
+        "current_state",
+        "unresolved",
+        "completion",
+    ];
+    let messages = sections
+        .iter()
+        .enumerate()
+        .map(|(index, section)| ConversationMessage {
+            id: format!("message-{index}"),
+            role: ConversationRole::User,
+            text: format!("Exact {section} quote {index}"),
+            call_id: None,
+            completed: None,
+            exit_code: None,
+        })
+        .collect::<Vec<_>>();
+    let draft = ConversationHandoffDraft {
+        candidates: sections
+            .iter()
+            .enumerate()
+            .map(|(index, section)| HandoffCandidate {
+                id: format!("candidate-{index}"),
+                source_message_id: format!("message-{index}"),
+                quote: format!("Exact {section} quote {index}"),
+                section: section.to_string(),
+                depends_on: vec![],
+                corrects: vec![],
+                confidence: 0.9,
+            })
+            .collect(),
+    };
+    (messages, draft)
+}
+
+#[test]
+fn local_draft_is_rechecked_against_exact_visible_conversation() {
+    let (messages, draft) = conversation_fixture();
+    let handoff = from_conversation_draft(&messages, draft, 12_000).unwrap();
+    let selected = handoff.select().unwrap();
+    assert_eq!(selected.sources.len(), 6);
+    assert_eq!(selected.sources[0].reference, "message:message-0");
+    assert_eq!(selected.sources[0].text, messages[0].text);
+}
+
+#[test]
+fn local_draft_cannot_invent_quote_or_hide_low_confidence() {
+    let (messages, mut draft) = conversation_fixture();
+    draft.candidates[0].quote = "invented paraphrase".into();
+    assert!(from_conversation_draft(&messages, draft, 12_000).is_err());
+
+    let (messages, mut draft) = conversation_fixture();
+    draft.candidates[0].confidence = 0.74;
+    assert!(from_conversation_draft(&messages, draft, 12_000).is_err());
+}
+
+#[test]
+fn local_draft_correction_must_point_to_earlier_source_message() {
+    let (messages, mut draft) = conversation_fixture();
+    draft.candidates[0].corrects = vec!["candidate-1".into()];
+    assert!(from_conversation_draft(&messages, draft, 12_000).is_err());
+
+    let (messages, mut draft) = conversation_fixture();
+    draft.candidates[1].corrects = vec!["candidate-0".into()];
+    assert!(from_conversation_draft(&messages, draft, 12_000).is_ok());
 }

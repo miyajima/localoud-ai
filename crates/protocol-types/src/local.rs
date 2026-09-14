@@ -88,6 +88,46 @@ pub struct CapsuleDraft {
     pub constraints: Vec<String>,
     pub selected_refs: Vec<String>,
 }
+
+/// Visible conversation input for an extractive handoff draft. The local model
+/// may select exact quotes, but it cannot assign a different speaker or invent
+/// tool outcomes; those fields are re-derived from this source by hub-context.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationRole {
+    User,
+    Assistant,
+    Tool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConversationMessage {
+    pub id: String,
+    pub role: ConversationRole,
+    pub text: String,
+    pub call_id: Option<String>,
+    pub completed: Option<bool>,
+    pub exit_code: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HandoffCandidate {
+    pub id: String,
+    pub source_message_id: String,
+    pub quote: String,
+    pub section: String,
+    pub depends_on: Vec<String>,
+    pub corrects: Vec<String>,
+    pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConversationHandoffDraft {
+    pub candidates: Vec<HandoffCandidate>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetrievalQuery {
@@ -165,6 +205,12 @@ pub trait LocalModelProvider: Send + Sync {
         request: &str,
         available_refs: &[String],
     ) -> Result<Generation<CapsuleDraft>>;
+    async fn draft_conversation_handoff(
+        &self,
+        _messages: &[ConversationMessage],
+    ) -> Result<Generation<ConversationHandoffDraft>> {
+        anyhow::bail!("Local conversation handoff extraction is unavailable")
+    }
     async fn generate_retrieval_query(&self, need: &str) -> Result<Generation<RetrievalQuery>>;
 }
 

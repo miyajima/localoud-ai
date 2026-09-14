@@ -15,7 +15,7 @@ services/spark-mlx/.venv/bin/python services/spark-mlx/server.py
 
 - `GET /health`：实际加载的模型、配置的量化方式、设备和revision。
 - `POST /v1/generate`：`model`（不匹配会在推理前拒绝）、`task`、`messages`、JSON `schema`、`max_tokens`、`temperature`。
-- 支持的task：`difficulty`（五级评估）、`route`、`draft_context`、`implement`、`summarize`、`review`、`retrieval_query`、`memory_extract`。Reasoning由本地服务固定，不支持按请求切换。
+- 支持的task：`difficulty`（五级评估）、`route`、`draft_context`、`draft_handoff`、`implement`、`summarize`、`review`、`retrieval_query`、`memory_extract`。`draft_handoff` 只生成交给确定性验证的会话原文引用候选。Reasoning由本地服务固定，不支持按请求切换。
 - 输出JSON会被解析并验证。这是生成后的schema验证，不代表使用了语法约束解码。格式错误的输出以422拒绝；推理繁忙时返回429。Rust provider会串行化进程内调用，避免MLX请求重叠。验证错误只返回长度受限的schema诊断，不会暴露生成的payload。
 - 由一个专用推理thread负责MLX。输入上限为8192 token，输出上限为4096 token。
 - 服务没有shell或文件编辑工具。Rust Hub会在应用前验证提议的完全匹配替换和选定路径。

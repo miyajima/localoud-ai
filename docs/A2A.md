@@ -16,6 +16,9 @@ The following explicit boundaries now use A2A Messages:
 - autonomous implementation-step capsules;
 - autonomous final-review capsules;
 - staged research handoffs.
+- validated conversation handoffs when an API-provider session moves to a fresh Codex thread.
+
+Conversation classification is local-first but not trusted. The local model may only propose exact quotes and relationships. Localoud's existing deterministic handoff code validates those proposals against the stored visible transcript and wraps the accepted selection in a normal context capsule. The full transcript is not sent as a fallback.
 
 ## Local HTTP+JSON interface
 

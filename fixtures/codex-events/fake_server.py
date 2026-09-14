@@ -37,6 +37,9 @@ for line in sys.stdin:
             assert p.get("model") == "fixture-b", "wrong model sent"
             assert p.get("effort") == "high", "reasoning was not sent"
         text = p.get("input", [{}])[0].get("text", "")
+        if "<context_capsule_json>" in text:
+            assert "application/vnd.localoud.context-capsule+json" in text
+            assert "<prior_transcript_json>" not in text
         if text.startswith("verify isolated cwd:"):
             expected = text.removeprefix("verify isolated cwd:")
             assert p.get("cwd") == expected, "turn reused a stale working directory"

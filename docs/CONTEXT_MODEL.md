@@ -2,6 +2,8 @@
 
 A worker capsule contains a goal, acceptance criteria, constraints, and selected source items. There is no implicit parent-conversation field. Any selected conversation excerpt must be a labeled item. Source references and estimated tokens are inspectable; estimates must not be reported as measured provider usage.
 
+When an existing API-provider session moves to a fresh Codex thread, Localoud no longer replays the normalized visible transcript wholesale. The configured local model proposes exact quote spans, section labels, dependencies and corrections. The existing deterministic handoff validator then re-derives speaker and tool provenance, checks every quote byte-for-byte against the stored visible message, rejects confidence below 0.75, verifies correction chronology and mandatory sections, and packs the result within the capsule budget. Any extraction or validation failure stops before `thread/start`; it never falls back to the full transcript.
+
 Budgets are configurable: Spark 2K initial / 8K maximum; Codex normal 6K / 24K; Codex deep 12K / 64K. Explicit retrieval consumes both the per-request and cumulative allowance. Exhaustion must return a visible error rather than truncating unobservably.
 
 Benchmark output must distinguish synthetic capsule-size checks from paired live runs with comparable task success, latency, and provider input/cached/output tokens. No percentage claim is justified yet.

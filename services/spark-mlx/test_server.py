@@ -50,6 +50,17 @@ def test_model_selection_is_checked_before_generation():
         assert c.post('/v1/generate',json=req).status_code==409
 
 
+def test_draft_handoff_is_an_explicit_local_task():
+    from server import GenerationRequest
+    request = GenerationRequest(
+        task='draft_handoff',
+        messages=[{'role':'user','content':'visible conversation'}],
+        schema={'type':'object'},
+        max_tokens=4096,
+    )
+    assert request.task == 'draft_handoff'
+
+
 def test_replacement_config_checks_real_checkpoint_bits_and_shards(tmp_path, monkeypatch):
     from model_config import ModelConfig
     import json

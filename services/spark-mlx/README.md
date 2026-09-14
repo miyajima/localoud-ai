@@ -15,7 +15,7 @@ On macOS, launch the service from a session where Metal is visible. It binds onl
 
 - `GET /health`: actual loaded model, configured quantization, device, revision.
 - `POST /v1/generate`: `model` (mismatches rejected before inference), `task`, `messages`, JSON `schema`, `max_tokens`, `temperature`.
-- Supported tasks: `difficulty` (five-level assessment), `route`, `draft_context`, `implement`, `summarize`, `review`, `retrieval_query`, `memory_extract`. Reasoning is fixed by this local service; per-request effort switching is not supported.
+- Supported tasks: `difficulty` (five-level assessment), `route`, `draft_context`, `draft_handoff`, `implement`, `summarize`, `review`, `retrieval_query`, `memory_extract`. `draft_handoff` proposes exact conversation quotes for deterministic validation. Reasoning is fixed by this local service; per-request effort switching is not supported.
 - Output JSON is parsed and validated. This is schema validation after generation, not a claim of grammar-constrained decoding. Malformed output is rejected with 422. Busy inference returns 429; the Rust provider serializes in-process calls to avoid overlapping MLX requests. Validation errors report a bounded schema diagnostic without exposing generated payloads.
 - One dedicated inference thread owns MLX. Inputs are bounded at 8192 tokens; output at 4096.
 - The service has no shell or filesystem editing tools. The Rust Hub validates proposed exact replacements and selected paths before applying them.
