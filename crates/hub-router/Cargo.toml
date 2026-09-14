@@ -9,4 +9,5 @@ hub-core.workspace = true
 protocol-types = { path = "../protocol-types" }
 [dev-dependencies]
 tokio.workspace = true
+serde_json.workspace = true
 provider-spark = { path = "../provider-spark" }

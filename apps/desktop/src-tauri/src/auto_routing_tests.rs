@@ -171,6 +171,8 @@ fn prepared(f: &Fixture) -> PreparedRoute {
             confidence: Some(0.91),
             estimated_scope: Some(assessment().estimated_scope),
             target: None,
+            route_key: None,
+            agent_name: None,
             reason: "known typo".into(),
             blocked: None,
             used_fallback: false,
@@ -225,24 +227,44 @@ async fn only_the_configured_fallback_is_used_and_never_bypasses_planning() {
     let actual = route.settings.target(1).unwrap();
     let mut unavailable = actual.clone();
     unavailable.model = "retired/model".into();
-    choose_target(&mut route, Some(unavailable.clone()), None, true, &f.state)
-        .await
-        .unwrap();
+    choose_target(
+        &mut route,
+        Some((unavailable.clone(), "level_1".into())),
+        None,
+        true,
+        &f.state,
+    )
+    .await
+    .unwrap();
     assert!(route.preview.blocked.is_some());
     assert!(route.preview.target.is_none());
     route.settings.fallback = Some(actual.clone());
-    choose_target(&mut route, Some(unavailable), None, true, &f.state)
-        .await
-        .unwrap();
+    choose_target(
+        &mut route,
+        Some((unavailable, "level_1".into())),
+        None,
+        true,
+        &f.state,
+    )
+    .await
+    .unwrap();
     assert_eq!(route.preview.target, Some(actual.clone()));
     assert!(route.preview.used_fallback);
+    assert_eq!(route.preview.agent_name.as_deref(), Some("Fallback"));
     route.assessment.as_mut().unwrap().risk = hub_core::RiskLevel::High;
     route.preview.level = Some(1);
-    choose_target(&mut route, Some(actual), None, true, &f.state)
-        .await
-        .unwrap();
+    choose_target(
+        &mut route,
+        Some((actual, "level_1".into())),
+        None,
+        true,
+        &f.state,
+    )
+    .await
+    .unwrap();
     assert!(route.preview.needs_plan);
     assert!(route.preview.target.is_none());
+    assert_eq!(route.preview.agent_name.as_deref(), Some("Planner"));
     assert!(f.state.connection.lock().await.is_none());
 }
 #[tokio::test]
@@ -250,9 +272,15 @@ async fn consumed_changed_or_stale_previews_cannot_be_reused() {
     let f = fixture().await;
     let mut route = prepared(&f);
     let target = route.settings.target(1).unwrap();
-    choose_target(&mut route, Some(target.clone()), None, true, &f.state)
-        .await
-        .unwrap();
+    choose_target(
+        &mut route,
+        Some((target.clone(), "level_1".into())),
+        None,
+        true,
+        &f.state,
+    )
+    .await
+    .unwrap();
     let id = route.preview.id.clone();
     f.state
         .auto_routes

@@ -245,6 +245,7 @@ async fn create_routed_task(
         known_files,
         estimated_loc: None,
     };
+    let mut resolved_auto_level = None;
     let (report, target) = if preference == ExecutorPreference::Auto {
         let preview = auto_routing::consume_route(
             auto_route_id
@@ -256,6 +257,7 @@ async fn create_routed_task(
             &state,
         )
         .await?;
+        resolved_auto_level = preview.level;
         let target = preview.target.clone().ok_or("振り分け先がありません。")?;
         let decision = RoutingDecision {
             executor: if target.provider == ModelProvider::Local {
@@ -279,7 +281,8 @@ async fn create_routed_task(
             }),
             confidence: preview.confidence.unwrap_or(0.0),
             reason: format!(
-                "Auto: 難易度 {}{} → {} / reasoning={}\n{}",
+                "Auto: {} · 難易度 {}{} → {} / reasoning={}\n{}",
+                preview.agent_name.as_deref().unwrap_or("Agent"),
                 preview
                     .level
                     .map(|v| v.to_string())
@@ -381,11 +384,11 @@ async fn create_routed_task(
             .ok_or("project not found")?
             .root;
         let base_revision = autonomous::project_head(&root).await?;
-        let level = match report.decision.complexity {
+        let level = resolved_auto_level.unwrap_or_else(|| match report.decision.complexity {
             hub_core::Complexity::Trivial => 1,
             hub_core::Complexity::Normal => 3,
             hub_core::Complexity::Deep => 5,
-        };
+        });
         let risk = match report.decision.risk {
             hub_core::RiskLevel::Low => "low",
             hub_core::RiskLevel::Medium => "medium",

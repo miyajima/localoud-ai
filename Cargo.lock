@@ -1990,6 +1990,7 @@ dependencies = [
  "protocol-types",
  "provider-spark",
  "serde",
+ "serde_json",
  "tokio",
 ]
 

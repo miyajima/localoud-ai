@@ -62,6 +62,53 @@ pub struct LevelAssignment {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct AgentProfile {
+    pub id: String,
+    pub name: String,
+    pub target: ModelTarget,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteAgentAssignment {
+    pub route: String,
+    pub agent_id: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LegacyRouteIdentity {
+    pub route: String,
+    pub role_name: String,
+    pub agent_name: String,
+}
+
+const ROUTES: [&str; 9] = [
+    "classifier",
+    "level_1",
+    "level_2",
+    "level_3",
+    "level_4",
+    "level_5",
+    "planner",
+    "reviewer",
+    "fallback",
+];
+
+fn default_agent_name(route: &str) -> &'static str {
+    match route {
+        "classifier" => "Router",
+        "level_1" => "Quick",
+        "level_2" => "Builder",
+        "level_3" => "Developer",
+        "level_4" => "Engineer",
+        "level_5" => "Architect",
+        "planner" => "Planner",
+        "reviewer" => "Reviewer",
+        "fallback" => "Fallback",
+        _ => "Agent",
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AutoSettings {
     pub classifier: ModelTarget,
     pub levels: Vec<LevelAssignment>,
@@ -70,6 +117,12 @@ pub struct AutoSettings {
     pub planner_default: Option<ModelTarget>,
     #[serde(default)]
     pub reviewer_default: Option<ModelTarget>,
+    #[serde(default)]
+    pub agents: Vec<AgentProfile>,
+    #[serde(default)]
+    pub route_agents: Vec<RouteAgentAssignment>,
+    #[serde(default, rename = "identities", skip_serializing)]
+    pub legacy_identities: Vec<LegacyRouteIdentity>,
     pub confirm_before_run: bool,
 }
 impl AutoSettings {
@@ -80,7 +133,7 @@ impl AutoSettings {
             model: local_model,
             reasoning: None,
         };
-        Self {
+        let mut settings = Self {
             classifier: local.clone(),
             levels: (1..=5)
                 .map(|level| LevelAssignment {
@@ -95,8 +148,13 @@ impl AutoSettings {
             fallback: None,
             planner_default: default_cloud.clone(),
             reviewer_default: default_cloud,
+            agents: Vec::new(),
+            route_agents: Vec::new(),
+            legacy_identities: Vec::new(),
             confirm_before_run: false,
-        }
+        };
+        settings.ensure_agent_profiles();
+        settings
     }
     pub fn validate(&self) -> Result<()> {
         self.classifier.validate()?;
@@ -117,6 +175,7 @@ impl AutoSettings {
         if let Some(reviewer) = &self.reviewer_default {
             reviewer.validate()?;
         }
+        self.validate_agents()?;
         Ok(())
     }
     pub fn target(&self, level: u8) -> Result<ModelTarget> {
@@ -126,6 +185,175 @@ impl AutoSettings {
             .find(|v| v.level == level)
             .map(|v| v.target.clone())
             .ok_or_else(|| anyhow::anyhow!("難易度は1〜5です。"))
+    }
+    fn target_for_route(&self, route: &str) -> Option<ModelTarget> {
+        let level = |number| {
+            self.levels
+                .iter()
+                .find(|assignment| assignment.level == number)
+                .map(|assignment| assignment.target.clone())
+        };
+        match route {
+            "classifier" => Some(self.classifier.clone()),
+            "level_1" => level(1),
+            "level_2" => level(2),
+            "level_3" => level(3),
+            "level_4" => level(4),
+            "level_5" => level(5),
+            "planner" => self.planner_default.clone().or_else(|| level(5)),
+            "reviewer" => self
+                .reviewer_default
+                .clone()
+                .or_else(|| self.planner_default.clone())
+                .or_else(|| level(5)),
+            "fallback" => self.fallback.clone().or_else(|| level(3)),
+            _ => None,
+        }
+    }
+    pub fn ensure_agent_profiles(&mut self) -> bool {
+        let complete = !self.agents.is_empty()
+            && self.route_agents.len() == ROUTES.len()
+            && ROUTES.iter().all(|route| {
+                self.route_agents
+                    .iter()
+                    .filter(|assignment| assignment.route == *route)
+                    .count()
+                    == 1
+            })
+            && self.route_agents.iter().all(|assignment| {
+                self.agents
+                    .iter()
+                    .any(|agent| agent.id == assignment.agent_id)
+            });
+        if complete {
+            let migrated = !self.legacy_identities.is_empty();
+            self.legacy_identities.clear();
+            return migrated;
+        }
+
+        let specs: Vec<_> = ROUTES
+            .iter()
+            .filter_map(|route| {
+                let target = self.target_for_route(route)?;
+                let name = self
+                    .legacy_identities
+                    .iter()
+                    .find(|identity| identity.route == *route)
+                    .map(|identity| identity.agent_name.trim())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| default_agent_name(route))
+                    .to_string();
+                Some(((*route).to_string(), name, target))
+            })
+            .collect();
+        self.agents.clear();
+        self.route_agents.clear();
+        for (route, name, target) in specs {
+            let agent_id = self
+                .agents
+                .iter()
+                .find(|agent| agent.name == name && agent.target == target)
+                .map(|agent| agent.id.clone())
+                .unwrap_or_else(|| {
+                    let id = format!("agent-{}", route.replace('_', "-"));
+                    self.agents.push(AgentProfile {
+                        id: id.clone(),
+                        name,
+                        target,
+                    });
+                    id
+                });
+            self.route_agents
+                .push(RouteAgentAssignment { route, agent_id });
+        }
+        self.legacy_identities.clear();
+        true
+    }
+    pub fn sync_targets_from_agents(&mut self) -> Result<()> {
+        self.validate_agents()?;
+        self.classifier = self.agent_for_route("classifier")?.target;
+        for level in 1..=5 {
+            let target = self.agent_for_level(level)?.target;
+            self.levels
+                .iter_mut()
+                .find(|assignment| assignment.level == level)
+                .ok_or_else(|| anyhow::anyhow!("難易度は1〜5です。"))?
+                .target = target;
+        }
+        self.planner_default = Some(self.agent_for_route("planner")?.target);
+        self.reviewer_default = Some(self.agent_for_route("reviewer")?.target);
+        if self.fallback.is_some() {
+            self.fallback = Some(self.agent_for_route("fallback")?.target);
+        }
+        Ok(())
+    }
+    fn validate_agents(&self) -> Result<()> {
+        if self.agents.is_empty() || self.agents.len() > 50 {
+            bail!("エージェントを1〜50件で設定してください。");
+        }
+        for agent in &self.agents {
+            if agent.id.trim().is_empty()
+                || agent.id.len() > 80
+                || !agent
+                    .id
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || "-_.".contains(character))
+            {
+                bail!("エージェントIDが不正です。");
+            }
+            if agent.name.trim().is_empty()
+                || agent.name.chars().count() > 80
+                || agent.name.chars().any(char::is_control)
+            {
+                bail!("エージェント名は1〜80文字で指定してください。");
+            }
+            agent.target.validate()?;
+            if self
+                .agents
+                .iter()
+                .filter(|candidate| candidate.id == agent.id)
+                .count()
+                != 1
+            {
+                bail!("エージェントIDは重複できません。");
+            }
+        }
+        if self.route_agents.len() != ROUTES.len()
+            || ROUTES.iter().any(|route| {
+                self.route_agents
+                    .iter()
+                    .filter(|assignment| assignment.route == *route)
+                    .count()
+                    != 1
+            })
+            || self.route_agents.iter().any(|assignment| {
+                !self
+                    .agents
+                    .iter()
+                    .any(|agent| agent.id == assignment.agent_id)
+            })
+        {
+            bail!("判定・難易度1〜5・計画・レビュー・代替実行にエージェントを割り当ててください。");
+        }
+        Ok(())
+    }
+    pub fn agent_for_route(&self, route: &str) -> Result<AgentProfile> {
+        let assignment = self
+            .route_agents
+            .iter()
+            .find(|assignment| assignment.route == route)
+            .ok_or_else(|| anyhow::anyhow!("エージェントの割り当てがありません: {route}"))?;
+        self.agents
+            .iter()
+            .find(|agent| agent.id == assignment.agent_id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("割り当てたエージェントがありません: {route}"))
+    }
+    pub fn agent_for_level(&self, level: u8) -> Result<AgentProfile> {
+        if !(1..=5).contains(&level) {
+            bail!("難易度は1〜5です。");
+        }
+        self.agent_for_route(&format!("level_{level}"))
     }
 }
 /// Changing a difficulty level never removes the independent planning gate.
@@ -241,5 +469,39 @@ mod tests {
         value.risk = RiskLevel::High;
         assert!(planning_reason(&input, Some(&value)).is_some());
         assert!(check_execution_scope(&target("remote"), &input, Some(&value)).is_ok());
+    }
+    #[test]
+    fn agents_are_user_owned_and_legacy_json_gets_profiles() {
+        let mut config = AutoSettings::initial("local".into(), Some(target("default")));
+        let reviewer = config.agent_for_route("reviewer").unwrap();
+        let agent = config
+            .agents
+            .iter_mut()
+            .find(|agent| agent.id == reviewer.id)
+            .unwrap();
+        agent.name = "赤ペン担当".into();
+        assert_eq!(
+            config.agent_for_route("reviewer").unwrap().name,
+            "赤ペン担当"
+        );
+        config.validate().unwrap();
+
+        let mut value = serde_json::to_value(&config).unwrap();
+        value.as_object_mut().unwrap().remove("agents");
+        value.as_object_mut().unwrap().remove("route_agents");
+        value.as_object_mut().unwrap().insert(
+            "identities".into(),
+            serde_json::json!([{
+                "route":"reviewer",
+                "role_name":"レビュー",
+                "agent_name":"Legacy Reviewer"
+            }]),
+        );
+        let mut migrated: AutoSettings = serde_json::from_value(value).unwrap();
+        assert!(migrated.ensure_agent_profiles());
+        assert_eq!(
+            migrated.agent_for_route("reviewer").unwrap().name,
+            "Legacy Reviewer"
+        );
     }
 }

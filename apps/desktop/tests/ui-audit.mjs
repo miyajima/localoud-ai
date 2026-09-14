@@ -33,6 +33,7 @@ async function fixture(options={},kind='direct') {
     case 'projects':return [project];
     case 'threads':return [thread];
     case 'available_models':return {models:[model],warnings:[]};
+    case 'auto_settings':return {classifier:{provider:'codex',profile_id:'codex',model:model.model,reasoning:'medium'},levels:[1,2,3,4,5].map(level=>({level,target:{provider:'codex',profile_id:'codex',model:model.model,reasoning:'medium'}})),fallback:null,planner_default:{provider:'codex',profile_id:'codex',model:model.model,reasoning:'high'},reviewer_default:{provider:'codex',profile_id:'codex',model:model.model,reasoning:'high'},agents:[{id:'agent-sakura',name:'Sakura',target:{provider:'codex',profile_id:'codex',model:model.model,reasoning:'medium'}},{id:'agent-reviewer',name:'Reviewer',target:{provider:'codex',profile_id:'codex',model:model.model,reasoning:'high'}}],route_agents:['classifier','level_1','level_2','level_3','level_4','level_5','planner','fallback'].map(route=>({route,agent_id:'agent-sakura'})).concat({route:'reviewer',agent_id:'agent-reviewer'}),confirm_before_run:true};
     case 'thread_models':return {'task-1':model.model};
     case 'thread_model_targets':return {};
     case 'thread_reasoning':return {'task-1':'medium'};
@@ -52,7 +53,7 @@ async function fixture(options={},kind='direct') {
     case 'mcp_settings':case 'set_mcp_settings':return {config:args.config||{enabled:true,project_ids:['fixture'],connection:{kind:'secure_tunnel',tunnel_id:'fixture-tunnel'}},running:true,error:null,local_endpoint:'http://127.0.0.1:8792/mcp'};
     case 'codex_binary':return '/usr/local/bin/codex';
     case 'astra_settings':return {mode:'disabled',model:'fixture-model',reasoning:null};
-    case 'autonomous_snapshot':return {thread,messages:[{role:'user',text:thread.title}],steps:[{step:{key:'implementation',title:'検索結果を改善',goal:'見出しと説明の余白を整える',level:3,owned_paths:['src/search.ts'],acceptance:['キーボード操作を維持'],dependencies:[]},status:'completed',target:{model:'fixture-model',reasoning:'medium'},child_id:'child-1',capsule:'保存済みの実行指示です。',verification:[{status:'pass',command:'npm test',exit_code:0,target_revision:'fixture-revision',log_ref:'fixture-log',output:'テスト成功（画面検証用データ）'}],usage:[{prompt_tokens:1200,completion_tokens:340,latency_ms:1600}]}],children:[{id:'child-1',provider_thread:{id:'child-provider'}}],artifact_version:'fixture-revision',source_head:'fixture-base',iteration:1,final_diff:null,artifact:{path:'/workspace/fixture-worktree'},manifest:{manifest_id:'fixture-manifest',request:thread.title,acceptance:['読みやすさとキーボード操作を両立する']},review:{manifest_id:'fixture-review',verdict:'pass',summary:'画面検証用の保存記録です。実際のLLM実行は行っていません。',findings:[]}};
+    case 'autonomous_snapshot':return {thread,messages:[{role:'user',text:thread.title}],steps:[{step:{key:'implementation',title:'検索結果を改善',goal:'見出しと説明の余白を整える',level:3,owned_paths:['src/search.ts'],acceptance:['キーボード操作を維持'],dependencies:[]},status:'completed',target:{model:'fixture-model',reasoning:'medium'},agent_name:'Sakura',child_id:'child-1',capsule:'保存済みの実行指示です。',verification:[{status:'pass',command:'npm test',exit_code:0,target_revision:'fixture-revision',log_ref:'fixture-log',output:'テスト成功（画面検証用データ）'}],usage:[{prompt_tokens:1200,completion_tokens:340,latency_ms:1600}]}],children:[{id:'child-1',provider_thread:{id:'child-provider'}}],artifact_version:'fixture-revision',source_head:'fixture-base',iteration:1,final_diff:null,artifact:{path:'/workspace/fixture-worktree'},manifest:{manifest_id:'fixture-manifest',request:thread.title,acceptance:['読みやすさとキーボード操作を両立する']},review:{manifest_id:'fixture-review',verdict:'pass',summary:'画面検証用の保存記録です。実際のLLM実行は行っていません。',findings:[]}};
     case 'autonomous_activity':return {workers:[{child_id:'child-1',events:[{sequence:1,event:{kind:'item_completed',text:'表示の調整と検証を完了しました。',details:{type:'command',command:'npm test',exit_code:0}}}]}],changes:[{key:'implementation',title:'検索結果を改善',path:'/workspace/fixture-worktree',diff:'diff --git a/search.ts b/search.ts\n--- a/search.ts\n+++ b/search.ts\n@@ -1 +1 @@\n-const spacing = 4;\n+const spacing = 12;',error:null}]};
     default:throw Error('AUDIT BLOCKED native command: '+command);
    }
@@ -86,6 +87,13 @@ try{
  for(const mode of ['light','dark']){
   const f=await fixture({colorScheme:mode});
   await inspect(f.page,`desktop-${mode}-welcome`);
+  await f.page.locator('#compose-more').evaluate(element=>element.open=true);
+  await f.page.locator('#auto-settings-button').click();
+  await f.page.locator('#agent-list .agent-row').first().waitFor();
+  await f.page.locator('#add-agent').click();
+  check(`${mode}: agent can be added`,await f.page.locator('#agent-list .agent-row').count()===3);
+  await inspect(f.page,`desktop-${mode}-agent-settings`);
+  await f.page.locator('#auto-settings-close').click();
   await f.page.locator('[data-thread="task-1"]').click();
   await f.page.locator('.message').first().waitFor();
   await inspect(f.page,`desktop-${mode}-task`);
@@ -125,6 +133,7 @@ try{
   for(const tab of ['Chat','Plan','Diff','Agents','Terminal','Context','Usage']){
    await f.page.locator(`[data-tab="${tab}"]`).click();
    await f.page.waitForFunction(()=>document.querySelector('#content').getAttribute('aria-busy')!=='true');
+   if(tab==='Agents')check(`${mode}: configured agent is visible`,await f.page.locator('#content').evaluate(e=>e.textContent.includes('Sakura · 難易度 3')));
    await inspect(f.page,`execution-${mode}-${tab.toLowerCase()}`);
   }
   assert.deepEqual(f.errors,[]);await f.context.close();
@@ -132,6 +141,11 @@ try{
  for(const viewport of [{width:375,height:812},{width:812,height:375}]){
   const f=await fixture({viewport,hasTouch:true,colorScheme:'dark',reducedMotion:'reduce'});
   await inspect(f.page,`narrow-${viewport.width}-welcome`);
+  await f.page.locator('#compose-more').evaluate(element=>element.open=true);
+  await f.page.locator('#auto-settings-button').click();
+  await f.page.locator('#agent-list .agent-row').first().waitFor();
+  await inspect(f.page,`narrow-${viewport.width}-agent-settings`);
+  await f.page.locator('#auto-settings-close').click();
   if(viewport.width===375){
    await f.page.locator('#sidebar-toggle').click();
    check('375px navigation opens with focus inside',await f.page.evaluate(()=>document.activeElement.id==='sidebar-close'&&document.querySelector('main').inert));

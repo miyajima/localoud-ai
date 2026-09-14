@@ -22,6 +22,10 @@ pub struct AutoPreview {
     pub confidence: Option<f64>,
     pub estimated_scope: Option<protocol_types::local::EstimatedScope>,
     pub target: Option<ModelTarget>,
+    #[serde(default)]
+    pub route_key: Option<String>,
+    #[serde(default)]
+    pub agent_name: Option<String>,
     pub reason: String,
     pub blocked: Option<String>,
     pub used_fallback: bool,
@@ -182,6 +186,9 @@ fn normalize_saved_settings(
         config.reviewer_default = legacy_reviewer.or_else(|| config.planner_default.clone());
         migrated = true;
     }
+    if config.ensure_agent_profiles() {
+        migrated = true;
+    }
     (config, migrated)
 }
 fn initial_settings(local_model: String, catalog: &models::Catalog) -> AutoSettings {
@@ -222,6 +229,9 @@ fn initial_settings(local_model: String, catalog: &models::Catalog) -> AutoSetti
     }
     config.planner_default = config.target(5).ok();
     config.reviewer_default = config.planner_default.clone();
+    config.agents.clear();
+    config.route_agents.clear();
+    config.ensure_agent_profiles();
     config
 }
 #[tauri::command]
@@ -230,9 +240,12 @@ pub async fn auto_settings(state: tauri::State<'_, AppState>) -> Result<AutoSett
 }
 #[tauri::command]
 pub async fn set_auto_settings(
-    config: AutoSettings,
+    mut config: AutoSettings,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    config
+        .sync_targets_from_agents()
+        .map_err(|e| e.to_string())?;
     config.validate().map_err(|e| e.to_string())?;
     let catalog = models::catalog(&state).await?;
     for target in std::iter::once(&config.classifier)
@@ -240,6 +253,7 @@ pub async fn set_auto_settings(
         .chain(config.fallback.iter())
         .chain(config.planner_default.iter())
         .chain(config.reviewer_default.iter())
+        .chain(config.agents.iter().map(|agent| &agent.target))
     {
         let choice = catalog
             .models
@@ -415,7 +429,7 @@ async fn target_status(
 }
 async fn choose_target(
     route: &mut PreparedRoute,
-    candidate: Option<ModelTarget>,
+    candidate: Option<(ModelTarget, String)>,
     failure: Option<String>,
     allow_fallback: bool,
     state: &AppState,
@@ -423,15 +437,20 @@ async fn choose_target(
     route.preview.blocked = None;
     route.preview.target = None;
     route.preview.used_fallback = false;
+    route.preview.needs_plan = false;
+    route.preview.route_key = None;
+    route.preview.agent_name = None;
     if let Some(reason) = planning_reason(&route.input, route.assessment.as_ref()) {
+        apply_agent(route, "planner")?;
         route.preview.needs_plan = true;
         route.preview.blocked = Some(reason);
         return Ok(());
     }
     let mut failure = failure;
-    if let Some(target) = candidate {
+    if let Some((target, route_key)) = candidate {
         match target_status(&target, route, state).await {
             Ok(()) => {
+                apply_agent(route, &route_key)?;
                 route.preview.target = Some(target);
                 return Ok(());
             }
@@ -443,6 +462,7 @@ async fn choose_target(
         if let Some(fallback) = route.settings.fallback.clone() {
             match target_status(&fallback, route, state).await {
                 Ok(()) => {
+                    apply_agent(route, "fallback")?;
                     route.preview.used_fallback = true;
                     route.preview.target = Some(fallback);
                     route.preview.reason = format!(
@@ -460,6 +480,15 @@ async fn choose_target(
         }
     }
     route.preview.blocked = Some(failure);
+    Ok(())
+}
+fn apply_agent(route: &mut PreparedRoute, route_key: &str) -> Result<(), String> {
+    let agent = route
+        .settings
+        .agent_for_route(route_key)
+        .map_err(|e| e.to_string())?;
+    route.preview.route_key = Some(route_key.into());
+    route.preview.agent_name = Some(agent.name);
     Ok(())
 }
 fn check_fresh(route: &PreparedRoute, state: &AppState) -> Result<(), String> {
@@ -536,6 +565,8 @@ pub async fn preview_auto_route(
             confidence,
             estimated_scope,
             target: None,
+            route_key: None,
+            agent_name: None,
             reason,
             blocked: None,
             used_fallback: false,
@@ -545,7 +576,11 @@ pub async fn preview_auto_route(
         },
     };
     let candidate = level
-        .map(|level| settings.target(level))
+        .map(|level| {
+            settings
+                .target(level)
+                .map(|target| (target, format!("level_{level}")))
+        })
         .transpose()
         .map_err(|e| e.to_string())?;
     choose_target(&mut route, candidate, failure, true, &state).await?;
@@ -585,9 +620,20 @@ pub async fn revise_auto_route(
     }
     let candidate = if let Some(level) = level {
         route.preview.level = Some(level);
-        route.settings.target(level).map_err(|e| e.to_string())?
+        (
+            route.settings.target(level).map_err(|e| e.to_string())?,
+            format!("level_{level}"),
+        )
     } else {
-        target.ok_or("モデルがありません")?
+        (
+            target.ok_or("モデルがありません")?,
+            route
+                .preview
+                .route_key
+                .clone()
+                .or_else(|| route.preview.level.map(|level| format!("level_{level}")))
+                .unwrap_or_else(|| "fallback".into()),
+        )
     };
     route.preview.manual_override = true;
     choose_target(&mut route, Some(candidate), None, false, &state).await?;

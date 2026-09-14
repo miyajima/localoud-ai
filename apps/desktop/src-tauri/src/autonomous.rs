@@ -75,6 +75,8 @@ pub struct StepState {
     pub task_id: TaskId,
     pub step: PlanStep,
     pub target: ModelTarget,
+    #[serde(default)]
+    pub agent_name: String,
     pub status: String,
     pub capsule: Option<String>,
     pub dispatch_phase: Option<String>,
@@ -453,7 +455,8 @@ fn capsule(w: &AutonomousSnapshot, i: usize) -> Result<String> {
         })
         .collect::<std::result::Result<_, &str>>()
         .map_err(err)?;
-    let payload = json!({"task":w.steps[i].step,"target":w.steps[i].target,"dependencies":dependencies,
+    let payload = json!({"task":w.steps[i].step,"target":w.steps[i].target,
+        "assignment":{"agent_name":w.steps[i].agent_name},"dependencies":dependencies,
         "overall_acceptance":w.manifest.as_ref().map(|m| &m.acceptance),"revision_instruction":w.steps[i].revision_instruction,
         "iteration":w.iteration,"worktree_note":"Each iteration has a new worktree containing only base sources and current dependency outputs. Reimplement your step here; your prior own patch is not pre-applied. Never write to a previous worktree.",
         "instructions":"Execute only this task in the supplied isolated worktree. Read repository sources as needed. No subagents, no commit, merge, push, external publication or changes outside owned_paths. Run acceptance checks and report their exact results. Do not claim unrun tests passed. No parent conversation is available."});
@@ -587,6 +590,7 @@ pub async fn import_task(
     }
     let mut steps = Vec::new();
     for step in plan {
+        let agent = settings.agent_for_level(step.level).map_err(err)?;
         let target = step
             .target_override
             .clone()
@@ -597,6 +601,7 @@ pub async fn import_task(
             task_id: TaskId::default(),
             step,
             target,
+            agent_name: agent.name,
             status: "pending".into(),
             capsule: None,
             dispatch_phase: None,
@@ -1372,6 +1377,10 @@ async fn automated_review(
     version: &str,
 ) -> Result<bool> {
     let w = read(state, id)?;
+    let reviewer_agent = w
+        .settings_snapshot
+        .agent_for_route("reviewer")
+        .map_err(err)?;
     let Some(target) = w.settings_snapshot.reviewer_default.clone() else {
         update(state, id, |workflow| {
             workflow.thread.status = "needs_attention".into();
@@ -1583,7 +1592,7 @@ async fn automated_review(
     update(state, id, |workflow| {
         workflow.children.push(Child {
             id: reviewer_id,
-            role: format!("reviewer-{}", workflow.iteration),
+            role: reviewer_agent.name.clone(),
             provider: mapping.provider.clone(),
             provider_thread: Some(ProviderThread {
                 id: provider_thread_id.clone(),
@@ -2152,7 +2161,7 @@ async fn worker(state: &AppState, id: HubThreadId, i: usize) -> Result<()> {
                 w.steps[i].child_id = Some(child);
                 w.children.push(Child {
                     id: child,
-                    role: s.step.key.clone(),
+                    role: s.agent_name.clone(),
                     provider: "local".into(),
                     provider_thread: None,
                     turn: None,
@@ -2449,7 +2458,7 @@ async fn api_worker(
         } else {
             workflow.children.push(Child {
                 id: child,
-                role: step.step.key.clone(),
+                role: step.agent_name.clone(),
                 provider: format!("api:{profile_id}"),
                 provider_thread: Some(ProviderThread {
                     id: provider_thread_id.clone(),
@@ -2721,7 +2730,7 @@ async fn codex_worker(
             w.steps[i].child_id = Some(child);
             w.children.push(Child {
                 id: child,
-                role: s.step.key.clone(),
+                role: s.agent_name.clone(),
                 provider: "codex".into(),
                 provider_thread: Some(thread.clone()),
                 turn: None,

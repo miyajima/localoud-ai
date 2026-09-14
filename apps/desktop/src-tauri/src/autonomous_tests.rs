@@ -46,6 +46,7 @@ fn task(step: PlanStep) -> StepState {
         task_id: TaskId::default(),
         step,
         target: target(),
+        agent_name: "Builder".into(),
         status: "pending".into(),
         capsule: None,
         dispatch_phase: None,
@@ -151,6 +152,7 @@ fn saved_routes_preserve_every_model_and_exact_effort() {
         assert_eq!(t.model, format!("model-{level}"));
         assert_eq!(t.reasoning, Some(format!("effort-{level}")));
     }
+    assert_eq!(frozen.agent_for_level(3).unwrap().name, "Builder");
     assert!(frozen.target(0).is_err());
 }
 #[test]
@@ -343,6 +345,13 @@ fn capsules_are_bounded_and_exclude_orchestration_and_unrelated_outputs() {
         Some(protocol_types::a2a::CONTEXT_CAPSULE_MEDIA_TYPE)
     );
     assert_eq!(envelope.parts[0].data.as_ref().unwrap()["task"]["key"], "b");
+    assert!(envelope.parts[0].data.as_ref().unwrap()["assignment"]
+        .get("role_name")
+        .is_none());
+    assert_eq!(
+        envelope.parts[0].data.as_ref().unwrap()["assignment"]["agent_name"],
+        "Builder"
+    );
     assert_eq!(envelope.reference_task_ids.len(), 1);
     assert!(!p.contains("TRANSCRIPT"));
     assert!(!p.contains("original request"));
