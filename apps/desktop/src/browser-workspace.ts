@@ -16,16 +16,21 @@ export function setupBrowserWorkspace(invoke: Invoke) {
 
   const toggle = document.createElement('button'); toggle.id = 'browser-toggle'; toggle.type = 'button';
   toggle.textContent = 'ChatGPTに相談'; toggle.title = 'ChatGPTを開く ⌘⇧B';
-  toggle.setAttribute('aria-controls', 'browser-panel'); toggle.setAttribute('aria-haspopup', 'dialog'); header.append(toggle);
+  toggle.setAttribute('aria-controls', 'browser-panel'); header.append(toggle);
   const overlay = document.createElement('div'); overlay.id = 'browser-overlay'; overlay.hidden = true;
-  const panel = document.createElement('section'); panel.id = 'browser-panel'; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-labelledby', 'browser-title');
-  panel.innerHTML = '<div class="browser-toolbar"><div><strong id="browser-title">ChatGPT Web</strong><span>計画・相談・レビュー</span></div><button id="browser-back" type="button" title="前のページに戻る">← 戻る</button><button id="browser-home" type="button">ChatGPTホーム</button><button id="browser-reload" type="button" aria-label="ChatGPTを再読み込み" title="再読み込み"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M13 6A5 5 0 1 0 14 9"/><path d="M13 3v3h-3"/></svg></button><button id="browser-close" type="button">作業に戻る <span aria-hidden="true">×</span></button></div><div id="chatgpt-usage"></div><div id="browser-surface"><p id="browser-error" role="alert" aria-live="assertive"></p></div><section id="browser-handoff" aria-label="Localoudとの受け渡し" hidden></section>';
-  overlay.append(panel); document.body.append(overlay);
+  const panel = document.createElement('section'); panel.id = 'browser-panel'; panel.setAttribute('role', 'region'); panel.setAttribute('aria-labelledby', 'browser-title');
+  panel.innerHTML = '<div class="browser-toolbar"><div><strong id="browser-title">ChatGPT Web</strong><span id="browser-context">このセッション専用</span></div><button id="browser-sessions" type="button">セッション</button><button id="browser-back" type="button" title="前のページに戻る">← 戻る</button><button id="browser-home" type="button">ChatGPTホーム</button><button id="browser-reload" type="button" aria-label="ChatGPTを再読み込み" title="再読み込み"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M13 6A5 5 0 1 0 14 9"/><path d="M13 3v3h-3"/></svg></button><button id="browser-close" type="button">作業に戻る <span aria-hidden="true">×</span></button></div><div id="chatgpt-usage"></div><div id="browser-surface"><p id="browser-error" role="alert" aria-live="assertive"></p></div><section id="browser-handoff" aria-label="Localoudとの受け渡し" hidden></section>';
+  overlay.append(panel); main.append(overlay);
   const divider = document.createElement('div'); divider.id = 'sidebar-divider'; divider.tabIndex = 0;
   divider.setAttribute('role', 'separator'); divider.setAttribute('aria-label', 'プロジェクト一覧の幅'); divider.setAttribute('aria-orientation', 'vertical'); main.before(divider);
   document.body.classList.add('browser-open');
   const stored = Number(localStorage.getItem('localoud-sidebar-width') ?? 234);
   let sidebarWidth = Math.max(160, Math.min(360, Number.isFinite(stored) ? stored : 234));
+  const sessionBrowsers = new Map<string, string>();
+  let browserSequence = 0;
+  const createBrowserId = () => `web-${Date.now().toString(36)}-${++browserSequence}`;
+  let activeSession = 'new:none', activeBrowser = createBrowserId();
+  sessionBrowsers.set(activeSession, activeBrowser);
   let pending = false, again = false, lastBounds = '', focusRevision = 0, appliedFocus = 0, previousFocus: HTMLElement | null = null;
   function reflect() {
     app.style.setProperty('--sidebar-width', `${sidebarWidth}px`);
@@ -37,16 +42,17 @@ export function setupBrowserWorkspace(invoke: Invoke) {
     if (!isTauri()) { message.textContent = 'ChatGPTはデスクトップアプリで表示できます。'; return; }
     if (pending) { again = true; return; } pending = true;
     const rect = panel.querySelector('#browser-surface')!.getBoundingClientRect();
-    const visible = !overlay.hidden && !document.querySelector('dialog[open]');
+    const visible = !overlay.hidden && !document.querySelector('dialog[open]') && !app.classList.contains('mobile-sidebar-open');
     const focusRequest = focusRevision;
     const bounds = { x: Math.max(0, rect.x), y: Math.max(0, rect.y), width: Math.max(1, rect.width), height: Math.max(1, rect.height), viewport_height: window.innerHeight, visible, focus: focusRequest !== appliedFocus };
-    const key = JSON.stringify(bounds);
-    try { if (key !== lastBounds) { await invoke('browser_layout', { bounds }); lastBounds = JSON.stringify({...bounds,focus:false}); appliedFocus = focusRequest; } message.textContent = ''; }
+    const browserId = activeBrowser;
+    const key = JSON.stringify({browserId,bounds});
+    try { if (key !== lastBounds) { await invoke('browser_layout', { browserId, bounds }); lastBounds = JSON.stringify({browserId,bounds:{...bounds,focus:false}}); appliedFocus = focusRequest; } message.textContent = ''; }
     catch (e) { lastBounds = ''; message.textContent = `ChatGPTを開けませんでした。再読み込みしてください。 ${String(e)}`; }
     finally { pending = false; if (again) { again = false; void layout(); } }
   }
   function closeBrowser() {
-    const wasOpen = !overlay.hidden; overlay.hidden = true; app.inert = false;
+    const wasOpen = !overlay.hidden; overlay.hidden = true;
     if (wasOpen) {
       focusRevision++;
       const composer = main.querySelector<HTMLTextAreaElement>('#task-input');
@@ -57,8 +63,8 @@ export function setupBrowserWorkspace(invoke: Invoke) {
   function showBrowser() {
     if (overlay.hidden) {
       previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      overlay.hidden = false; app.inert = true; focusRevision++;
-      // Keep local controls and the native ChatGPT webview accessible together.
+      overlay.hidden = false; focusRevision++;
+      // The browser occupies the work area while the session list stays interactive.
       panel.querySelector<HTMLButtonElement>('#browser-close')!.focus();
     }
     reflect();
@@ -72,35 +78,28 @@ export function setupBrowserWorkspace(invoke: Invoke) {
   guide.querySelector('#guide-open')!.addEventListener('click', () => { guide.close(); showBrowser(); });
   function showCopiedRequestGuide(kind: 'plan' | 'review') {
     closeBrowser();
-    guide.querySelector('#chatgpt-return-guide')!.textContent = `回答が来たら、回答内の${kind === 'plan' ? '計画' : 'レビュー結果'}のJSONをコピーし、画面下部の「${kind === 'plan' ? 'コピーした計画を確認' : 'コピーした結果を確認'}」を押してください。内容を確認してLocaloudに取り込めます。`;
+    guide.querySelector('#chatgpt-return-guide')!.textContent = `回答が来たら、${kind === 'plan' ? '実行用の計画JSON' : 'レビュー結果のJSON'}が含まれていることを確認し、回答のコピーボタンで全体をコピーしてください。Localoudへ戻り「${kind === 'plan' ? 'ChatGPTの回答を確認' : 'コピーした結果を確認'}」を押すと、JSONを自動で見つけて内容を確認できます。`;
     guide.showModal();
   }
   for (const action of ['back', 'home']) {
     const button = panel.querySelector<HTMLButtonElement>(`#browser-${action}`)!;
     button.addEventListener('click', async () => {
       button.disabled = true;
-      try { await invoke(`browser_${action}`); }
+      try { await invoke(`browser_${action}`, { browserId: activeBrowser }); }
       catch (e) { panel.querySelector('#browser-error')!.textContent = `移動できませんでした。 ${String(e)}`; }
       finally { button.disabled = false; }
     });
   }
   toggle.addEventListener('click', showBrowser);
+  panel.querySelector('#browser-sessions')!.addEventListener('click', () => { app.querySelector<HTMLButtonElement>('#sidebar-toggle')?.click(); reflect(); });
   panel.querySelector('#browser-close')!.addEventListener('click', closeBrowser);
   overlay.addEventListener('click', e => { if (e.target === overlay) closeBrowser(); });
-  panel.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { e.preventDefault(); closeBrowser(); }
-    if (e.key === 'Tab') {
-      const controls = Array.from(panel.querySelectorAll<HTMLElement>('button:not(:disabled), summary, a[href]')).filter(el => el.getClientRects().length);
-      const first = controls[0], last = controls.at(-1);
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
-    }
-  });
+  panel.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); closeBrowser(); } });
   const reload=panel.querySelector<HTMLButtonElement>('#browser-reload')!;
   panel.querySelector('#browser-error')!.removeAttribute('aria-live');
   reload.addEventListener('click', async () => {
     if(reload.disabled)return;reload.disabled=true;reload.setAttribute('aria-busy','true');
-    try{await invoke('browser_reload');panel.querySelector('#browser-error')!.textContent='';}
+    try{await invoke('browser_reload',{browserId:activeBrowser});panel.querySelector('#browser-error')!.textContent='';}
     catch(e){panel.querySelector('#browser-error')!.textContent=`再読み込みに失敗しました。接続を確認して、もう一度お試しください。 ${String(e)}`;}
     finally{reload.disabled=false;reload.setAttribute('aria-busy','false');}
   });
@@ -117,6 +116,21 @@ export function setupBrowserWorkspace(invoke: Invoke) {
   window.addEventListener('resize', reflect); reflect();
   return {
     showWorkspace: closeBrowser, showBrowser, showCopiedRequestGuide, hideBrowser: closeBrowser, isBrowserOpen: () => !overlay.hidden,
+    setSession: (id: string, title: string) => {
+      const next = id.trim() || 'new:none';
+      let browser = sessionBrowsers.get(next);
+      if (!browser) { browser = createBrowserId(); sessionBrowsers.set(next, browser); }
+      const changed = next !== activeSession || browser !== activeBrowser;
+      activeSession = next; activeBrowser = browser;
+      panel.querySelector('#browser-context')!.textContent = title ? `「${title}」専用` : 'このセッション専用';
+      if (changed) { lastBounds = ''; void layout(); }
+    },
+    moveSession: (from: string, to: string) => {
+      const target = to.trim(); if (!target || from === target) return;
+      const browser = sessionBrowsers.get(target) || sessionBrowsers.get(from) || createBrowserId();
+      sessionBrowsers.delete(from); sessionBrowsers.set(target, browser);
+      if (activeSession === from) { activeSession = target; activeBrowser = browser; lastBounds = ''; void layout(); }
+    },
     setSidebarHidden: (value: boolean) => { app.classList.toggle('sidebar-hidden', value); const button = app.querySelector('#sidebar-toggle'); button?.setAttribute('aria-expanded', String(!value)); button?.setAttribute('aria-label', value ? 'プロジェクト一覧を表示' : 'プロジェクト一覧を閉じる'); reflect(); },
     setWorkflow: (markup: string, action: (name: string) => void) => {
       if (workflow.innerHTML === markup) return; workflow.innerHTML = markup;

@@ -16,7 +16,7 @@ async function fixture({saved,existing=false,connected=true,duplicate=false,impo
  const dom=new JSDOM('<div id="app"></div>',{url:'https://workflow.fixture'});
  if(saved)dom.window.localStorage.setItem('astra-ui-v1',saved);
  dom.window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};dom.window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new dom.window.Event('close'));};
- const calls=[];const clipboard=[];const navigator={clipboard:{writeText:async text=>{if(state.copyError)throw Error(state.copyError);clipboard.push(text);}}};
+ const calls=[];const clipboard=[];const browserChanges=[];const navigator={clipboard:{writeText:async text=>{if(state.copyError)throw Error(state.copyError);clipboard.push(text);}}};
  const project={id:'project',name:'Fixture',root:'/fixture'};
  const root={id:'root-session',project_id:project.id,provider:'workflow',provider_thread_id:'workflow:root',title:'入力を保持する',status:'idle'};
  const state={projects:multipleProjects?[project,{id:'other',name:'別プロジェクト',root:'/other'}]:[project],threads:existing?[root]:[],providerProfiles:profiles.map(profile=>({...profile})),running:false,failReview:false,messages:existing?[{role:'user',text:'保存済みの依頼',key:'old-user'},{role:'assistant',text:'保存済みのプラン',key:'old-plan',label:'プラン · ChatGPT'}]:[],targets:existing?{plan:{model:'gpt-6-astra',reasoning:'high',chatgpt:true},review:{model:'gpt-6-astra',reasoning:'high',chatgpt:true},implement:{model:'codex-implementation',reasoning:'high',chatgpt:false}}:{},phase:'plan',model:'gpt-6-astra'};
@@ -67,11 +67,11 @@ async function fixture({saved,existing=false,connected=true,duplicate=false,impo
   }
  };
  const noop=()=>{};
- const context={tabLabels,flowMarkup,welcomeMarkup,executionOverview,executionPlan,executionContext,executionUsage,focusMarkup,planningRequest,reviewRequest,recordMarkup,syncWorkers,applyWorkerEvent,mergeActivity,progressMarkup,changesMarkup,taskGraph,bindTaskGraphs,navigator,window:dom.window,document:dom.window.document,localStorage:dom.window.localStorage,console,Option:dom.window.Option,setTimeout,clearTimeout,setInterval:()=>0,clearInterval:noop,nativeInvoke:invoke,isTauri:()=>true,listen:async()=>noop,appendModelOptions,fillReasoningSelect,profileForChoice,readTarget,resolvedModel,modelForTarget,markdown:s=>s,diffMarkup:s=>s,statusLabel:s=>s,planPreview:()=>'',setupSettingsNavigation:()=>({mcp:dom.window.document.createElement('div'),select:noop,setMcpLoader:noop}),setupManifestReview:()=>noop,setupMcpSettings:()=>noop,setupChatGptUsage:noop,setupBrowserWorkspace:()=>{const bar=dom.window.document.createElement('section');bar.id='workflow-bar';dom.window.document.body.append(bar);return {showBrowser:noop,showWorkspace:noop,showCopiedRequestGuide:noop,isBrowserOpen:()=>browserOpen,setSidebarHidden:noop,setWorkflow:(html,action)=>{bar.innerHTML=html;bar.querySelectorAll('[data-flow-action]').forEach(b=>b.onclick=()=>action(b.dataset.flowAction));}}},setupMemory:noop,memoryPanel:()=>'',bindMemory:noop,setupAutoRouting:noop,showAutoPreview:preview=>calls.push({command:'showAutoPreview',args:preview}),openAutoSettings:noop,setupComposer:()=>({syncContext:noop,getMentions:()=>[],setMentions:noop,clear:noop,refreshThread:async()=>{},seedHistory:async()=>{},remember:async()=>{},beforeSend:async()=>true})};
+ const context={tabLabels,flowMarkup,welcomeMarkup,executionOverview,executionPlan,executionContext,executionUsage,focusMarkup,planningRequest,reviewRequest,recordMarkup,syncWorkers,applyWorkerEvent,mergeActivity,progressMarkup,changesMarkup,taskGraph,bindTaskGraphs,navigator,window:dom.window,document:dom.window.document,localStorage:dom.window.localStorage,console,Option:dom.window.Option,setTimeout,clearTimeout,setInterval:()=>0,clearInterval:noop,nativeInvoke:invoke,isTauri:()=>true,listen:async()=>noop,appendModelOptions,fillReasoningSelect,profileForChoice,readTarget,resolvedModel,modelForTarget,markdown:s=>s,diffMarkup:s=>s,statusLabel:s=>s,planPreview:()=>'',setupSettingsNavigation:()=>({mcp:dom.window.document.createElement('div'),select:noop,setMcpLoader:noop}),setupManifestReview:()=>noop,setupMcpSettings:()=>noop,setupChatGptUsage:noop,setupBrowserWorkspace:()=>{const bar=dom.window.document.createElement('section');bar.id='workflow-bar';dom.window.document.body.append(bar);return {showBrowser:noop,showWorkspace:noop,showCopiedRequestGuide:noop,isBrowserOpen:()=>browserOpen,setSidebarHidden:noop,setSession:(id,title)=>browserChanges.push({kind:'set',id,title}),moveSession:(from,to)=>browserChanges.push({kind:'move',from,to}),setWorkflow:(html,action)=>{bar.innerHTML=html;bar.querySelectorAll('[data-flow-action]').forEach(b=>b.onclick=()=>action(b.dataset.flowAction));}}},setupMemory:noop,memoryPanel:()=>'',bindMemory:noop,setupAutoRouting:noop,showAutoPreview:preview=>calls.push({command:'showAutoPreview',args:preview}),openAutoSettings:noop,setupComposer:()=>({syncContext:noop,getMentions:()=>[],setMentions:noop,clear:noop,refreshThread:async()=>{},seedHistory:async()=>{},remember:async()=>{},beforeSend:async()=>true})};
  for(const name of ['HTMLElement','HTMLButtonElement','HTMLSelectElement','HTMLInputElement','HTMLTextAreaElement','HTMLDialogElement','HTMLDetailsElement','HTMLAnchorElement','HTMLOptionElement','URL'])context[name]=dom.window[name];
  context.setupManifestReview=vm.runInNewContext(reviewJs+';setupManifestReview',context);
  const api=await vm.runInNewContext(`(async()=>{${js}\nawait refreshModels();return {render,newTask,choosePhase,send,sendAutonomous,selectThread,refreshWorkflow,refreshAutonomous,refreshDiff,refreshUsage,refreshContext,refreshThreads,applyEvent,selectedView,activeId:()=>activeThread};})()`,context);
- return {dom,calls,clipboard,state,api,select:dom.window.document.querySelector('#preference'),input:dom.window.document.querySelector('#task-input'),document:dom.window.document,close:()=>dom.window.close()};
+ return {dom,calls,clipboard,browserChanges,state,api,select:dom.window.document.querySelector('#preference'),input:dom.window.document.querySelector('#task-input'),document:dom.window.document,close:()=>dom.window.close()};
 }
 test('failed startup exposes a read-only retry without repeating archive synchronization',async()=>{
  const f=await fixture({startupError:'接続エラー'});try{
@@ -243,7 +243,7 @@ test('startup never reads clipboard or invokes the retired browser transport',as
  const f=await fixture();try{assert.ok(!f.calls.some(c=>/chatgpt|workflow_run|manifest_import/.test(c.command)));assert.equal(f.document.querySelector('#chatgpt-dialog'),null);}finally{f.close();}
 });
 test('explicit paste button imports a Manifest once and tracks worker state',async()=>{
- const f=await fixture();try{f.api.choosePhase('autonomous');await f.api.sendAutonomous('captured-plan','project');const calls=f.calls.filter(c=>c.command==='manifest_import_text');assert.equal(calls.length,1);assert.equal(calls[0].args.projectId,'project');assert.equal(f.api.selectedView().running,true);assert.equal(f.input.hidden,true);}finally{f.close();}
+ const f=await fixture();try{f.api.choosePhase('autonomous');await f.api.sendAutonomous('captured-plan','project');const calls=f.calls.filter(c=>c.command==='manifest_import_text');assert.equal(calls.length,1);assert.equal(calls[0].args.projectId,'project');assert.equal(f.api.selectedView().running,true);assert.equal(f.input.hidden,true);assert.ok(f.browserChanges.some(change=>change.kind==='move'&&change.from==='new:project'&&change.to==='root-session'));}finally{f.close();}
 });
 test('legacy records are readable but cannot be resent by changing composer mode',async()=>{
  const f=await fixture({existing:true});try{await f.api.selectThread('root-session');f.api.choosePhase('autonomous');await f.api.sendAutonomous('captured-plan','project');assert.ok(f.calls.some(c=>c.command==='workflow_snapshot'));assert.ok(!f.calls.some(c=>/manifest_import|workflow_run|send_turn|chatgpt_send/.test(c.command)));assert.match(f.document.querySelector('#error').textContent,/閲覧専用/);}finally{f.close();}
@@ -257,7 +257,7 @@ test('paste immediately signals progress, prevents duplicate clicks and confirms
  let release;const gate=new Promise(resolve=>{release=resolve;});
  const f=await fixture({importStatus:'completed',importGate:gate});try{
   f.api.choosePhase('autonomous');const pending=f.api.sendAutonomous('captured-plan','project');
-  assert.match(f.document.querySelector('#workflow-bar [data-flow-action="import"]').textContent,/取り込み中/);
+  assert.match(f.document.querySelector('#workflow-bar [data-flow-action="import"]').textContent,/確認中/);
   assert.equal(f.document.querySelector('#workflow-bar [data-flow-action="import"]').disabled,true);
   assert.match(f.document.querySelector('#notice').textContent,/取り込み中/);
   await assert.rejects(f.api.sendAutonomous('captured-plan','project'),/現在は取り込めません/);assert.equal(f.calls.filter(c=>c.command==='manifest_import_text').length,1);
@@ -273,7 +273,7 @@ test('failed import replaces progress with error and enables retry',async()=>{
   assert.match(f.document.querySelector('#error').textContent,/JSON形式が不正/);
   assert.equal(f.document.querySelector('#notice').hidden,true);
   assert.equal(f.document.querySelector('#workflow-bar [data-flow-action="import"]').disabled,false);
-  assert.equal(f.document.querySelector('#workflow-bar [data-flow-action="import"]').textContent,'コピーした計画を確認');
+  assert.equal(f.document.querySelector('#workflow-bar [data-flow-action="import"]').textContent,'コピー済みの実行計画を確認');
  }finally{f.close();}
 });
 
@@ -505,9 +505,11 @@ test('planning decision starts configured planner in plan mode without model sel
   f.api.selectedView().messages.push({role:'assistant',text:'計画です',key:'plan'});f.api.render();
   const start=f.document.querySelector('#implement-plan');assert.equal(start.hidden,false);start.click();await new Promise(r=>setTimeout(r,10));
   assert.equal(f.calls.filter(c=>c.command==='create_routed_task').length,1);
-  assert.equal(f.calls.filter(c=>c.command==='send_composed_turn').length,1);
-  assert.equal(f.document.querySelector('#task-mode').value,'autonomous');
-  assert.match(f.input.value,/計画です/);
+  assert.equal(f.calls.filter(c=>c.command==='send_composed_turn').length,2);
+  assert.equal(f.calls.filter(c=>c.command==='send_composed_turn').at(-1).args.options.mode,'default');
+  assert.match(f.calls.filter(c=>c.command==='send_composed_turn').at(-1).args.text,/実装・検証まで進めて/);
+  assert.equal(f.document.querySelector('#task-mode').value,'implement');
+  assert.equal(f.input.value,'');
  }finally{f.close();}
 });
 test('confirmation preference and unavailable planner preserve the unsent request',async()=>{

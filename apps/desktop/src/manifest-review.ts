@@ -9,7 +9,7 @@ const list=(items:string[])=>`<ul>${items.map(s=>`<li>${esc(s)}</li>`).join('')}
 
 export function setupManifestReview(call:Invoke,commit:(text:string,projectId:string)=>Promise<void>,models:()=>Choice[]=()=>[]){
  const dialog=document.createElement('dialog');dialog.id='manifest-review';dialog.setAttribute('aria-labelledby','manifest-review-title');
- dialog.innerHTML='<div class="manifest-heading"><span id="manifest-project"></span><h2 id="manifest-review-title">コピーした計画を確認</h2></div><div id="manifest-preview"></div><p id="manifest-error" role="alert"></p><div class="dialog-actions"><button id="manifest-cancel" type="button">戻る</button><button id="manifest-confirm" type="button" class="primary" disabled>この計画で実行</button></div>';
+ dialog.innerHTML='<div class="manifest-heading"><span id="manifest-project"></span><h2 id="manifest-review-title">ChatGPTの回答を確認</h2></div><div id="manifest-preview"></div><p id="manifest-error" role="alert"></p><div class="dialog-actions"><button id="manifest-cancel" type="button">戻る</button><button id="manifest-confirm" type="button" class="primary" disabled>この計画で実行</button></div>';
  document.body.append(dialog);
  const preview=dialog.querySelector<HTMLElement>('#manifest-preview')!,error=dialog.querySelector<HTMLElement>('#manifest-error')!,confirm=dialog.querySelector<HTMLButtonElement>('#manifest-confirm')!,cancel=dialog.querySelector<HTMLButtonElement>('#manifest-cancel')!;
  let captured:{manifest:Manifest;projectId:string}|undefined,working=false,generation=0,onCancel=()=>{};
@@ -67,6 +67,6 @@ export function setupManifestReview(call:Invoke,commit:(text:string,projectId:st
    }
    preview.insertAdjacentHTML('beforeend',`<details><summary>取り込むデータの全文</summary><pre id="manifest-raw">${esc(JSON.stringify(m,null,2))}</pre></details>`);
    captured={manifest:JSON.parse(JSON.stringify(m)) as Manifest,projectId:project.id};refreshRaw();confirm.disabled=false;
-  }catch(e){if(version===generation&&dialog.open){preview.textContent='ChatGPTが返した計画またはレビューのJSONをコピーし、もう一度開いてください。';error.textContent=String(e);}}
+  }catch(e){if(version===generation&&dialog.open){preview.textContent='実行用JSONを確認できませんでした。ChatGPTの回答にTaskManifestまたはReviewManifestのJSONコードブロックがあることを確認し、回答のコピーボタンでもう一度コピーしてください。計画の文章だけでは実行を開始しません。';error.textContent=String(e);}}
  };
 }

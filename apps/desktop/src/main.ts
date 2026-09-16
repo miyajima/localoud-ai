@@ -93,10 +93,11 @@ async function sendAutonomous(text:string,projectId:string){
   if(projectId!==activeProject)throw Error('確認した計画と選択中のプロジェクトが一致しません。');
   busy=true;importingManifest=true;error('');notice('確認した内容を取り込み中…');render();
   try{
+    const browserSession=draftKey();
     const result=await invoke<{thread:Thread;imported:boolean}>('manifest_import_text',{projectId,text});
     const thread=result.thread;
     (document.querySelector('#task-mode') as HTMLSelectElement).value='autonomous';
-    delete ui.drafts![draftKey()];delete ui.planningRequests![activeProject!];activeThread=thread.id;activeTab='Chat';
+    delete ui.drafts![browserSession];delete ui.planningRequests![activeProject!];browserWorkspace.moveSession(browserSession,thread.id);activeThread=thread.id;activeTab='Chat';
     threads=await invoke<Thread[]>('threads');threadModels[thread.id]='自動実行';
     document.querySelector<HTMLTextAreaElement>('#task-input')!.value='';composer?.clear();saveDraft();rememberSelection();browserWorkspace.showWorkspace();await refreshAutonomous(thread.id);
     if(result.imported)notice('Manifestを取り込みました。'+(threads.find(t=>t.id===thread.id)?.status==='completed'?'レビュー合格・タスク完了です。':'現在の状態: '+statusLabel(threads.find(t=>t.id===thread.id)?.status||thread.status)+'。'));
@@ -266,9 +267,9 @@ for(const id of ['auto-settings-button','refresh-models'])more.querySelector('di
 const localScope=document.createElement('div');localScope.id='local-scope';localScope.hidden=true;
 localScope.innerHTML='<label for="known-files">対象ファイル</label>';
 localScope.append(document.getElementById('known-files')!);document.querySelector('.compose-controls')!.before(localScope);
-const implementPlan=document.createElement('button');implementPlan.id='implement-plan';implementPlan.type='button';implementPlan.textContent='この計画を実行用に確認';implementPlan.hidden=true;
+const implementPlan=document.createElement('button');implementPlan.id='implement-plan';implementPlan.type='button';implementPlan.className='primary';implementPlan.textContent='この計画で実装を開始';implementPlan.hidden=true;
 document.querySelector('#execution-source')!.after(implementPlan);
-implementPlan.onclick=()=>{if(busy||selectedView()?.running||selectedView()?.needsResume||!activeThread)return;const proposal=selectedView()?.messages.filter(message=>message.role==='assistant').at(-1)?.text||'この計画';newTask();chooseAutonomous();const input=document.querySelector<HTMLTextAreaElement>('#task-input')!;input.value=`次の案を実行可能なManifestとして確認し、対象範囲・合格条件・担当を明確にしてください。\n\n${proposal}`;render();focusComposer();};
+implementPlan.onclick=()=>void startImplementationFromPlan();
   const browserWorkspace=setupBrowserWorkspace(invoke);
 const openManifestReview=setupManifestReview(invoke,sendAutonomous,()=>modelChoices);
 const quota=document.querySelector<HTMLElement>('#chatgpt-usage')!;document.querySelector('#settings-form')!.append(quota);
@@ -352,6 +353,7 @@ function render() {
   document.querySelectorAll<HTMLButtonElement>('[data-thread]').forEach(b => b.onclick = () => void selectThread(b.dataset.thread!));
   const v = selectedView();
   const current = threads.find(t=>t.id===activeThread);
+  browserWorkspace.setSession(draftKey(),current?.title||`${project?.name||'プロジェクト'}の新しいタスク`);
   document.querySelector('main')!.classList.toggle('composing-task',!current&&activeTab==='Chat');
   const providerLabel = threadModelLabel(current);
   const modelSelect=document.querySelector<HTMLSelectElement>('#preference')!;
@@ -427,6 +429,14 @@ function handleFlowAction(action:string){
  if(action==='stop'){document.querySelector<HTMLButtonElement>('#stop')!.click();return;}
  if(action==='new'){newTask();return;}
  if(action==='review')void copyReviewRequest();
+}
+async function startImplementationFromPlan(){
+ if(busy||selectedView()?.running||selectedView()?.needsResume||!activeThread)return;
+ if(!setComposerMode('implement'))return;
+ const input=document.querySelector<HTMLTextAreaElement>('#task-input')!;
+ input.value='直前の計画に従って、実装・検証まで進めてください。未解決の必須入力がある場合だけ確認し、それ以外は現在の作業状態を確認して続行してください。';
+ updateSendAvailability();render();notice('計画モードを終了し、同じタスクで実装を開始します。');
+ await send();
 }
 async function reviewManifest(){
  const project=projects.find(p=>p.id===activeProject);
@@ -621,6 +631,7 @@ async function send(approvedRoute?:AutoPreview) {
   busy = true; error(''); render();
   try {
     if (!activeThread) {
+      const browserSession=draftKey();
       let choice=selectedModel();const key=(document.querySelector('#preference') as HTMLSelectElement).value;
       if(key!=='auto'&&!choice)throw new Error('選択したモデルは利用できません。モデル一覧を更新してください。');
       if(approvedRoute&&key!=='auto')throw new Error('モデル選択が変更されました。もう一度実行してください。');
@@ -650,7 +661,7 @@ async function send(approvedRoute?:AutoPreview) {
       const explicitPreference=explicitProfile==='spark'?'spark':explicitProfile==='codex'?'codex':'api';
       const result = await invoke<{thread:Thread;target:ModelTarget;route:{decision:{reason:string;executor:string}};started:boolean}>('create_routed_task', { request:{projectId: activeProject, text, knownFiles:files, preference:autoPlan?(planTarget!.provider==='api'?'api':'codex'):key==='auto'?'auto':explicitPreference,profileId:(autoPlan?planTarget!.profile_id:(choice?profileForChoice(choice):null))??null,model:choice?.model??null,reasoning:autoPlan?planTarget!.reasoning:key==='auto'?null:selectedReasoning(),autoRouteId:autoPlan?null:approvedRoute?.id??null,autoRouteRevision:autoPlan?null:approvedRoute?.revision??null,reviewedWrite:!autoPlan&&!autoExplore&&files.length>0} });
       if(autoPlan||autoExplore)(document.querySelector('#task-mode') as HTMLSelectElement).value='codex-plan';
-      const thread=result.thread; delete ui.drafts![draftKey()]; threads.unshift(thread); activeThread = thread.id; saveDraft(); rememberSelection(); view(thread.id).needsResume = false; view(thread.id).route=autoExplore?`調査から開始 · ${result.target.model}\n${approvedRoute!.reason}`:autoPlan?`${planAgentName?`${planAgentName} · `:''}${result.target.model}\n${approvedRoute!.blocked||approvedRoute!.reason}`:`${key==='auto'&&approvedRoute?.agent_name?`${approvedRoute.agent_name} · `:key==='auto'?'おまかせ · ':''}${result.target.model}\n${result.route.decision.reason}`;
+      const thread=result.thread; delete ui.drafts![browserSession]; threads.unshift(thread); browserWorkspace.moveSession(browserSession,thread.id);activeThread = thread.id; saveDraft(); rememberSelection(); view(thread.id).needsResume = false; view(thread.id).route=autoExplore?`調査から開始 · ${result.target.model}\n${approvedRoute!.reason}`:autoPlan?`${planAgentName?`${planAgentName} · `:''}${result.target.model}\n${approvedRoute!.blocked||approvedRoute!.reason}`:`${key==='auto'&&approvedRoute?.agent_name?`${approvedRoute.agent_name} · `:key==='auto'?'おまかせ · ':''}${result.target.model}\n${result.route.decision.reason}`;
       if(result.started&&thread.provider==='autonomous'){
         (document.querySelector('#task-mode') as HTMLSelectElement).value='autonomous';
         input.value='';composer?.clear();saveDraft();await refreshAutonomous(thread.id);return;

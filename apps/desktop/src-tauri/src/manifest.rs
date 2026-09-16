@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 pub const MAX_MANIFEST_BYTES: usize = 48 * 1024;
+const MAX_CLIPBOARD_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -53,22 +54,16 @@ pub struct ReviewChange {
 }
 
 pub fn parse(text: &str) -> Result<Manifest, String> {
+    if text.len() > MAX_CLIPBOARD_BYTES {
+        return Err("コピーした回答は256KB以内にしてください".into());
+    }
+    let text = manifest_payload(text)?;
     if text.len() > MAX_MANIFEST_BYTES {
         return Err("Manifestは48KB以内にしてください".into());
     }
-    let text = text.trim();
-    let text = if let Some(body) = text
-        .strip_prefix("```json\n")
-        .or_else(|| text.strip_prefix("```\n"))
-    {
-        body.strip_suffix("```")
-            .ok_or("JSONコードブロックが閉じていません")?
-            .trim()
-    } else {
-        text
-    };
-    let mut manifest: Manifest =
-        serde_json::from_str(text).map_err(|e| format!("ManifestのJSON形式が不正です: {e}"))?;
+    let mut manifest: Manifest = serde_json::from_str(text).map_err(|e| {
+        format!("実行用ManifestのJSON形式が不正です。ChatGPTの回答にTaskManifestまたはReviewManifestのJSONコードブロックを1つ含めてください: {e}")
+    })?;
     let (version, id, project) = match &manifest {
         Manifest::Task(m) => (m.version, &m.manifest_id, &m.project_id),
         Manifest::Review(m) => (m.version, &m.manifest_id, &m.project_id),
@@ -133,6 +128,49 @@ pub fn parse(text: &str) -> Result<Manifest, String> {
         }
     }
     Ok(manifest)
+}
+
+fn manifest_payload(text: &str) -> Result<&str, String> {
+    let text = text.trim();
+    let mut json_blocks = Vec::new();
+    let mut cursor = 0;
+    while let Some(relative_start) = text[cursor..].find("```") {
+        let fence_start = cursor + relative_start;
+        let after_fence = &text[fence_start + 3..];
+        let Some(header_end) = after_fence.find('\n') else {
+            break;
+        };
+        let language = after_fence[..header_end].trim();
+        let body_start = fence_start + 3 + header_end + 1;
+        let Some(relative_end) = text[body_start..].find("```") else {
+            return Err("JSONコードブロックが閉じていません".into());
+        };
+        let body_end = body_start + relative_end;
+        if language.eq_ignore_ascii_case("json") {
+            json_blocks.push(text[body_start..body_end].trim());
+        }
+        cursor = body_end + 3;
+    }
+    match json_blocks.len() {
+        1 => return Ok(json_blocks[0]),
+        count if count > 1 => {
+            return Err(
+                "実行用JSONコードブロックが複数あります。取り込む1つだけをコピーしてください"
+                    .into(),
+            )
+        }
+        _ => {}
+    }
+    if let Some(body) = text
+        .strip_prefix("```json\n")
+        .or_else(|| text.strip_prefix("```\n"))
+    {
+        return Ok(body
+            .strip_suffix("```")
+            .ok_or("JSONコードブロックが閉じていません")?
+            .trim());
+    }
+    Ok(text)
 }
 fn nonempty(values: &[String]) -> bool {
     !values.is_empty() && values.iter().all(|v| !v.trim().is_empty())
@@ -275,6 +313,13 @@ mod tests {
         let mut v = task();
         assert!(parse(&v.to_string()).is_ok());
         assert!(parse(&format!("```json\n{v}\n```")).is_ok());
+        assert!(parse(&format!(
+            "計画をまとめました。\n\n```json\n{v}\n```\n\nこの回答をコピーしてください。"
+        ))
+        .is_ok());
+        assert!(parse(&format!("```json\n{v}\n```\n```json\n{v}\n```"))
+            .unwrap_err()
+            .contains("複数"));
         assert!(parse(&format!("Explanation\n{v}")).is_err());
         v["version"] = json!(2);
         assert!(parse(&v.to_string()).is_err());

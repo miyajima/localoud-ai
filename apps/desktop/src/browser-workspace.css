@@ -3,7 +3,7 @@ body.browser-open #app{display:grid;grid-template-columns:var(--sidebar-width,23
 body.browser-open #app>aside{grid-column:1;grid-row:1;min-width:0;min-height:0;display:flex}
 #sidebar-divider{grid-column:2;grid-row:1;background:var(--line);cursor:col-resize;touch-action:none}
 #sidebar-divider:hover,#sidebar-divider:focus-visible{background:var(--blue);outline:none}
-#app>main{grid-column:3;grid-row:1;min-width:0;height:100%;min-height:0;overflow:hidden;container-type:inline-size}
+#app>main{position:relative;grid-column:3;grid-row:1;min-width:0;height:100%;min-height:0;overflow:hidden;container-type:inline-size}
 body.browser-open #app.sidebar-hidden{grid-template-columns:38px 0 minmax(0,1fr)}
 #app.sidebar-hidden>#sidebar-divider{display:none}
 #app>main>header{min-height:54px;height:54px;padding:0 24px;gap:12px;flex-shrink:0;background:var(--paper);border-bottom:1px solid var(--line)}
@@ -15,18 +15,20 @@ body.browser-open #app.sidebar-hidden{grid-template-columns:38px 0 minmax(0,1fr)
 #app>main>nav{padding:0 24px;gap:18px;overflow-x:auto;flex-shrink:0}#app>main>nav button{padding:12px 0;font-size:0.75rem;white-space:nowrap}
 #app>main>footer{padding:16px clamp(20px,4vw,40px) 20px;flex-shrink:0}
 #app>main>footer[hidden]{display:none}
-#browser-overlay{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:#25334355}
+#browser-overlay{position:absolute;inset:0;z-index:100;display:block;background:var(--paper)}
 #browser-overlay[hidden]{display:none}
-#browser-panel{position:static;margin:0;width:min(1120px,calc(100vw - 48px));max-width:none;height:calc(100dvh - 48px);max-height:none;padding:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 24px 90px #25334340;background:var(--paper)}
+#browser-panel{position:static;margin:0;width:100%;max-width:none;height:100%;max-height:none;padding:0;border:0;border-radius:0;overflow:hidden;background:var(--paper)}
 #browser-panel{display:flex;flex-direction:column}
 .browser-toolbar{min-height:54px;display:flex;align-items:center;gap:12px;padding:0 20px;border-bottom:1px solid var(--line);flex-shrink:0}
-.browser-toolbar>div{display:flex;align-items:baseline;gap:12px;margin-right:auto}.browser-toolbar strong{font-size:0.875rem}.browser-toolbar span{font-size:0.75rem;color:var(--muted)}
+.browser-toolbar>div{display:flex;align-items:baseline;gap:12px;margin-right:auto;min-width:0}.browser-toolbar strong{font-size:0.875rem;white-space:nowrap}.browser-toolbar span{font-size:0.75rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .browser-toolbar button{font-size:0.75rem;padding:8px 10px}.browser-toolbar #browser-close{border:1px solid var(--line)}
+#browser-sessions{display:none}
 #browser-surface{flex:1;min-height:0}#browser-error{padding:20px;color:var(--muted);font-size:0.8125rem;line-height:1.7;white-space:pre-wrap}
 #browser-handoff{flex-shrink:0;padding:16px 22px;border-top:1px solid var(--line);background:#f7f9fc;max-height:30%;overflow:auto}
 #browser-handoff[hidden]{display:none}#browser-handoff .flow-title{margin-bottom:7px}#browser-handoff .flow-title>strong{font-size:0.8125rem;-webkit-line-clamp:1}
 #browser-handoff .flow-next p{font-size:0.75rem}#browser-handoff .flow-actions button{font-size:0.75rem;padding:9px 12px}
-@media(max-width:900px){#browser-panel{width:calc(100vw - 24px);height:calc(100dvh - 24px)}.browser-toolbar{padding:0 14px}.browser-toolbar>div>span{display:none}#browser-handoff .flow-next{flex-direction:column;align-items:stretch}#browser-handoff .flow-actions{justify-content:flex-end}}
+@media(max-width:900px){.browser-toolbar{padding:0 14px}.browser-toolbar>div>span{display:none}#browser-handoff .flow-next{flex-direction:column;align-items:stretch}#browser-handoff .flow-actions{justify-content:flex-end}}
+@media(max-width:650px){#browser-sessions{display:inline-flex}.browser-toolbar #browser-back{display:none}}
 #app .compose-controls{flex-wrap:wrap;gap:8px}#app button.manifest-send{width:auto!important;min-width:120px;height:40px;border-radius:8px!important;padding:0 16px!important;font-size:0.8125rem;white-space:nowrap}
 .executor-controls>[hidden]{display:none!important}#app dialog{max-width:700px}
 #operation{display:inline-flex;align-items:center;gap:3px;padding:3px;border-radius:8px;background:var(--side)}

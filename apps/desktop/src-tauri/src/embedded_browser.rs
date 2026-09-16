@@ -1,10 +1,12 @@
 //! User-operated browser with a completion-metadata observer for local usage counts.
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl};
 
-const DISABLE_CONTEXT_MENU: &str = "window.addEventListener('contextmenu', event => event.preventDefault(), true);";
+const DISABLE_CONTEXT_MENU: &str =
+    "window.addEventListener('contextmenu', event => event.preventDefault(), true);";
 
-const LABEL: &str = "chatgpt-browser";
+const LABEL_PREFIX: &str = "chatgpt-browser-";
 // Stable, app-specific WKWebsiteDataStore; never imports another browser's cookies.
 const DATA_STORE: [u8; 16] = *b"LocaloudChatGPT1";
 
@@ -34,9 +36,22 @@ fn valid_bounds(b: &BrowserBounds) -> bool {
         && b.height <= 20000.0
 }
 
+fn browser_label(browser_id: &str) -> Result<String, String> {
+    if browser_id.is_empty() || browser_id.len() > 200 || browser_id.chars().any(char::is_control) {
+        return Err("invalid browser session".into());
+    }
+    let digest = Sha256::digest(browser_id.as_bytes());
+    let suffix = digest[..12]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(format!("{LABEL_PREFIX}{suffix}"))
+}
+
 #[tauri::command]
 pub async fn browser_layout(
     app: tauri::AppHandle,
+    browser_id: String,
     mut bounds: BrowserBounds,
 ) -> Result<(), String> {
     if !valid_bounds(&bounds) {
@@ -56,14 +71,20 @@ pub async fn browser_layout(
             .height;
         bounds.y += (height - bounds.viewport_height).max(0.0);
     }
-    let view = match app.get_webview(LABEL) {
+    let label = browser_label(&browser_id)?;
+    for (view_label, webview) in app.webviews() {
+        if view_label.starts_with(LABEL_PREFIX) && (view_label != label || !bounds.visible) {
+            webview.hide().map_err(|e| e.to_string())?;
+        }
+    }
+    let view = match app.get_webview(&label) {
         Some(view) => view,
         None if !bounds.visible => return Ok(()),
         None => {
             let popup_app = app.clone();
             let usage_app = app.clone();
             let builder = tauri::webview::WebviewBuilder::new(
-                LABEL,
+                &label,
                 WebviewUrl::External("https://chatgpt.com/".parse().map_err(|e| format!("{e}"))?),
             )
             .data_store_identifier(DATA_STORE)
@@ -87,7 +108,7 @@ pub async fn browser_layout(
                     tauri::WebviewWindowBuilder::new(&popup_app, label, WebviewUrl::External(url))
                         .title("ChatGPT — Browser")
                         .data_store_identifier(DATA_STORE)
-            .initialization_script(DISABLE_CONTEXT_MENU)
+                        .initialization_script(DISABLE_CONTEXT_MENU)
                         .window_features(features)
                         .on_navigation(|url| {
                             url.scheme() == "https" || url.as_str() == "about:blank"
@@ -132,24 +153,24 @@ pub async fn browser_layout(
 }
 
 #[tauri::command]
-pub async fn browser_reload(app: tauri::AppHandle) -> Result<(), String> {
-    app.get_webview(LABEL)
+pub async fn browser_reload(app: tauri::AppHandle, browser_id: String) -> Result<(), String> {
+    app.get_webview(&browser_label(&browser_id)?)
         .ok_or("ブラウザを開いてください")?
         .reload()
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn browser_back(app: tauri::AppHandle) -> Result<(), String> {
-    app.get_webview(LABEL)
+pub async fn browser_back(app: tauri::AppHandle, browser_id: String) -> Result<(), String> {
+    app.get_webview(&browser_label(&browser_id)?)
         .ok_or("ブラウザを開いてください")?
         .eval("window.history.back()")
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn browser_home(app: tauri::AppHandle) -> Result<(), String> {
-    app.get_webview(LABEL)
+pub async fn browser_home(app: tauri::AppHandle, browser_id: String) -> Result<(), String> {
+    app.get_webview(&browser_label(&browser_id)?)
         .ok_or("ブラウザを開いてください")?
         .navigate("https://chatgpt.com/".parse().map_err(|e| format!("{e}"))?)
         .map_err(|e| e.to_string())
@@ -172,6 +193,16 @@ mod tests {
         assert!(valid_bounds(&b));
         b.width = f64::NAN;
         assert!(!valid_bounds(&b));
+    }
+
+    #[test]
+    fn browser_labels_are_stable_distinct_and_reject_invalid_sessions() {
+        let first = browser_label("session-a").unwrap();
+        assert_eq!(first, browser_label("session-a").unwrap());
+        assert_ne!(first, browser_label("session-b").unwrap());
+        assert!(first.starts_with(LABEL_PREFIX));
+        assert!(browser_label("").is_err());
+        assert!(browser_label("session\ninvalid").is_err());
     }
 }
 

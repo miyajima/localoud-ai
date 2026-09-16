@@ -366,8 +366,8 @@ dialog fieldset { border-color: var(--ui-line) !important; border-radius: var(--
 .dialog-actions button { min-height: 29px; padding: 5px 10px; font-size: 0.75rem; }
 .dialog-actions .primary, .primary { color: var(--ui-on-accent); background: var(--ui-accent); }
 .dialog-actions .primary:hover, .primary:hover { background: var(--ui-accent-strong); }
-#browser-overlay { background: rgba(29, 29, 31, .28); }
-#browser-panel { width: min(1120px, calc(100vw - 40px)); height: calc(100dvh - 40px); border-color: var(--ui-line); border-radius: var(--ui-radius-lg); background: var(--ui-surface); box-shadow: var(--ui-shadow); }
+#browser-overlay { background: var(--ui-surface); }
+#browser-panel { width: 100%; height: 100%; border: 0; border-radius: 0; background: var(--ui-surface); box-shadow: none; }
 .browser-toolbar { min-height: 46px; padding: 0 14px; gap: 8px; border-bottom-color: var(--ui-line); }
 .browser-toolbar > div { gap: 8px; }
 .browser-toolbar strong { font-size: 0.8125rem; }
@@ -563,7 +563,8 @@ kbd, #app .new kbd { font-size: .75rem; opacity: 1; }
 #app .diff-remove { color: var(--ui-danger); background: var(--ui-danger-surface); }
 #app .model-chevron { color: var(--ui-muted); }
 dialog, #browser-panel { color: var(--ui-text); background: var(--ui-surface); }
-dialog::backdrop, #browser-overlay { background: var(--ui-overlay); }
+dialog::backdrop { background: var(--ui-overlay); }
+#browser-overlay { background: var(--ui-surface); }
 dialog :is(input,select,textarea), dialog button { min-height: 2.25rem; font-size: .875rem; }
 dialog :is(input,select,textarea) { max-width: 100%; }
 dialog select { width: 100%; }
@@ -618,7 +619,7 @@ body.browser-open #app.sidebar-hidden > aside { display: none; }
   #app > main > footer { padding-bottom: max(.75rem, env(safe-area-inset-bottom)); }
   .route-guide > div { grid-template-columns: 1fr; gap: .25rem; }
   #app .usage :is(th,td) { padding: .5rem .25rem; }
-  #browser-panel { width: calc(100vw - 1rem); height: calc(100dvh - 1rem); }
+  #browser-panel { width: 100%; height: 100%; }
 }
 
 @media (pointer: coarse), (max-width: 650px) {
