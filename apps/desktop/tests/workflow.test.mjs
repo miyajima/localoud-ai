@@ -32,7 +32,8 @@ async function fixture({saved,existing=false,connected=true,duplicate=false,impo
    case 'auto_settings':return {levels:[{level:5,target:planTarget||{provider:'codex',model:'gpt-6-astra',reasoning:'high'}}]};
    case 'create_routed_task':{if(routeError)throw Error(routeError);const thread={id:'direct-task',project_id:project.id,provider:'codex',provider_thread_id:'provider-direct',title:args.request.text,status:'idle'};state.threads.push(thread);return {thread,target:{model:'codex-implementation',reasoning:'high'},route:{decision:{executor:'codex',reason:'explicit'}}};}
    case 'interrupt_turn':case 'send_composed_turn':case 'send_turn':case 'steer_turn':return;
-   case 'resume_task':return {active_turn:null,messages:[]};
+   case 'reconnect_codex':return;
+   case 'read_task':case 'resume_task':return {active_turn:null,messages:[]};
    case 'event_history':return [];
    case 'model_usage':return args?.threadId?[{model:'session-model',prompt_tokens:1,latency_ms:1000}]:[{model:'global-model',prompt_tokens:99,latency_ms:2000}];
    case 'manage_project':return null;
@@ -102,6 +103,29 @@ test('manual tab navigation keeps focus in the tab rail until activation',async(
  }finally{f.close();}
 });
 async function directFixture(){const f=await fixture();f.state.threads=[{id:'direct-task',project_id:'project',provider:'codex',provider_thread_id:'provider-direct',title:'検証する',status:'completed'}];await f.api.refreshThreads();await f.api.selectThread('direct-task');return f;}
+test('Codex session selection reads history and defers writer ownership until send',async()=>{
+ const f=await directFixture();try{
+  assert.equal(f.calls.filter(c=>c.command==='read_task').length,1);
+  assert.equal(f.calls.filter(c=>c.command==='resume_task').length,0);
+  f.input.value='続きも確認する';f.input.dispatchEvent(new f.dom.window.Event('input',{bubbles:true}));
+  await f.api.send();
+  const commands=f.calls.map(c=>c.command);assert.ok(commands.indexOf('resume_task')>commands.indexOf('read_task'));
+  assert.ok(commands.indexOf('send_turn')>commands.indexOf('resume_task'));
+ }finally{f.close();}
+});
+test('active-writer errors offer in-place reconnection without duplicating the pending message',async()=>{
+ const f=await directFixture();try{
+  f.state.fail={resume_task:'{"code":-32600,"message":"thread provider-direct already has an active writer"}'};
+  f.input.value='再接続して続ける';f.input.dispatchEvent(new f.dom.window.Event('input',{bubbles:true}));
+  await f.api.send();
+  assert.match(f.document.querySelector('#error').textContent,/別のCodex接続が使用中/);
+  assert.equal(f.document.querySelector('#retry-error').textContent,'接続を切り替えて再試行');
+  assert.equal(f.api.selectedView().messages.filter(m=>m.role==='user'&&m.text==='再接続して続ける').length,0);
+  delete f.state.fail.resume_task;f.document.querySelector('#retry-error').click();await new Promise(r=>setTimeout(r,0));
+  assert.equal(f.document.querySelector('#error').hidden,true);
+  assert.ok(f.calls.some(c=>c.command==='reconnect_codex'));
+ }finally{f.close();}
+});
 test('a read distinguishes loading from empty and preserves previous data on failure',async()=>{
  const f=await directFixture();let release;try{
   f.state.gates={model_usage:new Promise(r=>release=r)};

@@ -29,6 +29,7 @@ pub struct CodexProvider {
     next: AtomicU64,
     events: broadcast::Sender<AgentEvent>,
     alive: Arc<AtomicBool>,
+    intentional_shutdown: Arc<AtomicBool>,
     handlers: Arc<Mutex<HashMap<String, Arc<dyn AgentTool>>>>,
     questions: Arc<Mutex<HashMap<String, composer::PendingQuestion>>>,
 }
@@ -115,6 +116,7 @@ impl CodexProvider {
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let (events, _) = broadcast::channel(4096);
         let alive = Arc::new(AtomicBool::new(true));
+        let intentional_shutdown = Arc::new(AtomicBool::new(false));
         let handlers: Arc<Mutex<HashMap<String, Arc<dyn AgentTool>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let handler_map = handlers.clone();
@@ -128,6 +130,7 @@ impl CodexProvider {
             stdin.clone(),
             alive.clone(),
         );
+        let stopping = intentional_shutdown.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
@@ -338,20 +341,22 @@ impl CodexProvider {
                     "Codex app-server disconnected; command outcome may be unknown".into(),
                 ));
             }
-            let _ = dispatch(
-                &tx,
-                sink.as_ref(),
-                AgentEvent {
-                    details: None,
-                    thread_id: None,
-                    turn_id: None,
-                    item_id: None,
-                    kind: "disconnected".into(),
-                    text:
-                        "Codex app-server disconnected. Resume to reconcile state before retrying."
-                            .into(),
-                },
-            );
+            if !stopping.load(Ordering::SeqCst) {
+                let _ = dispatch(
+                    &tx,
+                    sink.as_ref(),
+                    AgentEvent {
+                        details: None,
+                        thread_id: None,
+                        turn_id: None,
+                        item_id: None,
+                        kind: "disconnected".into(),
+                        text:
+                            "Codex app-server disconnected. Resume to reconcile state before retrying."
+                                .into(),
+                    },
+                );
+            }
         });
         let provider = Self {
             stdin,
@@ -360,6 +365,7 @@ impl CodexProvider {
             next: AtomicU64::new(1),
             events,
             alive,
+            intentional_shutdown,
             handlers,
             questions,
         };
@@ -544,7 +550,18 @@ impl CodexProvider {
         self.alive.load(Ordering::SeqCst)
     }
     pub async fn shutdown(&self) -> Result<()> {
-        self.child.lock().await.kill().await?;
+        self.intentional_shutdown.store(true, Ordering::SeqCst);
+        let mut child = self.child.lock().await;
+        // Wait for the app-server process after signalling it.  The server
+        // owns the OS writer locks; spawning a replacement before it exits can
+        // otherwise reproduce an active-writer error inside the same app.
+        if let Err(error) = child.kill().await {
+            if error.kind() != std::io::ErrorKind::InvalidInput {
+                return Err(error.into());
+            }
+        }
+        let _ = child.wait().await;
+        self.alive.store(false, Ordering::SeqCst);
         Ok(())
     }
 }

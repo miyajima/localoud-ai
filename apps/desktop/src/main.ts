@@ -45,7 +45,7 @@ type AgentEvent = { thread_id: string | null; turn_id: string | null; item_id: s
 type JournalEvent = { sequence: number; event: AgentEvent };
 type ChatMessage = { role: string; text: string; key: string; label?:string };
 type Snapshot = { active_turn: { id: string } | null; messages: { role: string; text: string }[] };
-type View = { messages: ChatMessage[]; events: JournalEvent[]; diff: string; running: boolean; needsResume: boolean; sequence: number; route?: string; summary?: string; review?: string; finalReview?: {verdict:string;findings:string[];rework_instruction:string|null}; recovery?:{action:string;reason:string;instruction:string;replacement:unknown|null}; activeTurn?:string; completedTurns?:Set<string>; capture?:Capture; context?: ContextInspection|null; progress?:Progress; focus?:TaskFocus;execution?:ExecutionRecord };
+type View = { messages: ChatMessage[]; events: JournalEvent[]; diff: string; running: boolean; needsResume: boolean; sequence: number; resumeOnSend?: boolean; route?: string; summary?: string; review?: string; finalReview?: {verdict:string;findings:string[];rework_instruction:string|null}; recovery?:{action:string;reason:string;instruction:string;replacement:unknown|null}; activeTurn?:string; completedTurns?:Set<string>; capture?:Capture; context?: ContextInspection|null; progress?:Progress; focus?:TaskFocus;execution?:ExecutionRecord };
 let projects: Project[] = [], threads: Thread[] = [], activeProject: string | null = null, activeThread: string | null = null;
 let loadingWorkspace=false;
 const views = new Map<string, View>();
@@ -311,6 +311,22 @@ function error(message: string, recovery?: ErrorRecovery) {
   el.innerHTML=message?`<span>${escape(message)}</span><span class="error-actions">${recovery?`<button type="button" id="retry-error">${escape(recovery.label)}</button>`:''}<button type="button" aria-label="エラーを閉じる" id="dismiss-error"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></span>`:'';
   document.querySelector('#dismiss-error')?.addEventListener('click',()=>error(''));
   document.querySelector('#retry-error')?.addEventListener('click',()=>{const run=errorRecovery?.run;error('');if(run)void run();});
+}
+function isActiveWriterError(value: unknown) { return /already has an active writer/i.test(String(value)); }
+function writerConflictRecovery(id: string): ErrorRecovery {
+  return {label:'接続を切り替えて再試行',run:()=>reconnectAndResume(id)};
+}
+async function reconnectAndResume(id: string) {
+  if (busy) return;
+  busy=true;error('');notice('Codex接続を切り替えています…');render();
+  try {
+    await invoke('reconnect_codex');
+  } catch (e) {
+    view(id).needsResume=true;view(id).resumeOnSend=false;
+    error(isActiveWriterError(e)?'このセッションは別のCodex接続が使用中です。履歴は閲覧できます。所有側を閉じてから再試行してください。':String(e),isActiveWriterError(e)?{label:'履歴を表示',run:()=>selectThread(id,false)}:undefined);
+    return;
+  } finally { busy=false;render(); }
+  await selectThread(id,true);
 }
 function focusContent() {
   const content=document.querySelector<HTMLElement>('#content');
@@ -595,19 +611,24 @@ async function localInsight(command:'summarize_task'|'review_task') {
 async function refreshDiff(id: string) {
   return readPane(id,'Diff',async()=>{if(threads.find(t=>t.id===id)?.provider==='autonomous'){await refreshAutonomous(id);return;}view(id).diff=await invoke<string>('repo_diff',{threadId:id});});
 }
-async function selectThread(id: string) {
+async function selectThread(id: string, resume = false) {
   if (busy) return; mobileSidebarOpen=false;notice(''); saveDraft(); const t=threads.find(t=>t.id===id); if(t)activeProject=t.project_id; activeThread = id; restoreDraft(); rememberSelection(); busy = true; error(''); render();
   try {
     if(t?.provider==='autonomous'){(document.querySelector('#task-mode') as HTMLSelectElement).value='autonomous';await refreshAutonomous(id);return;}
     if(t?.provider==='workflow'){await refreshWorkflow(id);return;}
     if(!legacyThread()&&composerMode()==='autonomous')(document.querySelector('#task-mode') as HTMLSelectElement).value='implement';
-    const snapshot = threads.find(t=>t.id===id)?.provider === 'spark' ? {active_turn:null,messages:[]} : await invoke<Snapshot>('resume_task', { threadId: id });
-    const v = view(id); if(threads.find(t=>t.id===id)?.provider === 'spark') {v.sequence=0;v.events=[];} v.messages = snapshot.messages.map((m, i) => ({ ...m, key: threads.find(t=>t.id===id)?.provider==='chatgpt'?`chatgpt-${i}`:`restored-${i}` }));
+    const provider=t?.provider;
+    const isCodex=provider==='codex';
+    const snapshot = provider === 'spark' ? {active_turn:null,messages:[]} : await invoke<Snapshot>(isCodex ? (resume?'resume_task':'read_task') : 'resume_task', { threadId: id });
+    const v = view(id); if(provider === 'spark') {v.sequence=0;v.events=[];} v.messages = snapshot.messages.map((m, i) => ({ ...m, key: provider==='chatgpt'?`chatgpt-${i}`:`restored-${i}` }));
     let after = v.sequence;
     for (;;) { const history = await invoke<JournalEvent[]>('event_history', { threadId: id, after }); for (const e of history) applyEvent(e, true); if (history.length < 2000) break; after = history[history.length - 1].sequence; }
     const insights=await invoke<{review:View['finalReview'];recovery:View['recovery']}>('worker_insights',{threadId:id});v.finalReview=insights.review||undefined;v.recovery=insights.recovery||undefined;
-    v.running = !!snapshot.active_turn && !v.completedTurns?.has(snapshot.active_turn.id); v.activeTurn=snapshot.active_turn?.id; v.needsResume = false;
-  } catch (e) { view(id).needsResume = true; error(String(e),{label:'再試行',run:()=>selectThread(id)}); } finally { busy = false; render(); focusContent(); }
+    v.running = !!snapshot.active_turn && !v.completedTurns?.has(snapshot.active_turn.id); v.activeTurn=snapshot.active_turn?.id; v.needsResume = false; v.resumeOnSend = isCodex&&!resume;
+  } catch (e) {
+    const conflict=isActiveWriterError(e), v=view(id);v.needsResume=true;v.resumeOnSend=false;
+    error(conflict?'このセッションは別のCodex接続が使用中です。履歴を表示してから接続を切り替えられます。':String(e),conflict?writerConflictRecovery(id):{label:'再試行',run:()=>selectThread(id,resume)});
+  } finally { busy = false; render(); focusContent(); }
   if(activeTab==='Usage')void refreshUsage();if(activeTab==='Diff')void refreshDiff(id);if(activeTab==='Context')void refreshContext(id);
   if(threads.find(t=>t.id===id)?.provider==='codex')void composer?.refreshThread(true);
   if(activeProject)void composer?.seedHistory(view(id).messages.filter(m=>m.role==='user').map(m=>m.text).slice(-10),activeProject);
@@ -629,7 +650,13 @@ async function send(approvedRoute?:AutoPreview) {
   if(selectedView()?.running&&mentions.length){error('参照を追加するときは、実行完了を待ってから送信してください。');return;}
   if(composerMode()==='goal'&&text.length>4000){error('ゴールは4000文字以内で指定してください。');return;}
   busy = true; error(''); render();
+  let optimisticKey: string | undefined;
   try {
+    if(activeThread&&threads.find(t=>t.id===activeThread)?.provider==='codex'&&view(activeThread).resumeOnSend){
+      notice('セッションに接続しています…');
+      const snapshot=await invoke<Snapshot>('resume_task',{threadId:activeThread});
+      const v=view(activeThread);v.running=!!snapshot.active_turn&&!v.completedTurns?.has(snapshot.active_turn.id);v.activeTurn=snapshot.active_turn?.id;v.needsResume=false;v.resumeOnSend=false;
+    }
     if (!activeThread) {
       const browserSession=draftKey();
       let choice=selectedModel();const key=(document.querySelector('#preference') as HTMLSelectElement).value;
@@ -671,14 +698,21 @@ async function send(approvedRoute?:AutoPreview) {
     }
     const v = view(activeThread);
     if(threads.find(t=>t.id===activeThread)?.provider === 'spark') { await invoke('run_local',{threadId:activeThread,text,knownFiles:files}); }
-    else { v.messages.push({ role: 'user', text, key: `user-${Date.now()}` });
+    else { optimisticKey=`user-${Date.now()}`; v.messages.push({ role: 'user', text, key: optimisticKey });
     if (v.running) await invoke('steer_turn', { threadId: activeThread, text });
     else { await invoke(threadModels[activeThread]||mentions.length||cloudMode()?'send_composed_turn':'send_turn', { threadId: activeThread, text,options:{mode:composerMode()==='codex-plan'?'plan':'default',mentions,goal:composerMode()==='goal'?text:null} }); }
     }
     void composer?.remember(text);input.value = '';composer?.clear();
     if(composerMode()==='goal')(document.querySelector('#task-mode') as HTMLSelectElement).value='implement';
     saveDraft();void composer?.refreshThread();
-  } catch (e) { if(String(e).includes('ローカル処理を停止しました'))notice('ローカル処理を停止しました。');else{if (activeThread) view(activeThread).needsResume = true; error(String(e));} }
+  } catch (e) {
+    if(String(e).includes('ローカル処理を停止しました'))notice('ローカル処理を停止しました。');
+    else if(activeThread&&isActiveWriterError(e)){
+      const v=view(activeThread);v.needsResume=true;v.resumeOnSend=false;
+      if(optimisticKey){const index=v.messages.findIndex(m=>m.key===optimisticKey);if(index>=0)v.messages.splice(index,1);}
+      error('このセッションは別のCodex接続が使用中です。履歴は閲覧できます。',writerConflictRecovery(activeThread));
+    } else {if (activeThread) {view(activeThread).needsResume = true;view(activeThread).resumeOnSend=false;} error(String(e));}
+  }
   finally { busy = false; render(); }
 }
 function openDialog() { void pickProject(); }
@@ -792,10 +826,16 @@ document.querySelector('#settings-form')!.addEventListener('submit', async e => 
 document.querySelector('#add')!.addEventListener('click', openDialog);
 document.querySelector('#new')!.addEventListener('click', newTask);
 document.querySelector<HTMLTextAreaElement>('#task-input')!.addEventListener('input',updateSendAvailability);
-document.querySelector('#resume')!.addEventListener('click', async () => { if (!activeThread||busy)return; if(!autonomousThread()){void selectThread(activeThread);return;}const id=activeThread;busy=true;render();try{await invoke('autonomous_resume',{threadId:id});await refreshAutonomous(id);}catch(e){error(String(e));}finally{busy=false;render();} });
+document.querySelector('#resume')!.addEventListener('click', async () => { if (!activeThread||busy)return; if(!autonomousThread()){void selectThread(activeThread,true);return;}const id=activeThread;busy=true;render();try{await invoke('autonomous_resume',{threadId:id});await refreshAutonomous(id);}catch(e){error(String(e));}finally{busy=false;render();} });
 document.querySelector('#send')!.addEventListener('click', () => void send());
 document.querySelector<HTMLTextAreaElement>('#task-input')!.addEventListener('keydown', e => { if (!e.isComposing && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(); } });
-document.querySelector('#stop')!.addEventListener('click', async () => { if (!activeThread || stopping) return; const id=activeThread;stopping=true;render();try{await invoke(autonomousThread()?'autonomous_stop':'interrupt_turn',{threadId:id});if(autonomousThread())await refreshAutonomous(id);else if(workflowThread())await refreshWorkflow(id);}catch(e){view(id).needsResume=true;error(String(e));}finally{stopping=false;render();}});
+document.querySelector('#stop')!.addEventListener('click', async () => { if (!activeThread || stopping) return; const id=activeThread;stopping=true;render();try{
+  if(!autonomousThread()&&!workflowThread()&&threads.find(t=>t.id===id)?.provider==='codex'&&view(id).resumeOnSend){
+    const snapshot=await invoke<Snapshot>('resume_task',{threadId:id});
+    view(id).running=!!snapshot.active_turn&&!view(id).completedTurns?.has(snapshot.active_turn.id);view(id).activeTurn=snapshot.active_turn?.id;view(id).resumeOnSend=false;view(id).needsResume=false;
+  }
+  await invoke(autonomousThread()?'autonomous_stop':'interrupt_turn',{threadId:id});if(autonomousThread())await refreshAutonomous(id);else if(workflowThread())await refreshWorkflow(id);
+}catch(e){view(id).needsResume=true;view(id).resumeOnSend=false;error(isActiveWriterError(e)?'このセッションは別のCodex接続が使用中です。履歴は閲覧できます。':String(e),isActiveWriterError(e)?writerConflictRecovery(id):undefined);}finally{stopping=false;render();}});
 document.querySelector('#cancel')!.addEventListener('click', () => (document.querySelector('#register') as HTMLDialogElement).close());
 document.querySelector('#register form')!.addEventListener('submit', async e => {
   e.preventDefault(); if(busy)return; busy=true;const form=e.currentTarget as HTMLFormElement;formBusy(form,true);render();try{await registerProject((document.querySelector('#path') as HTMLInputElement).value);}finally{busy=false;formBusy(form,false);render();if(document.querySelector<HTMLDialogElement>('#register')!.open)document.querySelector<HTMLElement>('#form-error')!.focus();else focusComposer();}

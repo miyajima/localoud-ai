@@ -41,7 +41,7 @@ async function fixture(options={},kind='direct') {
     case 'composer_thread_state':return {mode:'implement',goal:null,questions:[],warning:null};
     case 'composer_catalog':return {entries:[],modes:[],warnings:[]};
     case 'browser_layout':case 'browser_reload':case 'remember_prompt':case 'set_astra_settings':return null;
-    case 'resume_task':return {active_turn:null,messages:[{role:'user',text:'検索結果の見出しと説明を読みやすくしてください。キーボード操作も維持してください。'},{role:'assistant',text:'## 変更内容\n\n見出しと説明の間隔を整え、キーボードのフォーカスを維持しました。\n\n- 検索結果を読みやすく表示\n- 長いURLも画面内で折り返し\n- テストで基本操作を確認\n\n```ts\nconst label = "検索結果";\n```\n\nテスト用の表示です。実際のファイルは変更していません。'}]};
+    case 'read_task':case 'resume_task':return {active_turn:null,messages:[{role:'user',text:'検索結果の見出しと説明を読みやすくしてください。キーボード操作も維持してください。'},{role:'assistant',text:'## 変更内容\n\n見出しと説明の間隔を整え、キーボードのフォーカスを維持しました。\n\n- 検索結果を読みやすく表示\n- 長いURLも画面内で折り返し\n- テストで基本操作を確認\n\n```ts\nconst label = "検索結果";\n```\n\nテスト用の表示です。実際のファイルは変更していません。'}]};
     case 'worker_insights':return {review:null,recovery:null};
     case 'repo_diff':return 'diff --git a/search.ts b/search.ts\n--- a/search.ts\n+++ b/search.ts\n@@ -1 +1 @@\n-const spacing = 4;\n+const spacing = 12;';
     case 'model_usage':return [{project_id:'fixture',project_name:'Localoud',provider:'codex',model:'fixture-model',prompt_tokens:1200,completion_tokens:340,cached_tokens:null,latency_ms:1600}];

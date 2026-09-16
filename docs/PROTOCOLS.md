@@ -5,7 +5,7 @@ https://learn.chatgpt.com/docs/app-server
 
 The locally installed binary supports `codex app-server generate-json-schema --out <directory>`. Generate compatibility fixtures from the binary actually used; do not rely on undocumented desktop state.
 
-Required lifecycle: initialize → initialized → thread/start or thread/resume → turn/start; turn/steer and turn/interrupt require the active turn identity. A worker uses thread/start, not thread/fork.
+Required lifecycle: initialize → initialized → thread/start or thread/resume → turn/start; turn/steer and turn/interrupt require the active turn identity. A worker uses thread/start, not thread/fork. Codex session selection uses thread/read so browsing another session never claims its writer; Localoud resumes only when the user sends or explicitly retries. If a resume reports an active-writer conflict, the desktop can replace its idle app-server connection in place and retry once without restarting the UI.
 
 Verified against Codex 0.153.4: handshake, normalized streaming events, lifecycle, serialized turn changes, interrupt/steer, process restart/resume, worker dynamic tools and usage. Raw schemas were generated from the installed binary. Unknown notifications do not imply completion. Provider approval/input requests currently return a visible denial; implementing a general approval UI remains open. Transport loss or timeout requires reconciliation before further mutations; there is no blind retry of ambiguous requests.
 

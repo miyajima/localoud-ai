@@ -297,6 +297,35 @@ impl Sessions {
             .save_thread(&m)?;
         Ok(result)
     }
+    /// Read a thread without claiming its provider-side writer slot.
+    ///
+    /// Selecting a session is a viewing operation.  Keep the local actor
+    /// unreconciled so the next mutating action must explicitly resume the
+    /// provider thread first.
+    pub async fn read(&self, id: HubThreadId) -> Result<ThreadSnapshot> {
+        let actor = self.actor(id).await;
+        let mut state = actor.lock().await;
+        let mut mapping = self.mapping(id)?;
+        let result = self
+            .provider
+            .read_thread(&ProviderThread {
+                id: mapping.provider_thread_id.clone(),
+            })
+            .await?;
+        state.active = result.active_turn.clone();
+        state.reconciled = false;
+        mapping.status = if state.active.is_some() {
+            "running"
+        } else {
+            "idle"
+        }
+        .into();
+        self.store
+            .lock()
+            .map_err(|_| anyhow!("database lock poisoned"))?
+            .save_thread(&mapping)?;
+        Ok(result)
+    }
     pub async fn start(&self, id: HubThreadId, text: String) -> Result<ProviderTurn> {
         self.start_with_options(id, text, protocol_types::composer::TurnOptions::default())
             .await

@@ -600,6 +600,29 @@ async fn create_task(
         .map_err(|e| format!("{e:#}"))
 }
 #[tauri::command]
+async fn read_task(
+    thread_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<ThreadSnapshot, String> {
+    let id = parse_thread(thread_id)?;
+    if legacy_browser::is_thread(&state, id)? {
+        return legacy_browser::read(&state, id);
+    }
+    if thread_provider(id, &state)?.starts_with("api:") {
+        return state
+            .api_sessions
+            .resume(id)
+            .await
+            .map_err(|e| format!("{e:#}"));
+    }
+    state
+        .sessions()
+        .await?
+        .read(id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+#[tauri::command]
 async fn resume_task(
     thread_id: String,
     state: tauri::State<'_, AppState>,
@@ -621,6 +644,30 @@ async fn resume_task(
         .resume(parse_thread(thread_id)?)
         .await
         .map_err(|e| format!("{e:#}"))
+}
+#[tauri::command]
+async fn reconnect_codex(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if !state.running_plans.lock().await.is_empty() {
+        return Err("計画の実行が終了してからCodex接続を切り替えてください。".into());
+    }
+    if state
+        .store
+        .lock()
+        .map_err(|e| e.to_string())?
+        .threads()
+        .map_err(|e| e.to_string())?
+        .iter()
+        .any(|t| t.provider == "codex" && matches!(t.status.as_str(), "running" | "inProgress"))
+    {
+        return Err("実行中のタスクが終了してからCodex接続を切り替えてください。".into());
+    }
+    // Keep the connection lock while stopping the old app-server so another
+    // command cannot create a replacement before its writer locks are gone.
+    let mut connection = state.connection.lock().await;
+    if let Some(c) = connection.take() {
+        c.provider.shutdown().await.map_err(|e| format!("{e:#}"))?;
+    }
+    Ok(())
 }
 #[tauri::command]
 async fn send_turn(
@@ -954,7 +1001,9 @@ fn main() {
                     model_usage,
                     summarize_task,
                     review_task,
+                    read_task,
                     resume_task,
+                    reconnect_codex,
                     send_turn,
                     steer_turn,
                     interrupt_turn,
