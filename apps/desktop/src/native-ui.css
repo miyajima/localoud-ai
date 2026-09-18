@@ -205,6 +205,9 @@ kbd { border: 0; border-radius: 4px; color: var(--ui-muted); font-size: 0.75rem;
 .project-path:hover { color: var(--ui-accent-strong); background: transparent; }
 #app .header-actions { flex: 0 0 auto; gap: 4px; }
 #app .header-actions button { min-height: 28px; padding: 4px 7px; border: 0; font-size: 0.75rem; }
+#app > main > header > #sidebar-toggle { min-width: var(--ui-control); min-height: var(--ui-control); padding: 5px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); color: var(--ui-accent-strong); background: var(--ui-surface); }
+#app > main > header > #sidebar-toggle:hover { background: var(--ui-surface-subtle); }
+#app > main > header > #sidebar-toggle svg { width: 1rem; height: 1rem; }
 #app #browser-toggle { min-height: 28px; padding: 4px 9px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); color: var(--ui-accent-strong); background: var(--ui-surface); font-size: 0.75rem; }
 .badge { max-width: 180px; min-height: 22px; overflow: hidden; padding: 3px 7px; border: 1px solid var(--ui-line); border-radius: 999px; color: var(--ui-muted); font-size: 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
 #app > main > nav { min-height: 36px; padding: 4px 18px; gap: 3px; border-bottom: 1px solid var(--ui-line); background: var(--ui-surface); overflow-x: auto; scrollbar-width: none; }
@@ -624,6 +627,7 @@ body.browser-open #app.sidebar-hidden > aside { display: none; }
 
 @media (pointer: coarse), (max-width: 650px) {
   #app :is(button,input,select,summary), dialog :is(button,input,select,summary), #browser-panel button { min-height: var(--ui-touch-control) !important; min-width: var(--ui-touch-control); }
+  #app > main > header > #sidebar-toggle { width: var(--ui-touch-control); flex: 0 0 var(--ui-touch-control); }
   #app :is(.project-toggle,.project-more,.pin-thread,#sidebar-toggle,#compose-more>summary,.round-send), #browser-reload { min-width: var(--ui-touch-control); min-height: var(--ui-touch-control); }
   #app .project-group .project-toggle, #app .project-group .project-more { flex-basis: var(--ui-touch-control); }
   #app input, #app select, dialog input, dialog select { font-size: 1rem; }

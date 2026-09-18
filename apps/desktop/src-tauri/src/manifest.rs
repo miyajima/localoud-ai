@@ -131,7 +131,10 @@ pub fn parse(text: &str) -> Result<Manifest, String> {
 }
 
 fn manifest_payload(text: &str) -> Result<&str, String> {
-    let text = text.trim();
+    // Some browser/native clipboard implementations preserve a UTF-8 BOM
+    // when copying a code block. `str::trim` intentionally does not remove
+    // U+FEFF, so strip it before looking for a raw JSON payload or fences.
+    let text = text.trim().trim_start_matches('\u{feff}').trim();
     let mut json_blocks = Vec::new();
     let mut cursor = 0;
     while let Some(relative_start) = text[cursor..].find("```") {
@@ -312,6 +315,7 @@ mod tests {
     fn accepts_only_complete_bounded_manifests() {
         let mut v = task();
         assert!(parse(&v.to_string()).is_ok());
+        assert!(parse(&format!("\u{feff}{v}")).is_ok());
         assert!(parse(&format!("```json\n{v}\n```")).is_ok());
         assert!(parse(&format!(
             "計画をまとめました。\n\n```json\n{v}\n```\n\nこの回答をコピーしてください。"

@@ -21,6 +21,10 @@ test('preview is not running; actual concurrency and blocked predecessors are re
  assert.match(taskGraph([node('a')],{status:'interrupted'}),/タスクが停止中/);
  assert.match(taskGraph([node('a',[],'completed')]),/全作業の実行完了/);
 });
+test('preview graph can expose per-step execution target controls',()=>{
+ const html=taskGraph([{step:{key:'build',title:'ビルド',level:3,owned_paths:['src']},status:'pending'}],{preview:true,targetControls:true});
+ assert.match(html,/data-step-model="build"/);assert.match(html,/data-step-reasoning="build"/);assert.match(html,/モデル／リーズニング/);
+});
 test('selecting a node exposes its full detail without losing the graph or invoking work',()=>{
  const nodes=fork();nodes[3].step.title='合流 <img src=x> 長い作業名';
  const dom=new JSDOM(taskGraph(nodes));

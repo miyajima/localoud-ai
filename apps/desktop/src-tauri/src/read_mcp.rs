@@ -25,7 +25,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 type Result<T> = std::result::Result<T, String>;
 const PORT: u16 = 8792;
 const RESPONSE_BYTES: usize = 64 * 1024;
-const FILE_BYTES: u64 = 256 * 1024;
+const FILE_BYTES: u64 = 1024 * 1024;
 const SCAN_ENTRIES: usize = 5000;
 const MAX_RESULTS: usize = 200;
 const PROTOCOLS: &[&str] = &["2025-06-18", "2025-11-25"];
@@ -577,7 +577,7 @@ fn read_text(dir: &Dir, path: &str) -> Result<String> {
     let file = dir.open(path).map_err(err)?;
     let meta = file.metadata().map_err(err)?;
     if !meta.is_file() || meta.len() > FILE_BYTES {
-        return Err("file is not bounded text (256KB limit)".into());
+        return Err("file is not bounded text (1MiB limit)".into());
     }
     let mut text = String::new();
     file.take(FILE_BYTES + 1)
@@ -715,7 +715,7 @@ fn safe_value(mut v: Value) -> Result<Value> {
     let text = serde_json::to_string(&v).map_err(err)?;
     if text.len() > RESPONSE_BYTES {
         return Err(
-            "response exceeds 64KB; request fewer lines, entries or a specific step".into(),
+            "response exceeds 64KiB; request fewer lines, entries or a specific step".into(),
         );
     }
     Ok(v)
@@ -1616,6 +1616,48 @@ mod tests {
             "one\n日本語 needle\nthree\n"
         );
         assert!(s.store.lock().unwrap().threads().unwrap().is_empty());
+    }
+    #[tokio::test]
+    async fn file_read_accepts_files_above_legacy_limit_but_enforces_new_limit() {
+        let (d, s, id) = fixture();
+        let root = d.path().join("project");
+        let legacy_limit = 256 * 1024;
+        assert!(FILE_BYTES as usize > legacy_limit);
+        std::fs::write(
+            root.join("larger-than-legacy-limit.txt"),
+            "x\n".repeat(legacy_limit / 2 + 1),
+        )
+        .unwrap();
+        let value = s
+            .call(
+                "file_read",
+                Arguments {
+                    project_id: Some(id.clone()),
+                    path: Some("larger-than-legacy-limit.txt".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(value["total_lines"], legacy_limit / 2 + 1);
+
+        std::fs::write(
+            root.join("over-new-limit.txt"),
+            vec![b'x'; FILE_BYTES as usize + 1],
+        )
+        .unwrap();
+        let error = s
+            .call(
+                "file_read",
+                Arguments {
+                    project_id: Some(id),
+                    path: Some("over-new-limit.txt".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(error.contains("1MiB limit"), "{error}");
     }
     #[test]
     fn redaction_preserves_json_and_pagination_is_explicit() {

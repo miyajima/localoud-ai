@@ -19,8 +19,9 @@ export function setupManifestReview(call:Invoke,commit:(text:string,projectId:st
  const selectedManifest=()=>{
   if(!captured||captured.manifest.kind!=='task')return captured?.manifest;
   return {...captured.manifest,steps:captured.manifest.steps.map((step,index)=>{
-   const model=dialog.querySelector<HTMLSelectElement>(`[data-step-model="${index}"]`);
-   const reasoning=dialog.querySelector<HTMLSelectElement>(`[data-step-reasoning="${index}"]`);
+   const key=step.key||String(index);
+   const model=dialog.querySelector<HTMLSelectElement>(`[data-step-model="${key}"]`);
+   const reasoning=dialog.querySelector<HTMLSelectElement>(`[data-step-reasoning="${key}"]`);
    const choice=models().find(candidate=>candidate.key===model?.value);
    return {...step,target_override:choice?target(choice,reasoning?.value||null):null};
   })};
@@ -48,11 +49,12 @@ export function setupManifestReview(call:Invoke,commit:(text:string,projectId:st
    if(m.project_id!==project.id)throw Error('選択中のプロジェクトと計画が一致しません。');
    if(m.kind==='task'){
     dialog.querySelector('#manifest-review-title')!.textContent='この計画で進めますか？';
-    preview.innerHTML=`<p class="manifest-goal">${esc(m.request)}</p>${taskGraph(m.steps.map(step=>({step,status:'pending'})),{preview:true,id:'preview-graph'})}<h3>変更する範囲</h3>${list(m.scope)}<h3>完了の条件</h3>${list(m.acceptance)}<h3>実行する作業 · ${m.steps.length}件</h3><ol>${m.steps.map((s,index)=>`<li><strong>${esc(s.title)}</strong><p>${esc(s.goal)}</p><small>${esc(s.owned_paths.join('、'))}</small><label>実行モデル<select data-step-model="${index}"><option value="">難易度 ${s.level} の設定を使用</option></select></label><label>Reasoning<select data-step-reasoning="${index}" disabled><option value="">既定</option></select></label><details><summary>この作業の完了条件</summary>${list(s.acceptance)}</details></li>`).join('')}</ol><p class="muted">明示したモデルはこの実行だけに固定されます。未指定の作業は難易度別の設定を使います。</p>`;
+    preview.innerHTML=`<p class="manifest-goal">${esc(m.request)}</p>${taskGraph(m.steps.map(step=>({step,status:'pending',target:step.target_override||undefined})),{preview:true,id:'preview-graph',targetControls:true})}<h3>変更する範囲</h3>${list(m.scope)}<h3>完了の条件</h3>${list(m.acceptance)}<h3>実行する作業 · ${m.steps.length}件</h3><ol>${m.steps.map(s=>`<li><strong>${esc(s.title)}</strong><p>${esc(s.goal)}</p><small>${esc(s.owned_paths.join('、'))}</small><details><summary>この作業の完了条件</summary>${list(s.acceptance)}</details></li>`).join('')}</ol><p class="muted">上のタスクグラフで作業カードを選ぶと、モデルとリーズニングを個別に指定できます。明示した設定はこの実行だけに固定され、未指定の作業は難易度別の設定を使います。</p>`;
     bindTaskGraphs(preview);
     m.steps.forEach((step,index)=>{
-     const model=dialog.querySelector<HTMLSelectElement>(`[data-step-model="${index}"]`)!;
-     const reasoning=dialog.querySelector<HTMLSelectElement>(`[data-step-reasoning="${index}"]`)!;
+     const key=step.key||String(index);
+     const model=dialog.querySelector<HTMLSelectElement>(`[data-step-model="${key}"]`)!;
+     const reasoning=dialog.querySelector<HTMLSelectElement>(`[data-step-reasoning="${key}"]`)!;
      for(const choice of models())addOption(model,choice.label,choice.key);
      const saved=models().find(choice=>step.target_override&&profile(choice)===(step.target_override.profile_id||(step.target_override.provider==='local'?'spark':'codex'))&&choice.model===step.target_override.model);
      if(saved)model.value=saved.key;

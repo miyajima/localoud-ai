@@ -1,6 +1,6 @@
 /** A view of the scheduler's saved dependency graph, never an execution authority. */
-export type GraphStep = {key:string;title:string;dependencies?:string[];goal?:string;owned_paths?:string[]};
-export type GraphNode = {step:GraphStep;status:string;target?:{model:string};error?:string|null};
+export type GraphStep = {key:string;title:string;dependencies?:string[];goal?:string;owned_paths?:string[];level?:number};
+export type GraphNode = {step:GraphStep;status:string;target?:{model:string;reasoning?:string|null};error?:string|null};
 const esc=(s:string)=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const active=(s:string)=>['running','dispatching','integrating','inProgress'].includes(s);
 const attention=(s:string)=>['failed','interrupted','cancelled','reconciliation_required','needs_attention'].includes(s);
@@ -17,7 +17,7 @@ export function graphLayers(nodes:GraphNode[]):GraphNode[][] {
  }
  return layers;
 }
-export function taskGraph(nodes:GraphNode[],options:{preview?:boolean;status?:string;id?:string}={}):string {
+export function taskGraph(nodes:GraphNode[],options:{preview?:boolean;status?:string;id?:string;targetControls?:boolean}={}):string {
  const id=options.id||'execution-graph',preview=!!options.preview;
  if(!nodes.length)return '<section class="task-graph"><h3>タスクグラフ</h3><p>計画の作業と依存関係が届くと、実行順序を表示します。</p></section>';
  let layers:GraphNode[][];
@@ -46,10 +46,11 @@ export function taskGraph(nodes:GraphNode[],options:{preview?:boolean;status?:st
   return `<path class="graph-edge ${!preview&&active(n.status)?'graph-edge-active':''}" d="M${x},${y} C${x+20},${y} ${to.x-20},${end} ${to.x-5},${end}"/><path class="graph-edge ${!preview&&active(n.status)?'graph-edge-active':''}" d="m${to.x-10},${end-4} 5,4 -5,4"/>`;
  })).join('');
  const summary=preview?`${nodes.length}件の作業 · ${parallel?'並列に進められる分岐あり':'順番に実行'}`:`${running.length?`${running.length}件を実行中`:stalled?'実行を停止・要確認':done===nodes.length?'全作業の実行完了':'次の実行を待機'} · ${done} / ${nodes.length}件完了`;
- return `<section class="task-graph" aria-label="タスクグラフ"><div class="graph-heading"><h3>タスクグラフ</h3><span ${preview?'':'role="status"'}>${esc(summary)}</span></div><p class="graph-guide">矢印は先に完了する作業から次の作業へ。同じ列は依存関係上の並列候補です。</p><div class="graph-scroll" tabindex="0" role="region" aria-label="実行順序。横にスクロールして全体を確認" data-scroll-key="${esc(id)}"><div class="graph-canvas" style="width:${width/16}rem;height:${height/16}rem"><svg aria-hidden="true" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${edges}</svg>${layers.map((_,i)=>`<span class="graph-column" style="left:${i*264/16}rem">${i===0?'開始':'依存先の完了後'}${layers.length>1?` · ${i+1}`:''}</span>`).join('')}${nodes.map((n,index)=>{
+ const guide=options.targetControls?'作業カードを選択すると、完了条件と実行先（モデル／リーズニング）を設定できます。':'矢印は先に完了する作業から次の作業へ。';
+ return `<section class="task-graph" aria-label="タスクグラフ"><div class="graph-heading"><h3>タスクグラフ</h3><span ${preview?'':'role="status"'}>${esc(summary)}</span></div><p class="graph-guide">${guide} 同じ列は依存関係上の並列候補です。</p><div class="graph-scroll" tabindex="0" role="region" aria-label="実行順序。横にスクロールして全体を確認" data-scroll-key="${esc(id)}"><div class="graph-canvas" style="width:${width/16}rem;height:${height/16}rem"><svg aria-hidden="true" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${edges}</svg>${layers.map((_,i)=>`<span class="graph-column" style="left:${i*264/16}rem">${i===0?'開始':'依存先の完了後'}${layers.length>1?` · ${i+1}`:''}</span>`).join('')}${nodes.map((n,index)=>{
  const p=positions.get(n.step.key)!;
  return `<button type="button" id="${esc(id)}-node-${index}" class="graph-node graph-${tone(n)}" style="left:${p.x/16}rem;top:${p.y/16}rem" data-graph-node aria-controls="${esc(id)}-detail-${index}" aria-expanded="${n===initial}" title="${esc(n.step.title+' · '+state(n))}"><span class="graph-state">${esc(state(n))}</span><strong>${esc(n.step.title)}</strong></button>`;
- }).join('')}</div></div><p class="graph-policy">最大3件ずつ実行。同じ対象への変更は順番に進めます。実行先の同時実行上限によって待機する場合があります。</p><div class="graph-details">${nodes.map((n,index)=>`<details id="${esc(id)}-detail-${index}" ${n===initial?'open':''}><summary>${esc(n.step.title)} · ${esc(state(n))}</summary><p class="graph-reason">${esc(reason(n))}</p>${n.step.goal?`<p>${esc(n.step.goal)}</p>`:''}<p class="graph-meta">対象: ${esc(n.step.owned_paths?.join('、')||'未記録')}${n.target?`<br>モデル: ${esc(n.target.model)}`:''}</p></details>`).join('')}</div></section>`;
+ }).join('')}</div></div><p class="graph-policy">最大3件ずつ実行。同じ対象への変更は順番に進めます。実行先の同時実行上限によって待機する場合があります。</p><div class="graph-details">${nodes.map((n,index)=>{const stepKey=n.step.key||String(index);return `<details id="${esc(id)}-detail-${index}" ${n===initial?'open':''}><summary>${esc(n.step.title)} · ${esc(state(n))}</summary><p class="graph-reason">${esc(reason(n))}</p>${n.step.goal?`<p>${esc(n.step.goal)}</p>`:''}<p class="graph-meta">対象: ${esc(n.step.owned_paths?.join('、')||'未記録')}${n.target?`<br>モデル: ${esc(n.target.model)}${n.target.reasoning?` / リーズニング: ${esc(n.target.reasoning)}`:''}`:''}</p>${options.targetControls?`<div class="graph-target-controls" data-graph-target="${esc(stepKey)}"><strong>この作業の実行先</strong><label>モデル<select data-step-model="${esc(stepKey)}"><option value="">難易度 ${n.step.level??'別'} の設定を使用</option></select></label><label>リーズニング<select data-step-reasoning="${esc(stepKey)}" disabled><option value="">既定</option></select></label></div>`:''}</details>`;}).join('')}</div></section>`;
 }
 export function bindTaskGraphs(root:ParentNode){
  root.querySelectorAll<HTMLElement>('.task-graph').forEach(graph=>{

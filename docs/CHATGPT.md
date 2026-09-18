@@ -37,7 +37,7 @@ ChatGPTからlocalhostへ直接接続できるとは扱いません。OpenAIの�
 - [Connect from ChatGPT](https://developers.openai.com/plugins/deploy/connect-chatgpt)
 - [Secure MCP Tunnels](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 
-MCPは公開済みプロジェクトとその保存済みworktreeだけを読みます。ドットファイル、機密候補、シンボリックリンク、ビルド出力を除外し、ファイル256KB・応答64KB・走査5000件などの上限とページングを適用します。機密候補の自動除外は完全な機密判定ではないため、公開プロジェクトを選ぶ際は内容を確認してください。
+MCPは公開済みプロジェクトとその保存済みworktreeだけを読みます。ドットファイル、機密候補、シンボリックリンク、ビルド出力を除外し、ファイル1MiB・応答64KiB・走査5000件などの上限とページングを適用します。機密候補の自動除外は完全な機密判定ではないため、公開プロジェクトを選ぶ際は内容を確認してください。
 
 公開する11ツールは `project_list`、`project_get`、`repo_tree`、`file_read`、`file_search`、`git_status`、`git_diff`、`task_list`、`task_get`、`verification_get`、`handoff_schema` です。ファイル変更、shell、テスト実行、worker制御はありません。
 

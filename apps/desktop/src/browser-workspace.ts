@@ -131,7 +131,7 @@ export function setupBrowserWorkspace(invoke: Invoke) {
       sessionBrowsers.delete(from); sessionBrowsers.set(target, browser);
       if (activeSession === from) { activeSession = target; activeBrowser = browser; lastBounds = ''; void layout(); }
     },
-    setSidebarHidden: (value: boolean) => { app.classList.toggle('sidebar-hidden', value); const button = app.querySelector('#sidebar-toggle'); button?.setAttribute('aria-expanded', String(!value)); button?.setAttribute('aria-label', value ? 'プロジェクト一覧を表示' : 'プロジェクト一覧を閉じる'); reflect(); },
+    setSidebarHidden: (value: boolean) => { app.classList.toggle('sidebar-hidden', value); const button = app.querySelector<HTMLButtonElement>('#sidebar-toggle'); const label = value ? '左ペインを表示' : '左ペインを非表示'; button?.setAttribute('aria-expanded', String(!value)); button?.setAttribute('aria-label', `${label}（⌘B）`); if (button) button.title = `${label} ⌘B`; reflect(); },
     setWorkflow: (markup: string, action: (name: string) => void) => {
       if (workflow.innerHTML === markup) return; workflow.innerHTML = markup;
       const handoff = panel.querySelector<HTMLElement>('#browser-handoff')!;

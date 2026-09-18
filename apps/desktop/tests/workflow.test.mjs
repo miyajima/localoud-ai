@@ -102,6 +102,12 @@ test('manual tab navigation keeps focus in the tab rail until activation',async(
   assert.equal(f.document.querySelector('#content').hasAttribute('aria-live'),false);
  }finally{f.close();}
 });
+test('left-pane toggle stays in the visible header and announces its state',async()=>{
+ const f=await fixture();try{
+  const toggle=f.document.querySelector('#sidebar-toggle');assert.equal(toggle.parentElement.tagName,'HEADER');assert.match(toggle.getAttribute('aria-label'),/左ペインを非表示/);
+  toggle.click();assert.match(toggle.getAttribute('aria-label'),/左ペインを表示/);assert.equal(toggle.title,'左ペインを表示 ⌘B');
+ }finally{f.close();}
+});
 async function directFixture(){const f=await fixture();f.state.threads=[{id:'direct-task',project_id:'project',provider:'codex',provider_thread_id:'provider-direct',title:'検証する',status:'completed'}];await f.api.refreshThreads();await f.api.selectThread('direct-task');return f;}
 test('Codex session selection reads history and defers writer ownership until send',async()=>{
  const f=await directFixture();try{
@@ -307,6 +313,7 @@ test('worker progress survives snapshots, streams child events and reads actual 
   f.state.children=[{id:'child',provider_thread:{id:'provider-child'},turn:{id:'turn'}}];
   f.state.activity={workers:[{child_id:'child',events:[{sequence:1,event:{thread_id:'provider-child',turn_id:'turn',item_id:'cmd',kind:'item_started',text:'ファイルを確認',details:{type:'command',command:'cat new.txt'}}}]}],changes:[{key:'one',title:'実装担当',path:'/fixture/worktree',diff:'diff --git a/new.txt b/new.txt\n+++ b/new.txt\n+hello',error:null}]};
   f.api.choosePhase('autonomous');await f.api.sendAutonomous('captured-plan','project');
+  assert.match(f.document.querySelector('#content').textContent,/実行先: worker \/ high/);
   assert.match(f.document.querySelector('#content').textContent,/ファイルを確認/);
   f.api.applyEvent({sequence:2,event:{thread_id:'provider-child',turn_id:'turn',item_id:'message',kind:'message_delta',text:'これから変更します'}});
   assert.match(f.document.querySelector('#content').textContent,/これから変更します/);

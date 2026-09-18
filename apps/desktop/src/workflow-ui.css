@@ -33,7 +33,7 @@ body.browser-open #app .brand{padding:0;font-size:clamp(12px,7cqi,16px)}.brand s
 .read-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px}.read-row>span{font-size:0.75rem;color:var(--muted);white-space:nowrap}.read-row h3{margin:16px 0 8px}
 .read-card,.plan-steps>li,.progress-summary>li{border-bottom:1px solid var(--line);padding:14px 0}.read-card h3{margin-top:0}
 .plan-steps{padding-left:20px}.plan-steps>li::marker{color:var(--blue);font-size:0.75rem}.plan-steps p{margin:7px 0}
-.progress-summary{list-style:none;padding:0;margin:0 0 18px}.latest-progress{font-size:0.75rem;color:var(--muted);white-space:pre-wrap;margin:6px 0 0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.progress-summary{list-style:none;padding:0;margin:0 0 18px}.progress-target{font-size:0.75rem;color:var(--muted);margin:6px 0}.progress-target strong{color:var(--ink);font-weight:600}.latest-progress{font-size:0.75rem;color:var(--muted);white-space:pre-wrap;margin:6px 0 0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .review-summary{background:#edf6f0;border:1px solid #c7dfd1;border-radius:8px;padding:12px 14px}.review-summary h3{margin:0 0 8px}
 .read-output{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto;border:1px solid var(--line);background:#f5f7fa;border-radius:6px;padding:12px;font:0.75rem/1.7 Menlo,monospace;scrollbar-gutter:stable;overscroll-behavior:contain}
 .read-panel table{font-size:0.75rem}.read-panel td:first-child{text-align:left}.read-panel td small{display:block;font-size:0.75rem;color:var(--muted)}

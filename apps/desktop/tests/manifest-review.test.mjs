@@ -53,7 +53,8 @@ test('task step model override is shown and serialized into the confirmed payloa
  const choices=[{key:'api:anthropic:model',label:'Anthropic / model',model:'model',profile_id:'anthropic',local:false,reasoning:['low','high']}];
  const f=fixture(task,undefined,()=>choices);try{
   await f.open();
-  const model=f.doc.querySelector('[data-step-model="0"]'),reasoning=f.doc.querySelector('[data-step-reasoning="0"]');
+  const model=f.doc.querySelector('[data-step-model="keep"]'),reasoning=f.doc.querySelector('[data-step-reasoning="keep"]');
+  assert.ok(model.closest('.graph-details'),'model selection is attached to the selected graph detail');
   model.value=choices[0].key;model.dispatchEvent(new f.dom.window.Event('change'));
   reasoning.value='high';reasoning.dispatchEvent(new f.dom.window.Event('change'));
   f.confirm().click();await settle();

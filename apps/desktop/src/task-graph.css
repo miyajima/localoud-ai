@@ -24,7 +24,12 @@
 .task-graph .graph-details summary{color:var(--ui-text);font-weight:600;font-size:.8125rem;overflow-wrap:anywhere}
 .task-graph .graph-details p{margin:6px 0;overflow-wrap:anywhere;line-height:1.7}
 .graph-reason{color:var(--ui-accent)}.graph-meta{font-size:.75rem;color:var(--ui-muted)}
+.graph-target-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin:10px 0 4px;padding:10px;border:1px solid var(--ui-line);border-radius:var(--ui-radius-sm);background:var(--ui-surface-subtle)}
+.graph-target-controls>strong{grid-column:1/-1;font-size:.75rem;color:var(--ui-text)}
+.graph-target-controls label{display:grid;gap:4px;margin:0;color:var(--ui-muted);font-size:.75rem}
+.graph-target-controls select{min-width:0;width:100%;padding:6px;border:1px solid var(--ui-line);border-radius:var(--ui-radius-sm);color:var(--ui-text);background:var(--ui-surface)}
 @media(max-width:650px){.graph-heading{display:block}.graph-heading>span{display:block;margin-top:6px}.task-graph{margin:18px 0}.graph-scroll{scrollbar-gutter:auto}}
+@media(max-width:500px){.graph-target-controls{grid-template-columns:1fr}}
 
 .task-graph .graph-active:hover{background:var(--ui-sidebar-active)}
 /* Task plans need room to show a fork and join before execution is confirmed. */

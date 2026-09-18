@@ -217,6 +217,7 @@ sessionActions.insertAdjacentHTML('beforeend','<span>セッション</span>');
 document.body.insertAdjacentHTML('beforeend', `<dialog id="commands" aria-label="タスク・操作を検索"><label for="command-query">タスク・操作を検索</label><input id="command-query" type="search" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="タスク名、プロジェクト名、操作…" autocomplete="off"><div id="command-results"></div><small>↑↓ で選択 · Enter で開く · Esc で閉じる</small></dialog><dialog id="rename-dialog"><form id="rename-form"><h2>タスク名を変更</h2><label for="task-name">タスク名</label><input id="task-name" aria-describedby="rename-error" required maxlength="120"><p id="rename-error" role="alert"></p><div class="dialog-actions"><button type="button" id="rename-cancel">キャンセル</button><button type="submit" class="primary">保存</button></div></form></dialog>`);
 document.querySelector<HTMLButtonElement>('#stop')!.innerHTML='<svg aria-hidden="true" viewBox="0 0 16 16"><rect x="5" y="5" width="6" height="6" rx="1"/></svg>';
 document.querySelector<HTMLButtonElement>('#send')!.innerHTML='<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M8 13V3M4.5 7.5 8 3l3.5 4.5"/></svg>';
+document.querySelector<HTMLButtonElement>('#sidebar-toggle')!.innerHTML='<svg aria-hidden="true" viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1"/><path d="M6.5 3v10M9.5 8h3M11 6.5 12.5 8 11 9.5"/></svg>';
 document.querySelector<HTMLElement>('.mark')!.innerHTML='<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M8 1.5 9.7 6.3 14.5 8l-4.8 1.7L8 14.5 6.3 9.7 1.5 8l4.8-1.7L8 1.5Z"/></svg>';
 for(const [dialog,title] of [['register','register-title'],['connection-settings','settings-title'],['rename-dialog','rename-title']] as const){const d=document.getElementById(dialog),h=d?.querySelector('h2');if(d&&h){h.id=title;d.setAttribute('aria-labelledby',title);}}
 for(const [formId,errorId] of [['#register form','form-error'],['#settings-form','settings-error'],['#rename-form','rename-error']]){
@@ -972,8 +973,11 @@ function renderNavigation(){
  document.querySelector<HTMLElement>('main')!.inert=open;
  document.querySelector<HTMLElement>('#sidebar-backdrop')!.hidden=!open;
  document.querySelector<HTMLButtonElement>('#sidebar-close')!.hidden=!narrow;
- sidebarButton.setAttribute('aria-expanded',String(narrow?open:!ui.sidebarHidden));
- sidebarButton.setAttribute('aria-label',(narrow?!open:ui.sidebarHidden)?'プロジェクト一覧を表示':'プロジェクト一覧を閉じる');
+ const visible=narrow?open:!ui.sidebarHidden;
+ const toggleLabel=visible?'左ペインを非表示':'左ペインを表示';
+ sidebarButton.setAttribute('aria-expanded',String(visible));
+ sidebarButton.setAttribute('aria-label',`${toggleLabel}（⌘B）`);
+ sidebarButton.title=`${toggleLabel} ⌘B`;
  if(open){sidebar.setAttribute('role','dialog');sidebar.setAttribute('aria-modal','true');}
  else{sidebar.removeAttribute('role');sidebar.removeAttribute('aria-modal');}
 }
