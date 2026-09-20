@@ -27,19 +27,20 @@ Review Manifestは `kind: review`、対象project／task、正確な `artifact_v
 
 ## 読み取り専用MCPの接続
 
-ローカルエンドポイントは `http://127.0.0.1:8792/mcp` です。Streamable HTTPのJSON応答方式で、継続SSEストリームは提供しません。全リクエストでBearer認証を要求し、キーはmacOS Keychainに保存します。アプリにキーを表示せず、明示的な「接続キーをコピー」でクリップボードへ書き出します。これは旧Bridgeの接続キーとは別です。
+ローカルエンドポイントは `http://127.0.0.1:8792/mcp` です。Streamable HTTPのJSON応答方式で、継続SSEストリームは提供しません。MCP `2026-07-28` のステートレス `server/discover` と `Mcp-Method` / `Mcp-Name` ヘッダーに対応し、旧クライアント向けに `2025-11-25` / `2025-06-18` のハンドシェイクも維持します。全リクエストでBearer認証を要求し、キーはmacOS Keychainに保存します。アプリにキーを表示せず、明示的な「接続キーをコピー」でクリップボードへ書き出します。これは旧Bridgeの接続キーとは別です。
 
 ChatGPTからlocalhostへ直接接続できるとは扱いません。OpenAIの案内では公開HTTPSエンドポイントまたはSecure MCP Tunnelが必要です。アプリの接続方式欄は既設経路の情報を保存するだけで、トンネル・OAuth・クラウド契約・外部公開を構築しません。Secure MCP TunnelにはPlatform側の設定と実行資格情報が別途必要です。外部経路には認証を設け、ローカル側へBearer認証と正しいHostを伝達するよう配備してください。ChatGPTが任意Bearerヘッダーを直接設定できる前提にはしていません。
 
-参照した公式文書（2026-09-08確認）:
+参照した公式文書（2026-09-19確認）:
 
 - [ChatGPT developer mode](https://developers.openai.com/api/docs/guides/developer-mode)
 - [Connect from ChatGPT](https://developers.openai.com/plugins/deploy/connect-chatgpt)
 - [Secure MCP Tunnels](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+- [MCP 2026-07-28 server discovery](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/server/discover.mdx)
 
 MCPは公開済みプロジェクトとその保存済みworktreeだけを読みます。ドットファイル、機密候補、シンボリックリンク、ビルド出力を除外し、ファイル1MiB・応答64KiB・走査5000件などの上限とページングを適用します。機密候補の自動除外は完全な機密判定ではないため、公開プロジェクトを選ぶ際は内容を確認してください。
 
-公開する11ツールは `project_list`、`project_get`、`repo_tree`、`file_read`、`file_search`、`git_status`、`git_diff`、`task_list`、`task_get`、`verification_get`、`handoff_schema` です。ファイル変更、shell、テスト実行、worker制御はありません。
+公開する11ツールは `project_list`、`project_get`、`repo_tree`、`file_read`、`file_search`、`git_status`、`git_diff`、`task_list`、`task_get`、`verification_get`、`handoff_schema` です。modern MCPでは一覧・呼び出し結果に `resultType`、短いTTL、ユーザー単位の `cacheScope` を付けます。ファイル変更、shell、テスト実行、worker制御はありません。
 
 ## 検証証拠と利用量
 
