@@ -136,23 +136,40 @@ fn malformed_unknown_and_cyclic_plans_are_rejected() {
 #[test]
 fn saved_routes_preserve_every_model_and_exact_effort() {
     let mut config = AutoSettings::initial("spark-exact".into(), Some(target()));
-    for assignment in &mut config.levels {
-        assignment.target = ModelTarget {
+    for level in 1..=5 {
+        let agent_id = config.agent_for_level(level).unwrap().id;
+        let agent = config
+            .agents
+            .iter_mut()
+            .find(|agent| agent.id == agent_id)
+            .unwrap();
+        agent.name = format!("Custom agent {level}");
+        agent.target = ModelTarget {
             provider: ModelProvider::Codex,
             profile_id: Some("codex".into()),
-            model: format!("model-{}", assignment.level),
-            reasoning: Some(format!("effort-{}", assignment.level)),
+            model: format!("model-{level}"),
+            reasoning: Some(format!("effort-{level}")),
         };
     }
+    config.sync_targets_from_agents().unwrap();
     let frozen: AutoSettings =
         serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
-    config.levels[2].target.reasoning = Some("changed-after-run".into());
+    for agent in &mut config.agents {
+        agent.name = "changed-after-run".into();
+        agent.target.model = "changed-model".into();
+        if agent.target.provider != ModelProvider::Local {
+            agent.target.reasoning = Some("changed-effort".into());
+        }
+    }
+    config.sync_targets_from_agents().unwrap();
     for level in 1..=5 {
         let t = frozen.target(level).unwrap();
         assert_eq!(t.model, format!("model-{level}"));
         assert_eq!(t.reasoning, Some(format!("effort-{level}")));
+        let agent = frozen.agent_for_level(level).unwrap();
+        assert_eq!(agent.name, format!("Custom agent {level}"));
+        assert_eq!(agent.target, t);
     }
-    assert_eq!(frozen.agent_for_level(3).unwrap().name, "Builder");
     assert!(frozen.target(0).is_err());
 }
 #[test]
@@ -753,7 +770,7 @@ fn manifest_receipt_is_atomic_and_survives_restart() {
 }
 
 #[test]
-fn duplicate_manifest_reopens_deleted_mapping_without_replaying_or_replacing_state() {
+fn duplicate_manifest_reopens_archive_but_never_resurrects_deleted_task() {
     let d = tempfile::tempdir().unwrap();
     std::process::Command::new("git")
         .arg("init")
@@ -772,24 +789,52 @@ fn duplicate_manifest_reopens_deleted_mapping_without_replaying_or_replacing_sta
     store
         .accept_manifest("reopen", &receipt, &w.thread, &key(w.thread.id), &saved)
         .unwrap();
-    store.delete_thread(w.thread.id).unwrap();
-    assert!(store.threads().unwrap().is_empty());
+    store.set_thread_archived(w.thread.id, true).unwrap();
+    assert_eq!(
+        store.archived_threads().unwrap(),
+        vec![w.thread.id.to_string()]
+    );
     assert!(
         crate::manifest::existing_task(&store, "reopen", &ProjectId::default().to_string())
             .is_err()
     );
-    assert!(store.threads().unwrap().is_empty());
+    assert_eq!(
+        store.archived_threads().unwrap(),
+        vec![w.thread.id.to_string()]
+    );
     let restored = crate::manifest::existing_task(&store, "reopen", &project.id.to_string())
         .unwrap()
         .unwrap();
     assert_eq!(restored.id, w.thread.id);
     assert_eq!(restored.status, "interrupted");
     assert_eq!(store.threads().unwrap().len(), 1);
+    assert!(store.archived_threads().unwrap().is_empty());
     assert_eq!(store.setting(&key(w.thread.id)).unwrap().unwrap(), saved);
     assert_eq!(
         store.setting("manifest_receipt:reopen").unwrap().unwrap(),
         receipt
     );
+    // Full deletion intentionally removes the saved workflow. Its receipt
+    // remains a tombstone: repeated import must not recreate or rerun the task.
+    store.delete_thread(w.thread.id).unwrap();
+    assert!(store.setting(&key(w.thread.id)).unwrap().is_none());
+    assert!(crate::manifest::existing_task(&store, "reopen", &project.id.to_string()).is_err());
+    assert!(store.threads().unwrap().is_empty());
+    assert_eq!(
+        store.setting("manifest_receipt:reopen").unwrap().unwrap(),
+        receipt
+    );
+    assert!(store
+        .accept_manifest(
+            "reopen",
+            "replacement",
+            &w.thread,
+            &key(w.thread.id),
+            &saved
+        )
+        .is_err());
+    assert!(store.setting(&key(w.thread.id)).unwrap().is_none());
+    assert!(store.threads().unwrap().is_empty());
     assert!(
         crate::manifest::existing_task(&store, "unknown", &project.id.to_string())
             .unwrap()

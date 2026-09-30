@@ -1,5 +1,5 @@
 type Project = { id: string; name: string; root: string };
-type Config = { enabled: boolean; project_ids: string[]; connection: { kind: 'unconfigured' } | { kind: 'secure_tunnel'; tunnel_id: string } | { kind: 'https_proxy'; url: string } };
+type Config = { enabled: boolean; project_ids: string[]; write_project_ids?: string[]; connection: { kind: 'unconfigured' } | { kind: 'secure_tunnel'; tunnel_id: string } | { kind: 'https_proxy'; url: string } };
 type Status = { config: Config; running: boolean; error: string | null; local_endpoint: string };
 type Invoke = <T = unknown>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -7,9 +7,10 @@ export function setupMcpSettings(call: Invoke, projects: () => Project[], saved?
   const dialog = document.createElement('dialog');
   const close = () => embedded ? embedded.close() : dialog.close();
   dialog.id = 'mcp-settings'; dialog.setAttribute('aria-label', 'MCP公開設定');
-  dialog.innerHTML = `<form><h2>MCP公開設定</h2><p>ChatGPTに読ませるプロジェクトを選びます。MCPから実行・変更はできません。</p>
-    <label class="settings-check"><input type="checkbox" id="mcp-enabled"><span>読み取り専用MCPを有効にする</span></label>
+  dialog.innerHTML = `<form><h2>MCP公開設定</h2><p>ChatGPTに公開するプロジェクトと、ファイル編集を許可する範囲を選びます。</p>
+    <label class="settings-check"><input type="checkbox" id="mcp-enabled"><span>MCPを有効にする</span></label>
     <fieldset><legend>公開するプロジェクト</legend><div id="mcp-projects"></div></fieldset>
+    <fieldset><legend>ファイル編集を許可するプロジェクト</legend><p>公開したプロジェクトの通常のテキストファイルを作成・編集できます。編集には読取時のハッシュが必要です。秘密情報・管理用ファイル・作業中のタスクのworktreeは対象外です。</p><div id="mcp-write-projects"></div></fieldset>
     <p id="mcp-status" role="status"></p><button type="button" id="mcp-copy-token">ローカル接続キーをコピー</button>
     <label for="mcp-route">ChatGPTへの接続経路</label><select id="mcp-route"><option value="unconfigured">未設定</option><option value="secure_tunnel">Secure MCP Tunnel</option><option value="https_proxy">認証付きHTTPSプロキシ</option></select>
     <label for="mcp-address" id="mcp-address-label">接続先</label><input id="mcp-address" spellcheck="false" autocomplete="off">
@@ -39,7 +40,9 @@ export function setupMcpSettings(call: Invoke, projects: () => Project[], saved?
     e.preventDefault(); if (saving || !ready) return; saving = true; error.textContent = '';
     const button = root.querySelector<HTMLButtonElement>('button[type=submit]')!; button.disabled = true;
     const connection: Config['connection'] = route.value === 'secure_tunnel' ? { kind: 'secure_tunnel', tunnel_id: address.value.trim() } : route.value === 'https_proxy' ? { kind: 'https_proxy', url: address.value.trim() } : { kind: 'unconfigured' };
-    const config: Config = { enabled: enabled.checked, project_ids: Array.from(root.querySelectorAll<HTMLInputElement>('#mcp-projects input:checked')).map(e => e.value), connection };
+    const project_ids = Array.from(root.querySelectorAll<HTMLInputElement>('#mcp-projects input:checked')).map(e => e.value);
+    const write_project_ids = Array.from(root.querySelectorAll<HTMLInputElement>('#mcp-write-projects input:checked')).map(e => e.value).filter(id => project_ids.includes(id));
+    const config: Config = { enabled: enabled.checked, project_ids, write_project_ids, connection };
     try { const status = await call<Status>('set_mcp_settings', { config }); showStatus(status); if (!status.error) { close(); saved?.(); } }
     catch (e) { error.textContent = String(e); }
     finally { saving = false; button.disabled = false; }
@@ -54,11 +57,19 @@ export function setupMcpSettings(call: Invoke, projects: () => Project[], saved?
       enabled.checked = status.config.enabled; route.value = status.config.connection.kind;
       address.value = 'tunnel_id' in status.config.connection ? status.config.connection.tunnel_id : 'url' in status.config.connection ? status.config.connection.url : '';
       const list = root.querySelector('#mcp-projects')!; list.replaceChildren();
+      const writeList = root.querySelector('#mcp-write-projects')!; writeList.replaceChildren();
       for (const project of projects()) {
         const label = document.createElement('label'), box = document.createElement('input');
         box.type = 'checkbox'; box.value = project.id; box.checked = status.config.project_ids.includes(project.id);
         const name = document.createElement('span'); name.textContent = project.name;
         label.className = 'settings-check'; label.append(box, name); label.title = project.root; list.append(label);
+        const writeLabel = document.createElement('label'), writeBox = document.createElement('input');
+        writeBox.type = 'checkbox'; writeBox.value = project.id;
+        writeBox.checked = box.checked && (status.config.write_project_ids ?? []).includes(project.id);
+        writeBox.disabled = !box.checked;
+        const writeName = document.createElement('span'); writeName.textContent = project.name;
+        writeLabel.className = 'settings-check'; writeLabel.append(writeBox, writeName); writeLabel.title = project.root; writeList.append(writeLabel);
+        box.addEventListener('change', () => { writeBox.disabled = !box.checked; if (!box.checked) writeBox.checked = false; });
       }
       showRoute(); showStatus(status); ready = true; save.disabled = false;
     } catch (e) { error.textContent = String(e); }

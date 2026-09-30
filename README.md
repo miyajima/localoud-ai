@@ -88,7 +88,7 @@ See [ChatGPT connection and session management](docs/CHATGPT.md) for the separat
 
 ## Local settings and credentials
 
-`config.example.toml` and `services/spark-mlx/config.yaml` contain public examples/defaults, not personal settings. Configure your own providers through the app. Runtime settings, sessions and drafts stay in the local application database; OrgBrain credentials use the macOS Keychain. The read-only MCP bearer token stays in the macOS Keychain. ChatGPT uses its own persistent WKWebView browser data store. Do not commit database files, local configuration, provider credentials or MCP bearer tokens.
+`config.example.toml` and `services/spark-mlx/config.yaml` contain public examples/defaults, not personal settings. Configure your own providers through the app. Runtime settings, sessions and drafts stay in the local application database; OrgBrain credentials use the macOS Keychain. The MCP bearer token stays in the macOS Keychain. MCP file creation/editing requires separate per-project permission in MCP settings; see [ChatGPT and MCP usage](docs/CHATGPT.md). ChatGPT uses its own persistent WKWebView browser data store. Do not commit database files, local configuration, provider credentials or MCP bearer tokens.
 
 ## License
 

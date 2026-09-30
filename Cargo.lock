@@ -104,6 +104,7 @@ dependencies = [
  "hub-scheduler",
  "hub-worktree",
  "keyring",
+ "libc",
  "protocol-types",
  "provider-api",
  "provider-codex",

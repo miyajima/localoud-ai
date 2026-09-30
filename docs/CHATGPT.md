@@ -5,8 +5,8 @@
 ## 通常の流れ
 
 1. 左側のChatGPTに手動ログインする。専用の永続WKWebView領域を使い、ChromeのCookieは移植しない。
-2. Localoudの「接続設定 → 読み取り専用MCP」で、公開する登録済みプロジェクトを選ぶ。
-3. 別途配備した接続経路から、ChatGPTに読み取り専用MCPを接続する。下記の配備条件を参照。
+2. Localoudの「設定 → MCP公開設定」で、公開する登録済みプロジェクトを選ぶ。直接編集を使う場合は、編集を許可するプロジェクトも個別に選ぶ。
+3. 別途配備した接続経路から、ChatGPTにMCPを接続する。下記の配備条件を参照。
 4. プロジェクトを選び、開始方法を「ChatGPTで計画」にする。左のChatGPTへ作業内容・対象プロジェクト・条件を入力し、MCPの `project_get` と `handoff_schema` を使って計画を作るよう依頼する。
 5. 確定したTask ManifestのJSONをコピーし、上部の「計画を取り込んで実行」を押す。取り込み操作時だけクリップボードを読む。
 6. Localoudが依存関係と作業範囲に沿って最大3workerを並列実行し、統合成果物のIDと版を保存して「レビュー待ち」にする。
@@ -25,7 +25,7 @@ Review Manifestは `kind: review`、対象project／task、正確な `artifact_v
 
 中断・再起動後は保存済み状態を表示し、未確認の送信を自動再送しません。「再開・状態を確認」の操作で既存workerの停止を確認し、完了済みstepを保持して未完了stepを新しいworktreeで再開します。過去の試行・worktreeは保持します。旧ブラウザタスクは閲覧専用です。
 
-## 読み取り専用MCPの接続
+## MCPの接続
 
 ローカルエンドポイントは `http://127.0.0.1:8792/mcp` です。Streamable HTTPのJSON応答方式で、継続SSEストリームは提供しません。MCP `2026-07-28` のステートレス `server/discover` と `Mcp-Method` / `Mcp-Name` ヘッダーに対応し、旧クライアント向けに `2025-11-25` / `2025-06-18` のハンドシェイクも維持します。全リクエストでBearer認証を要求し、キーはmacOS Keychainに保存します。アプリにキーを表示せず、明示的な「接続キーをコピー」でクリップボードへ書き出します。これは旧Bridgeの接続キーとは別です。
 
@@ -40,7 +40,22 @@ ChatGPTからlocalhostへ直接接続できるとは扱いません。OpenAIの�
 
 MCPは公開済みプロジェクトとその保存済みworktreeだけを読みます。ドットファイル、機密候補、シンボリックリンク、ビルド出力を除外し、ファイル1MiB・応答64KiB・走査5000件などの上限とページングを適用します。機密候補の自動除外は完全な機密判定ではないため、公開プロジェクトを選ぶ際は内容を確認してください。
 
-公開する11ツールは `project_list`、`project_get`、`repo_tree`、`file_read`、`file_search`、`git_status`、`git_diff`、`task_list`、`task_get`、`verification_get`、`handoff_schema` です。modern MCPでは一覧・呼び出し結果に `resultType`、短いTTL、ユーザー単位の `cacheScope` を付けます。ファイル変更、shell、テスト実行、worker制御はありません。
+読み取り用の11ツールは `project_list`、`project_get`、`repo_tree`、`file_read`、`file_search`、`git_status`、`git_diff`、`task_list`、`task_get`、`verification_get`、`handoff_schema` です。加えて `file_create` と `file_edit` を公開します。modern MCPでは一覧・呼び出し結果に `resultType`、短いTTL、ユーザー単位の `cacheScope` を付けます。shell、テスト実行、worker制御はありません。A2Aのread-evidenceインターフェースでは編集ツールを拒否します。
+
+## MCPで直接ファイルを編集する
+
+既存設定は読み取り専用のままです。「MCP公開設定 → ファイル編集を許可するプロジェクト」で明示的に許可し、保存してください。読み取り対象の `project_ids` と編集対象の `write_project_ids` は別に保存します。編集対象は公開対象の部分集合です。アプリ更新後、ChatGPT側でもLocaloudのツール一覧を更新し、Write 2 / Read 11を確認してください。
+
+1. `project_list` の名前・UUID・`file_edit_enabled` を確認する。Localoud画面の選択プロジェクトはMCPに自動連動しないため、対象UUIDを明示する。
+2. 新規ファイルは `file_create` に `project_id`、相対 `path`、`content` を渡す。既存ファイル・既存リンクは上書きしない。親ディレクトリは事前に存在している必要がある。
+3. 既存ファイルは `file_read` で読み、返された全ファイルの `sha256` を使う。`file_edit` に `project_id`、`path`、`expected_sha256`、`old_text`、`new_text` を渡す。`old_text` はちょうど1箇所に一致する文字列にする。ハッシュ不一致や複数一致では書き込まない。競合したら再読取して差分を確認する。
+4. 返された操作ID・前後ハッシュ・バイト数を確認し、`file_read` と `git_diff` で変更を読み戻す。ツール成功だけではビルド・テスト・受入れ条件の成功を意味しない。
+
+編集はプロジェクト本体が対象です。`task_id` / `step_key` を指定した編集、管理worktree、ドットパス、機密候補、`AGENTS.md` / `CLAUDE.md` / `SKILL.md`、シンボリックリンクを拒否します。既存ファイルはUTF-8テキスト・1MiB以内・単一ハードリンク・書込可能である必要があり、読取時に機密情報が伏せられるファイルも編集を拒否します。新規内容は32KiB以内、置換の旧文字列と新文字列は合計32KiB以内です。空の `new_text` は一致した文字列だけを削除します。ファイル削除・移動のツールはありません。
+
+保存は同一ディレクトリの一時ファイルから原子的に反映し、既存ファイルのアクセス権と置換対象以外のバイトを維持します。MCP内の書込は直列化し、反映直前にもハッシュを再確認します。外部エディターとの全ての競合を防ぐOSレベルの比較交換ではないため、同じファイルへの同時保存は避けてください。通信が切れた場合は再送前に実ファイルを読み戻してください。
+
+直接編集した元checkoutはdirtyになります。Manifest実行は従来どおりcleanな元checkoutを要求するため、変更を確認・確定してから開始してください。既存の未コミット変更は自動削除しません。
 
 ## 検証証拠と利用量
 

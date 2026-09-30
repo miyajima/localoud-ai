@@ -22,7 +22,7 @@ Conversation classification is local-first but not trusted. The local model may 
 
 ## Local HTTP+JSON interface
 
-When the existing read-only MCP service is enabled, the same loopback listener exposes a bounded A2A v1 HTTP+JSON interface:
+When the MCP service is enabled, the same loopback listener exposes a bounded, read-only A2A v1 HTTP+JSON interface. MCP's opt-in file-edit tools are rejected by this A2A skill:
 
 - Agent Card: `http://127.0.0.1:8792/.well-known/agent-card.json`
 - preferred interface base: `http://127.0.0.1:8792/a2a/v1`
