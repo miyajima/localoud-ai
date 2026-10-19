@@ -1,0 +1,66 @@
+
+> test
+> node --test test/*.test.mjs
+
+TAP version 13
+# Subtest: upgrade requires the device capability and rejects a different device token
+ok 1 - upgrade requires the device capability and rejects a different device token
+  ---
+  duration_ms: 149.148084
+  type: 'test'
+  ...
+# Subtest: HTTP probe reaches only its selected socket and returns matching nonce
+not ok 2 - HTTP probe reaches only its selected socket and returns matching nonce
+  ---
+  duration_ms: 52.078041
+  type: 'test'
+  location: '/Users/miyajimakazuhiro/.codex/worktrees/sites-mac-websocket-proof/localoud/services/sites-mac-proof/test/transport.test.mjs:12:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    503 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 503
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/miyajimakazuhiro/.codex/worktrees/sites-mac-websocket-proof/localoud/services/sites-mac-proof/test/transport.test.mjs:12:501)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: replacement connection survives stale close and no device means no dispatch
+not ok 3 - replacement connection survives stale close and no device means no dispatch
+  ---
+  duration_ms: 47.354916
+  type: 'test'
+  location: '/Users/miyajimakazuhiro/.codex/worktrees/sites-mac-websocket-proof/localoud/services/sites-mac-proof/test/transport.test.mjs:13:1'
+  failureType: 'testCodeFailure'
+  error: "Cannot read properties of null (reading 'accept')"
+  code: 'ERR_TEST_FAILURE'
+  name: 'TypeError'
+  stack: |-
+    responder (file:///Users/miyajimakazuhiro/.codex/worktrees/sites-mac-websocket-proof/localoud/services/sites-mac-proof/test/transport.test.mjs:10:33)
+    TestContext.<anonymous> (file:///Users/miyajimakazuhiro/.codex/worktrees/sites-mac-websocket-proof/localoud/services/sites-mac-proof/test/transport.test.mjs:13:305)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: probe control route rejects missing credentials and malformed input
+ok 4 - probe control route rejects missing credentials and malformed input
+  ---
+  duration_ms: 38.562833
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 2
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 509.561959

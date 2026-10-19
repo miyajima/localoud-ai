@@ -1,0 +1,89 @@
+
+> test
+> node --test test/*.test.mjs
+
+TAP version 13
+# Subtest: upgrade requires per-device capability and same-origin browser requests
+ok 1 - upgrade requires per-device capability and same-origin browser requests
+  ---
+  duration_ms: 162.084667
+  type: 'test'
+  ...
+# Subtest: two established sockets return only their own nonce and device
+not ok 2 - two established sockets return only their own nonce and device
+  ---
+  duration_ms: 56.792667
+  type: 'test'
+  location: '/Users/miyajimakazuhiro/.codex/worktrees/sites-mac-websocket-proof/localoud/services/sites-mac-proof/test/transport.test.mjs:11:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + undefined
+    - 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/miyajimakazuhiro/.codex/worktrees/sites-mac-websocket-proof/localoud/services/sites-mac-proof/test/transport.test.mjs:11:665)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: disconnect and fresh connection work without cross-request socket access
+not ok 3 - disconnect and fresh connection work without cross-request socket access
+  ---
+  duration_ms: 57.096542
+  type: 'test'
+  location: '/Users/miyajimakazuhiro/.codex/worktrees/sites-mac-websocket-proof/localoud/services/sites-mac-proof/test/transport.test.mjs:12:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + undefined
+    - 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/miyajimakazuhiro/.codex/worktrees/sites-mac-websocket-proof/localoud/services/sites-mac-proof/test/transport.test.mjs:12:503)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: diagnostic does not expose an HTTP command or relay route
+not ok 4 - diagnostic does not expose an HTTP command or relay route
+  ---
+  duration_ms: 52.355167
+  type: 'test'
+  location: '/Users/miyajimakazuhiro/.codex/worktrees/sites-mac-websocket-proof/localoud/services/sites-mac-proof/test/transport.test.mjs:13:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    403 !== 404
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 404
+  actual: 403
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/miyajimakazuhiro/.codex/worktrees/sites-mac-websocket-proof/localoud/services/sites-mac-proof/test/transport.test.mjs:13:109)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 1
+# fail 3
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 606.286958

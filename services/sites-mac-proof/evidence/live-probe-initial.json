@@ -1,0 +1,51 @@
+{
+  "target": "https://localoud-sites-mac-proof.miyazima.chatgpt.site",
+  "started_at": "2026-10-18T18:00:36.572Z",
+  "scope": "transport-only; synthetic nonce probes; no file/command access",
+  "checks": [
+    {
+      "name": "authenticated_health",
+      "status": 200
+    },
+    {
+      "name": "anonymous_denied",
+      "status": 401,
+      "pass": true
+    },
+    {
+      "name": "wrong_device_rejected",
+      "status": 403,
+      "pass": true
+    },
+    {
+      "name": "two_real_websocket_upgrades",
+      "status": 101,
+      "pass": true
+    },
+    {
+      "name": "held_connection_60_seconds",
+      "pass": true
+    },
+    {
+      "name": "reconnect_and_other_device_survives",
+      "pass": true
+    }
+  ],
+  "completed": true,
+  "health": {
+    "service": "localoud-sites-mac-proof",
+    "worker_websocket_pair": true,
+    "production_ready": false,
+    "phase": "transport_only",
+    "probe_protocol": "nonce-v1"
+  },
+  "hold_ms": 60573.962875,
+  "rtt_ms": {
+    "count": 32,
+    "min": 31.514791000001424,
+    "median": 44.49091599999883,
+    "p95": 61.87674999999945,
+    "max": 69.7536670000045
+  },
+  "finished_at": "2026-10-18T18:01:43.898Z"
+}

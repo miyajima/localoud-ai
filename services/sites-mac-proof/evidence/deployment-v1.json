@@ -1,0 +1,28 @@
+{
+  "deployment": {
+    "id": "appgdep_6ad50928880081918d58757c7d47c18c",
+    "project_id": "appgprj_6ad50681dabc8191a670c42119e0408c",
+    "title": "Localoud Sites–Mac接続検証",
+    "version_id": "appgprj_6ad50681dabc8191a670c42119e0408c~appgver_e63d472e01508191a8cc843becbb0c92",
+    "type": "publish",
+    "status": "succeeded",
+    "url": "https://localoud-sites-mac-proof.miyazima.chatgpt.site",
+    "has_mcp": true,
+    "screenshot_asset_pointer": null,
+    "provider_deployment_id": "site---6ad50681dabc8191a670c42119e0408c",
+    "failure_message": null,
+    "env_set_revision": 1,
+    "updated_at": "2026-10-18T18:00:20.291556+00:00"
+  },
+  "published_source": "339f7b4f73f04c1c5515ff65a6e6160137f2a9ca",
+  "mcp_diagnostic": {
+    "tool": "transport_health",
+    "isError": false,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"phase\":\"transport_only\",\"production_ready\":false}"
+      }
+    ]
+  }
+}

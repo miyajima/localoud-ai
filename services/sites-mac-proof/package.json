@@ -1,0 +1,1 @@
+{"name":"localoud-sites-mac-proof","private":true,"type":"module","scripts":{"test":"node --test test/*.test.mjs","build":"bash scripts/build.sh && node scripts/validate-artifact.mjs"},"devDependencies":{"miniflare":"4.20260730.0","ws":"8.22.0"}}

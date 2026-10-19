@@ -1,0 +1,38 @@
+
+> test
+> node --test test/*.test.mjs
+
+TAP version 13
+# Subtest: upgrade requires per-device capability and same-origin browser requests
+ok 1 - upgrade requires per-device capability and same-origin browser requests
+  ---
+  duration_ms: 65.460083
+  type: 'test'
+  ...
+# Subtest: two established sockets return only their own nonce and device
+ok 2 - two established sockets return only their own nonce and device
+  ---
+  duration_ms: 49.169792
+  type: 'test'
+  ...
+# Subtest: disconnect and fresh connection work without cross-request socket access
+ok 3 - disconnect and fresh connection work without cross-request socket access
+  ---
+  duration_ms: 34.744709
+  type: 'test'
+  ...
+# Subtest: diagnostic does not expose an HTTP command or relay route
+ok 4 - diagnostic does not expose an HTTP command or relay route
+  ---
+  duration_ms: 37.047416
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 431.922542

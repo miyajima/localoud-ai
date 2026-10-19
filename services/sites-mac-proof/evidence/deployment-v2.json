@@ -1,0 +1,27 @@
+{
+  "deployment": {
+    "id": "appgdep_6ad50ac3aab48191b476bdc9021ecc05",
+    "project_id": "appgprj_6ad50681dabc8191a670c42119e0408c",
+    "title": "Localoud Sites–Mac接続検証",
+    "version_id": "appgprj_6ad50681dabc8191a670c42119e0408c~appgver_b823a7d0b8e88191a9171fdf28388df1",
+    "type": "publish",
+    "status": "succeeded",
+    "url": "https://localoud-sites-mac-proof.miyazima.chatgpt.site",
+    "has_mcp": true,
+    "screenshot_asset_pointer": null,
+    "provider_deployment_id": "site---6ad50681dabc8191a670c42119e0408c",
+    "failure_message": null,
+    "env_set_revision": 1,
+    "updated_at": "2026-10-18T18:07:10.455575+00:00"
+  },
+  "source": "2864bb7c002cadf416cffa7338413b8577eefcff",
+  "review": {
+    "verdict": "PASS",
+    "scope": "transport-only worker and probe client",
+    "worker_sha256": "a61c7a9078c0633016a154eb603568decfa1ecdb71afba7bb286f667a9a72857",
+    "client_sha256": "df10540565c718585408fd87a79b8b58091fb244fae5461c8393e0c651e491f5",
+    "protocol_sha256": "f958c1a01ad18822c8eb8009b8d8c535b695d9dc2091d0a4add1b1e4f486762c",
+    "checks": "transport4 PASS; client contract4 PASS; ESM build/validate PASS",
+    "limit": "Final null-object failure guard tested locally after live run; deployed Worker unchanged"
+  }
+}
