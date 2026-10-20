@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'none'; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="color-scheme" content="light" />
+    <title>Localoud Agent</title>
+    <link rel="stylesheet" href="./app.css" />
+    <script type="module" src="./renderer.mjs"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true"
+            ><span></span><span></span
+          ></span>
+          <span class="brand-name">Localoud <span>Agent</span></span>
+        </div>
+        <span class="build-chip" id="build-target">macOS arm64</span>
+      </header>
+
+      <main class="dashboard" id="main-content">
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <p class="eyebrow">YOUR MAC, CONNECTED</p>
+            <h1 id="hero-title">
+              このMacの作業フォルダを、<span>ChatGPT</span>につなぐ。
+            </h1>
+            <p class="hero-summary">
+              共有する範囲を選び、Mac側で起動してから、ChatGPTでOAuth接続します。
+            </p>
+            <p
+              class="connection-state"
+              id="connection-status"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="connection-dot" aria-hidden="true"></span>
+              <span id="connection-status-text">状態を確認しています</span>
+            </p>
+          </div>
+
+          <ol class="route-map" aria-label="接続経路">
+            <li class="route-stop" id="local-node" data-state="idle">
+              <span class="route-symbol route-symbol--local" aria-hidden="true"
+                ><span></span
+              ></span>
+              <span class="route-name">このMac</span>
+              <span class="route-detail" id="local-node-state">未設定</span>
+            </li>
+            <li class="route-link" aria-hidden="true"><span></span></li>
+            <li class="route-stop" id="gateway-node" data-state="idle">
+              <span
+                class="route-symbol route-symbol--gateway"
+                aria-hidden="true"
+                ><span></span><span></span><span></span
+              ></span>
+              <span class="route-name">Localoud</span>
+              <span class="route-detail" id="gateway-node-state">待機中</span>
+            </li>
+            <li class="route-link" aria-hidden="true"><span></span></li>
+            <li class="route-stop" id="chatgpt-node" data-state="idle">
+              <span
+                class="route-symbol route-symbol--chatgpt"
+                aria-hidden="true"
+                ><span></span><span></span
+              ></span>
+              <span class="route-name">ChatGPT</span>
+              <span class="route-detail">OAuthで接続</span>
+            </li>
+          </ol>
+        </section>
+
+        <div class="error-banner" id="error-banner" role="alert" hidden></div>
+        <p
+          class="action-notice"
+          id="action-notice"
+          role="status"
+          aria-live="polite"
+          hidden
+        ></p>
+
+        <div class="setup-grid">
+          <section class="setup-card scope-card" aria-labelledby="scope-title">
+            <div class="step-heading">
+              <span class="step-number" aria-hidden="true">01</span>
+              <div>
+                <p class="step-label">共有範囲</p>
+                <h2 id="scope-title">プロジェクトを登録する</h2>
+              </div>
+            </div>
+            <p class="card-intro">
+              複数のフォルダを追加し、それぞれの許可を設定できます。新しく追加したプロジェクトの編集・コマンド実行はオフです。
+            </p>
+
+            <div class="project-toolbar">
+              <button
+                class="button button--secondary"
+                id="choose-folder"
+                type="button"
+              >
+                プロジェクトを追加
+              </button>
+              <button
+                class="button button--secondary"
+                id="recheck-projects"
+                type="button"
+                hidden
+              >
+                フォルダを再確認
+              </button>
+              <p id="project-count" aria-live="polite">未登録</p>
+            </div>
+            <p class="scope-help" id="scope-help">
+              フォルダを選んで追加してください。複数選択もできます。
+            </p>
+            <div
+              id="project-list"
+              class="project-list"
+              aria-label="登録プロジェクト"
+            ></div>
+            <p id="project-empty" class="empty-projects">
+              まだプロジェクトがありません。
+            </p>
+
+            <div class="permission-warning" id="command-warning">
+              <span class="warning-mark" aria-hidden="true">!</span>
+              <p>
+                許可したコマンドはMacのユーザー権限で動きます。プロジェクト外のファイルやネットワークにも作用する可能性があり、サンドボックスには入りません。
+              </p>
+            </div>
+
+            <div class="card-actions">
+              <button
+                class="button button--primary"
+                id="configure"
+                type="button"
+                disabled
+              >
+                設定を保存
+              </button>
+              <span class="saved-state" id="saved-state"
+                >範囲を選んで保存してください</span
+              >
+            </div>
+          </section>
+
+          <div class="side-steps">
+            <section
+              class="setup-card runtime-card"
+              aria-labelledby="runtime-title"
+            >
+              <div class="step-heading">
+                <span class="step-number" aria-hidden="true">02</span>
+                <div>
+                  <p class="step-label">Macで起動</p>
+                  <h2 id="runtime-title">エージェントを起動する</h2>
+                </div>
+              </div>
+              <p class="card-intro" id="runtime-description">
+                保存したプロジェクトを、このMacから接続します。
+              </p>
+              <div class="runtime-actions">
+                <button
+                  class="button button--primary"
+                  id="start-agent"
+                  type="button"
+                  disabled
+                >
+                  エージェントを起動
+                </button>
+                <button
+                  class="button button--quiet"
+                  id="stop-agent"
+                  type="button"
+                  hidden
+                >
+                  停止
+                </button>
+                <button
+                  class="button button--secondary"
+                  id="show-approvals"
+                  type="button"
+                  disabled
+                >
+                  接続・承認を開く
+                </button>
+              </div>
+              <p class="approval-hint">
+                ChatGPTとのペアリングと、編集・コマンドの承認は別画面で行います。ローカル認証コードの入力は不要です。
+              </p>
+              <label class="login-option" for="start-at-login">
+                <input id="start-at-login" type="checkbox" />
+                <span>ログイン時にエージェントを起動する</span>
+              </label>
+              <p class="login-hint">
+                初期状態はオフです。アプリ起動時の再開とは別の設定です。
+              </p>
+              <p class="tray-hint">
+                次回アプリを起動すると、保存した設定でエージェントを再開します。ウインドウを閉じてもメニューバーに残ります。完全に終了するにはメニューから「終了」を選んでください。
+              </p>
+            </section>
+
+            <section
+              class="setup-card chatgpt-card"
+              aria-labelledby="chatgpt-title"
+            >
+              <div class="step-heading">
+                <span class="step-number" aria-hidden="true">03</span>
+                <div>
+                  <p class="step-label">ChatGPTで接続</p>
+                  <h2 id="chatgpt-title">OAuthで追加する</h2>
+                </div>
+              </div>
+              <p class="card-intro">このURLをカスタムMCPとして登録します。</p>
+              <div class="url-copy-row">
+                <code class="mcp-url" id="mcp-url"
+                  >https://localoud-mcp-gateway.miyazima.workers.dev/mcp</code
+                >
+                <button
+                  class="button button--icon"
+                  id="copy-mcp-url"
+                  type="button"
+                  aria-label="MCP URLをコピー"
+                >
+                  コピー
+                </button>
+              </div>
+              <ol class="chatgpt-steps">
+                <li>
+                  ChatGPTのプラグイン画面で「＋」を押し、カスタムMCPサーバーを追加します。
+                </li>
+                <li>表示名と上のURLを入力し、認証方式にOAuthを選びます。</li>
+                <li>
+                  OAuthの案内を進め、接続コードを「接続・承認」画面で確認して追加します。
+                </li>
+              </ol>
+              <p class="chatgpt-note">
+                利用できる操作は、ChatGPTのプランやワークスペース設定により異なります。
+              </p>
+              <button
+                class="button button--link"
+                id="open-chatgpt"
+                type="button"
+                disabled
+              >
+                ChatGPTの接続画面を開く <span aria-hidden="true">↗</span>
+              </button>
+            </section>
+          </div>
+        </div>
+      </main>
+
+      <footer class="footer-note">
+        <p>
+          <strong>データの流れ</strong>
+          ファイル内容やコマンド結果はCloudflareとChatGPTを経由します。
+        </p>
+        <p class="platform-note">
+          現在はmacOS arm64向けです。Windows版・Linux版は未対応です。
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>

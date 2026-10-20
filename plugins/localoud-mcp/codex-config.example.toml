@@ -1,0 +1,9 @@
+# Codex CLI snippet: append to ~/.codex/config.toml
+# stdio transport, no network. Requires `localoud-mcp` on PATH
+# (run ./scripts/install.sh in this directory first).
+
+[mcp_servers.localoud]
+command = "localoud-mcp"
+args = ["--config", "/Users/YOU/.config/localoud/mcp-projects.json"]
+startup_timeout_ms = 10000
+tool_timeout_sec = 60

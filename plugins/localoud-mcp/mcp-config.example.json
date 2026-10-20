@@ -1,0 +1,11 @@
+{
+  "projects": [
+    {
+      "id": "my-project",
+      "name": "my-project",
+      "root": "/absolute/path/to/repo",
+      "write_enabled": false,
+      "execution_enabled": false
+    }
+  ]
+}

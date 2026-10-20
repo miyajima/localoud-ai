@@ -1,0 +1,10 @@
+{
+  "name": "localoud-mcp",
+  "version": "0.1.0",
+  "description": "Localoud standalone MCP: bounded file/git evidence, opt-in text edits and separately enabled host command execution.",
+  "author": {
+    "name": "Localoud AI"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/miyajima/localoud-ai"
+}

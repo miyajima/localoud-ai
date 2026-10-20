@@ -1,0 +1,20 @@
+{
+  "name": "@localoud/mcp-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/worker.js --bundle --format=esm --external:cloudflare:workers --outfile=dist/worker.js",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "1.2.3"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "miniflare": "4.20260730.0",
+    "wrangler": "4.151.1"
+  }
+}

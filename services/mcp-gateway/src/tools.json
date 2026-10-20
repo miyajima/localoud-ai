@@ -1,0 +1,496 @@
+[
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Use before planning to discover projects explicitly published by the user.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "description": "Full Git hash for source diffs",
+          "type": "string"
+        },
+        "limit": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "line_count": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "Relative path; secrets and symlinks are not exposed",
+          "type": "string"
+        },
+        "project_id": {
+          "description": "Published project id",
+          "type": "string"
+        },
+        "query": {
+          "description": "Literal text query, up to 256 bytes",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "name": "project_list"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Use to get project HEAD and dirty state.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "description": "Full Git hash for source diffs",
+          "type": "string"
+        },
+        "limit": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "line_count": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "Relative path; secrets and symlinks are not exposed",
+          "type": "string"
+        },
+        "project_id": {
+          "description": "Published project id",
+          "type": "string"
+        },
+        "query": {
+          "description": "Literal text query, up to 256 bytes",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id"
+      ],
+      "type": "object"
+    },
+    "name": "project_get"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Use to inspect bounded folder/file structure. Narrow path if scan_truncated.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "description": "Full Git hash for source diffs",
+          "type": "string"
+        },
+        "limit": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "line_count": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "Relative path; secrets and symlinks are not exposed",
+          "type": "string"
+        },
+        "project_id": {
+          "description": "Published project id",
+          "type": "string"
+        },
+        "query": {
+          "description": "Literal text query, up to 256 bytes",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id"
+      ],
+      "type": "object"
+    },
+    "name": "repo_tree"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Use to read source text with line numbers and content hash.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "description": "Full Git hash for source diffs",
+          "type": "string"
+        },
+        "limit": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "line_count": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "Relative path; secrets and symlinks are not exposed",
+          "type": "string"
+        },
+        "project_id": {
+          "description": "Published project id",
+          "type": "string"
+        },
+        "query": {
+          "description": "Literal text query, up to 256 bytes",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id",
+        "path"
+      ],
+      "type": "object"
+    },
+    "name": "file_read"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Use for literal source search. Results include path and line; never executes a shell query.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "description": "Full Git hash for source diffs",
+          "type": "string"
+        },
+        "limit": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "line_count": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "Relative path; secrets and symlinks are not exposed",
+          "type": "string"
+        },
+        "project_id": {
+          "description": "Published project id",
+          "type": "string"
+        },
+        "query": {
+          "description": "Literal text query, up to 256 bytes",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id",
+        "query"
+      ],
+      "type": "object"
+    },
+    "name": "file_search"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Use to inspect tracked and new-file status without changing the index.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "description": "Full Git hash for source diffs",
+          "type": "string"
+        },
+        "limit": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "line_count": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "Relative path; secrets and symlinks are not exposed",
+          "type": "string"
+        },
+        "project_id": {
+          "description": "Published project id",
+          "type": "string"
+        },
+        "query": {
+          "description": "Literal text query, up to 256 bytes",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id"
+      ],
+      "type": "object"
+    },
+    "name": "git_status"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Use for exact source diff. Paginate until truncated=false. Omitted paths are not reviewed.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "base_revision": {
+          "description": "Full Git hash for source diffs",
+          "type": "string"
+        },
+        "limit": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "line_count": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "Relative path; secrets and symlinks are not exposed",
+          "type": "string"
+        },
+        "project_id": {
+          "description": "Published project id",
+          "type": "string"
+        },
+        "query": {
+          "description": "Literal text query, up to 256 bytes",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id"
+      ],
+      "type": "object"
+    },
+    "name": "git_diff"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Create a new UTF-8 file in an explicitly edit-enabled project. Fails if any destination exists; never overwrites. No command execution. Inspect receipt and read back afterwards.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "description": "Exact text, at most 32KiB UTF-8; no NUL",
+          "type": "string"
+        },
+        "path": {
+          "description": "Relative ordinary text-file path within the project source. Existing parent directories required. No symlinks, secrets, hidden or agent-instruction files.",
+          "type": "string"
+        },
+        "project_id": {
+          "description": "Published project id with file_edit_enabled=true",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "path",
+        "content"
+      ],
+      "type": "object"
+    },
+    "name": "file_create"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Edit one literal text occurrence in an explicitly edit-enabled project source. First file_read and use its sha256. On conflict, reread; never blindly retry. old_text must match exactly once. Preserves other bytes and permissions. Maximum file size 1MiB; old_text+new_text at most 32KiB. No commands or deletion. Read back and inspect git_diff afterwards.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_sha256": {
+          "description": "Exact full-file sha256 from the latest file_read",
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "new_text": {
+          "description": "Replacement text; empty deletes only the matched text",
+          "type": "string"
+        },
+        "old_text": {
+          "description": "Unique literal text including sufficient context",
+          "minLength": 1,
+          "type": "string"
+        },
+        "path": {
+          "description": "Relative ordinary text-file path within the project source. Existing parent directories required. No symlinks, secrets, hidden or agent-instruction files.",
+          "type": "string"
+        },
+        "project_id": {
+          "description": "Published project id with file_edit_enabled=true",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "path",
+        "expected_sha256",
+        "old_text",
+        "new_text"
+      ],
+      "type": "object"
+    },
+    "name": "file_edit"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": false
+    },
+    "description": "Run a host command only in a project with command_execution_enabled=true. Supply program and literal args (no implicit shell); cwd is relative to the project root. This grants the server user's OS privileges, including file changes/deletion and network access, outside file-edit restrictions. Default timeout 30000ms, maximum 120000ms; capped/redacted stdout and stderr. Inspect exit_code, signal, timed_out and output_truncated. Do not blindly retry commands with side effects.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
+        "cwd": {
+          "description": "Relative project directory, default project root; no symlinks",
+          "type": "string"
+        },
+        "program": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "default": 30000,
+          "maximum": 120000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id",
+        "program"
+      ],
+      "type": "object"
+    },
+    "name": "command_run"
+  }
+]

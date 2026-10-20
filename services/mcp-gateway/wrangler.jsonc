@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "localoud-mcp-gateway",
+  "account_id": "a29b6624dfc165268c04d67222afe1b2",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
+  "observability": {"enabled": false},
+  "vars": {"PUBLIC_ORIGIN": "https://localoud-mcp-gateway.miyazima.workers.dev"},
+  "kv_namespaces": [{"binding": "OAUTH_KV", "id": "dbdecc48f54b41fdbc12264a22cb70d9"}],
+  "durable_objects": {"bindings": [
+    {"name": "OWNERS", "class_name": "Owner"},
+    {"name": "LOGINS", "class_name": "Login"},
+    {"name": "LIMITS", "class_name": "RateLimit"}
+  ]},
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["Owner", "Login", "RateLimit"]}]
+}

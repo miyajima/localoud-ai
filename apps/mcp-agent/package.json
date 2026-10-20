@@ -1,0 +1,93 @@
+{
+  "name": "localoud-agent-app",
+  "productName": "Localoud Agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Localoud Mac agent with explicit local approvals",
+  "type": "module",
+  "main": "src/main.mjs",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "start": "electron .",
+    "package:mac": "electron-builder --mac dmg zip --arm64 --publish never --config.mac.identity=-",
+    "package:mac:x64": "electron-builder --mac dmg zip --x64 --publish never --config.mac.identity=-",
+    "package:dir": "electron-builder --mac --arm64 --dir --publish never --config.mac.identity=-",
+    "release:mac": "node scripts/release-mac.mjs",
+    "install:runtime": "install-electron",
+    "package:host": "node scripts/package-host.mjs"
+  },
+  "devDependencies": {
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "dev.localoud.agent",
+    "productName": "Localoud Agent",
+    "directories": {
+      "output": "../../target/localoud-agent-app"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "../../plugins/localoud-mcp/agent",
+        "to": "agent",
+        "filter": [
+          "*.mjs",
+          "package.json"
+        ]
+      },
+      {
+        "from": "../../target/release/localoud-mcp",
+        "to": "bin/localoud-mcp"
+      },
+      {
+        "from": "assets/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "../../plugins/localoud-mcp/agent/node_modules/ws",
+        "to": "agent/node_modules/ws",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icon.png",
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "13.0.0",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "notarize": false
+    },
+    "dmg": {
+      "title": "Localoud Agent",
+      "contents": [
+        {
+          "x": 160,
+          "y": 180,
+          "type": "file"
+        },
+        {
+          "x": 450,
+          "y": 180,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "artifactName": "Localoud-Agent-${version}-${arch}-unsigned.${ext}",
+    "beforePack": "scripts/before-pack.cjs",
+    "afterPack": "scripts/after-pack.cjs",
+    "electronDist": "node_modules/electron/dist"
+  },
+  "author": "Localoud",
+  "license": "MIT"
+}

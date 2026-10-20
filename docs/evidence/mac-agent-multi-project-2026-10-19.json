@@ -1,0 +1,88 @@
+{
+  "scope": "Mac multi-project app; existing Cloudflare gateway unchanged; Sites proof unchanged",
+  "source_files": [
+    {
+      "path": "apps/mcp-agent/src/controller.mjs",
+      "bytes": 9252,
+      "sha256": "dbd4e1bad031f04543db0df6238e6ba48243f61b116bf081f2a22e29f9803016"
+    },
+    {
+      "path": "apps/mcp-agent/src/main.mjs",
+      "bytes": 8804,
+      "sha256": "23fb18b47c7ad72302ae920e2cd480a17c67a41fe70e26a2aaacef1c6191f780"
+    },
+    {
+      "path": "apps/mcp-agent/src/preload.cjs",
+      "bytes": 872,
+      "sha256": "3a571ff1c182c211dce8b7731064dadb8b0a39aeb2975f74c3b9680da3876749"
+    },
+    {
+      "path": "apps/mcp-agent/src/renderer.mjs",
+      "bytes": 16042,
+      "sha256": "9469fc2b2bf457ef1d17b2c3c34d6cc031368247e97ecf069000e25a31263a3d"
+    },
+    {
+      "path": "apps/mcp-agent/src/renderer.html",
+      "bytes": 10834,
+      "sha256": "1b7d46a52cf725b8db6453757c09ae2704713b1316809ab098384aff41a62cdc"
+    },
+    {
+      "path": "apps/mcp-agent/src/app.css",
+      "bytes": 17013,
+      "sha256": "4d02adb7c3544f4e8e53a5650c18cfce48f5aae5ce284590843911ac26db9b23"
+    },
+    {
+      "path": "apps/mcp-agent/test/controller.test.mjs",
+      "bytes": 7891,
+      "sha256": "5032bca14d50ac4886e97d7cb08ad85a4fe15372868de1016e1feacb646b10d0"
+    },
+    {
+      "path": "apps/mcp-agent/test/multi-project.test.mjs",
+      "bytes": 7265,
+      "sha256": "6e5c7413d4837190ef511789f26d202474b1699d1985a5d9d53c8024f80cbfcf"
+    },
+    {
+      "path": "apps/mcp-agent/test/runtime-projects.test.mjs",
+      "bytes": 6853,
+      "sha256": "db86ca7a2a2060073516ae9d4162eca3710dd7ebd9bef52157d0d288c5dad3c4"
+    },
+    {
+      "path": "plugins/localoud-mcp/agent/runtime.mjs",
+      "bytes": 12398,
+      "sha256": "049f137ebf4139c95febaf5760192ecee8f625fcddff3b071e780d835a80a2fe"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "target/localoud-agent-app/Localoud-Agent-0.1.0-arm64-unsigned.dmg",
+      "bytes": 128775514,
+      "sha256": "05e341dd8da8dcec407bf4672acc50f79dd67e3ed986c2246f4f1c8c36a9fbb0"
+    },
+    {
+      "path": "target/localoud-agent-app/Localoud-Agent-0.1.0-arm64-unsigned.zip",
+      "bytes": 128756660,
+      "sha256": "9a75a243a46c90470f84225b50d0355b78d74fc361865bd2a047fe9a8b3487c0"
+    },
+    {
+      "path": "target/localoud-agent-app/mac-arm64/Localoud Agent.app/Contents/Resources/app.asar",
+      "bytes": 68377,
+      "sha256": "ee84cfcc629d4ec0c64abe7adb01639039c14b4314f90bca50feaa927eb1d213"
+    },
+    {
+      "path": "target/release/localoud-mcp",
+      "bytes": 4572192,
+      "sha256": "09443b47aadaa1a2581e6dacf4269cf8391af9fc2dcaf92cb2b50b5b5a3b3b76"
+    }
+  ],
+  "checks": {
+    "app_tests_with_real_rust_runtime": "34 PASS, 0 skipped",
+    "agent_tests": "19 PASS",
+    "independent_review": "PASS after recovery recheck fix",
+    "dmg_checksum": "VALID",
+    "zip_integrity": "PASS",
+    "codesign_structural_validation": "PASS (ad-hoc, not Developer ID/notarized)",
+    "installed_resources_match_build": true,
+    "existing_personal_project_and_permissions_preserved": "live project_list confirmed"
+  },
+  "live_multi_project_e2e": "not performed; user declined live fixture registration and permission grants; no new folders published"
+}

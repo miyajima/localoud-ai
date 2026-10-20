@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "localoud": {
+      "command": "localoud-mcp",
+      "args": ["--config", "${HOME}/.config/localoud/mcp-projects.json"],
+      "description": "Localoud standalone MCP (stdio). File/git reads, opt-in text edits and separately enabled host command execution."
+    }
+  }
+}

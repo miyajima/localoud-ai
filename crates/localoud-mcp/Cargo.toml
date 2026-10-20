@@ -1,0 +1,28 @@
+[package]
+name = "localoud-mcp"
+version.workspace = true
+edition.workspace = true
+description = "Standalone local MCP server with filesystem/git evidence, opt-in text edits and host command execution. No desktop app or DB."
+license.workspace = true
+
+[[bin]]
+name = "localoud-mcp"
+path = "src/main.rs"
+
+[lib]
+name = "localoud_mcp"
+path = "src/lib.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+tokio.workspace = true
+axum = "0.8"
+cap-std = "3"
+sha2 = "0.10"
+libc = "0.2"
+hub-policy = { path = "../hub-policy" }
+
+[dev-dependencies]
+tempfile = "3"
